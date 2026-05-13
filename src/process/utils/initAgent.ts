@@ -349,15 +349,13 @@ export const createAionrsAgent = async (options: ICreateConversationParams): Pro
     extra.customWorkspace
   );
 
-  // Set up skill symlinks for native discovery by the engine CLI.
-  // `agentType: 'aionrs'` is INTENTIONALLY preserved here — it controls the
-  // workspace skill-symlink subdirectory name (`.aionrs/skills/`), which is
-  // wire-bound to wayland-core's skill-discovery contract. Renaming this to
-  // `'wcore'` would require a matching change in the engine's skill loader.
-  // Engine-side rename is tracked as a follow-up; do not touch here.
+  // Set up skill symlinks for native discovery by wayland-core.
+  // The engine looks in `.wayland-core/skills/` (engine paths.rs:46);
+  // both 'wcore' and 'aionrs' agentType keys are mapped to that directory
+  // in NON_ACP_SKILLS_DIRS so the symlinks land where the engine reads.
   if (!customWorkspace) {
     await setupAssistantWorkspace(workspace, {
-      agentType: 'aionrs',
+      agentType: 'wcore',
       enabledSkills: extra.enabledSkills,
       extraSkillPaths: extra.extraSkillPaths,
       excludeBuiltinSkills: extra.excludeBuiltinSkills,

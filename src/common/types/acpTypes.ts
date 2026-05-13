@@ -494,9 +494,16 @@ export type AcpBackend = keyof typeof ACP_BACKENDS_ALL;
  * Skill directories for non-ACP agents (DetectedAgentKind not in ACP_BACKENDS_ALL).
  * These agents have their own execution engines but still support native skill discovery.
  */
+// The wayland-core engine's project-level skill discovery walks for
+// `.wayland-core/skills/` (see engine crates/wcore-skills/src/paths.rs:46).
+// Both 'wcore' (post-rebrand kind) and 'aionrs' (legacy kind, dual-read)
+// resolve to the same engine-side discovery path. The pre-rebrand value
+// `.aionrs/skills` was a known mismatch — engine never read from that
+// directory; symlinks landed in a directory the engine ignored.
 const NON_ACP_SKILLS_DIRS: Record<string, string[]> = {
   gemini: ['.gemini/skills'],
-  aionrs: ['.aionrs/skills'],
+  wcore: ['.wayland-core/skills'],
+  aionrs: ['.wayland-core/skills'],
 };
 
 /**

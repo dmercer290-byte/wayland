@@ -235,6 +235,14 @@ async function listWorkspaceFilesRecursive(root: string): Promise<IWorkspaceFlat
         continue;
       }
 
+      // Hide dot-prefixed entries (e.g. .wayland-core/, .git/, .DS_Store) from
+      // the workspace files panel. They're either engine/tooling implementation
+      // details (skill-symlink subdirs created by setupAssistantWorkspace) or
+      // OS noise — neither belongs in the user-facing file browser.
+      if (entry.name.startsWith('.')) {
+        continue;
+      }
+
       const fullPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
         await walk(fullPath);
