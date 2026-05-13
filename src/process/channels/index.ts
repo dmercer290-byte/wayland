@@ -7,7 +7,7 @@
 /**
  * Channel Module
  *
- * Provides remote interaction with AionUi through messaging platforms.
+ * Provides remote interaction with Wayland through messaging platforms.
  * MVP: Telegram integration with Gemini Agent.
  */
 

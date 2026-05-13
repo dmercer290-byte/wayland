@@ -17,7 +17,7 @@ import {
 const originalOpencodeConfig = process.env.OPENCODE_CONFIG;
 
 function createTempConfigPath(filename: string): string {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aionui-opencode-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wayland-opencode-'));
   return path.join(tempDir, filename);
 }
 

@@ -401,7 +401,7 @@ describe('pptPreviewBridge', () => {
         if (_cmd === 'officecli --version') {
           cb(null, '1.0.17');
         } else {
-          cb(null, 'https://github.com/iOfficeAI/OfficeCli/releases/tag/v1.0.18');
+          cb(null, 'https://github.com/TradeCanyon/OfficeCli/releases/tag/v1.0.18');
         }
       });
       execSyncMock.mockReturnValue('');
@@ -425,7 +425,7 @@ describe('pptPreviewBridge', () => {
         if (_cmd === 'officecli --version') {
           cb(null, '1.0.18');
         } else {
-          cb(null, 'https://github.com/iOfficeAI/OfficeCli/releases/tag/v1.0.18');
+          cb(null, 'https://github.com/TradeCanyon/OfficeCli/releases/tag/v1.0.18');
         }
       });
 

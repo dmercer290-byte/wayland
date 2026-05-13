@@ -20,7 +20,7 @@ describe('WriteFile ensures parent directory exists (ELECTRON-68)', () => {
 
   it('should create parent directory and write file when directory does not exist', async () => {
     const nestedDir = path.join(tmpDir, 'nonexistent', 'subdir');
-    const filePath = path.join(nestedDir, 'aionui-config.txt');
+    const filePath = path.join(nestedDir, 'wayland-config.txt');
 
     // Replicate the fixed WriteFile behavior
     await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -31,7 +31,7 @@ describe('WriteFile ensures parent directory exists (ELECTRON-68)', () => {
   });
 
   it('should succeed when parent directory already exists', async () => {
-    const filePath = path.join(tmpDir, 'aionui-config.txt');
+    const filePath = path.join(tmpDir, 'wayland-config.txt');
 
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, 'test-data');
@@ -41,7 +41,7 @@ describe('WriteFile ensures parent directory exists (ELECTRON-68)', () => {
   });
 
   it('should throw ENOENT without mkdir when parent directory is missing', async () => {
-    const filePath = path.join(tmpDir, 'nonexistent', 'aionui-config.txt');
+    const filePath = path.join(tmpDir, 'nonexistent', 'wayland-config.txt');
 
     await expect(fs.writeFile(filePath, 'test-data')).rejects.toThrow(/ENOENT/);
   });

@@ -29,7 +29,7 @@
  *   AC-M1-8 点击 = mouseup 触发，5 px 阈值
  *   AC-M1-9 DOM 必用 data-testid（ambient-bubble / ambient-input / ambient-chat）
  *   AC-M1-10 ambient 启用 → ambient 窗口创建，legacy pet 路径跳过（U-1=A 演进，[REQ-CHANGE-v5] 改写）
- *   AC-M1-11 AIONUI_AMBIENT env var 优先级 > settings 开关
+ *   AC-M1-11 WAYLAND_AMBIENT env var 优先级 > settings 开关
  *   AC-M1-12 settings 切换需重启 + toast "Restart required to apply"
  *   AC-M1-13（新增）displayId validate + position clamp 边界保护
  *   AC-M1-14（新增）E2E fixture 契约：launchAppWithEnv + ambientTest fixture
@@ -54,7 +54,7 @@
  * 以规避 Windows DWM frequent resize 闪烁。本 spec 把 M1 的 transparent:true
  * 抽成 `BUBBLE_RENDER_MODE` 常量，M3 spec 将定义 `CHAT_RENDER_MODE` 常量对应。
  */
-// AC-M1-14 fixture: use ambientTest (independent AIONUI_AMBIENT=1 Electron process,
+// AC-M1-14 fixture: use ambientTest (independent WAYLAND_AMBIENT=1 Electron process,
 // `electronApp` / `page` are aliases pointing to the ambient app / bubble page).
 import { ambientTest as test, expect } from '../../fixtures';
 import { invokeBridge } from '../../helpers';
@@ -222,7 +222,7 @@ test.describe('Ambient Mode — M1 Bubble', () => {
     test.skip(
       info === null,
       'Ambient bubble window not found. Blockers: (1) Dev has not implemented ambient mode yet; ' +
-        '(2) Q7 REQ-CLARIFY-REPLY pending — `AIONUI_AMBIENT=1` launch path under singleton fixture undefined. ' +
+        '(2) Q7 REQ-CLARIFY-REPLY pending — `WAYLAND_AMBIENT=1` launch path under singleton fixture undefined. ' +
         'Unskip after Dev [IMPL_DONE] + Q7 answer lands.'
     );
   });
@@ -540,12 +540,12 @@ test.describe('Ambient Mode — M1 Bubble', () => {
     expect(counts.ambient, 'the single bubble must be ambient-titled, not legacy pet').toBe(1);
   });
 
-  // ── AC-M1-11: AIONUI_AMBIENT env var 优先级高于 settings 开关 ─────────
-  test('AC-M1-11: AIONUI_AMBIENT env var overrides settings switch', async ({ electronApp }) => {
+  // ── AC-M1-11: WAYLAND_AMBIENT env var 优先级高于 settings 开关 ─────────
+  test('AC-M1-11: WAYLAND_AMBIENT env var overrides settings switch', async ({ electronApp }) => {
     test.skip(
       true,
       'PENDING AC-M1-14 fixture `launchAppWithEnv` + `ambientTest`: this assertion requires launching a second ' +
-        'Electron process with `AIONUI_AMBIENT=0` while ConfigStorage `ambient.enabled=true` (and the reverse), ' +
+        'Electron process with `WAYLAND_AMBIENT=0` while ConfigStorage `ambient.enabled=true` (and the reverse), ' +
         'then asserting env-var wins. Arch/Dev must add `launchAppWithEnv(extraEnv)` helper to tests/e2e/fixtures.ts first.'
     );
     void electronApp;
@@ -572,7 +572,7 @@ test.describe('Ambient Mode — M1 Bubble', () => {
       'PENDING AC-M1-14 fixture `launchAppWithEnv`: this assertion requires seeding ConfigStorage with ' +
         '`ambient.bubblePosition: { x, y, displayId: 999 }` before launch, then asserting bubble appears at ' +
         'primary workArea bottom-right (AC-M1-1). Needs a fresh launch per case (singleton fixture cannot reset). ' +
-        'Assertion shape: write stale displayId → launchAppWithEnv({AIONUI_AMBIENT:"1"}) → getAmbientBubbleInfo → ' +
+        'Assertion shape: write stale displayId → launchAppWithEnv({WAYLAND_AMBIENT:"1"}) → getAmbientBubbleInfo → ' +
         'assert bounds match AC-M1-1 default, AND ambient.getBubblePosition returns sanitized value (fresh displayId).'
     );
   });

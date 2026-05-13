@@ -97,12 +97,12 @@ export function getBubbleWindow(): BrowserWindow | null {
 async function resolveInitialBounds(): Promise<{ x: number; y: number }> {
   let persisted: { x: number; y: number; displayId: number } | null = null;
   // In E2E test mode we always start from the default bottom-right — the
-  // persistence layer is shared with the dev app's userData (`AionUi-Dev/config/`)
+  // persistence layer is shared with the dev app's userData (`Wayland-Dev/config/`)
   // so a previous local run could leave a non-default `ambient.bubblePosition`
   // that breaks AC-M1-1's "bottom-right on first launch" assertion. Honoring
-  // AIONUI_E2E_TEST here gives the test suite a clean slate without needing
+  // WAYLAND_E2E_TEST here gives the test suite a clean slate without needing
   // sandbox-per-worker userData isolation.
-  const isE2E = process.env['AIONUI_E2E_TEST'] === '1';
+  const isE2E = process.env['WAYLAND_E2E_TEST'] === '1';
   if (!isE2E) {
     try {
       persisted = (await ProcessConfig.get('ambient.bubblePosition')) ?? null;
@@ -165,7 +165,7 @@ export async function createAmbientWindow(): Promise<void> {
     height: BUBBLE_SIZE,
     x,
     y,
-    title: 'AionUi Ambient Bubble',
+    title: 'Wayland Ambient Bubble',
     frame: false,
     transparent: true,
     resizable: false,

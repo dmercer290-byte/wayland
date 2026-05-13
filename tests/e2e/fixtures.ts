@@ -5,7 +5,7 @@
  *
  * Two modes:
  *   1. **Packaged mode** (CI default): Launches from electron-builder's unpacked output
- *      (e.g. out/linux-unpacked/aionui, out/mac-arm64/AionUi.app, out/win-unpacked/AionUi.exe).
+ *      (e.g. out/linux-unpacked/wayland, out/mac-arm64/Wayland.app, out/win-unpacked/Wayland.exe).
  *      This validates that packaged resources are intact.
  *   2. **Dev mode** (local default): Launches via `electron .` from project root with
  *      the Vite dev server (electron-vite dev).
@@ -26,7 +26,7 @@ type Fixtures = {
 // Singleton – one app per test worker
 let app: ElectronApplication | null = null;
 let mainPage: Page | null = null;
-const e2eStateSandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aionui-e2e-state-'));
+const e2eStateSandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wayland-e2e-state-'));
 const e2eStateFile = path.join(e2eStateSandboxDir, 'extension-states.json');
 
 function isDevToolsWindow(page: Page): boolean {
@@ -86,29 +86,29 @@ function resolvePackagedApp(): { executablePath: string; cwd: string } | null {
   const platform = process.platform;
 
   if (platform === 'win32') {
-    // out/win-unpacked/AionUi.exe  or  out/win-x64-unpacked/AionUi.exe
+    // out/win-unpacked/Wayland.exe  or  out/win-x64-unpacked/Wayland.exe
     for (const dir of ['win-unpacked', 'win-x64-unpacked', 'win-arm64-unpacked']) {
-      const exe = path.join(outDir, dir, 'AionUi.exe');
+      const exe = path.join(outDir, dir, 'Wayland.exe');
       if (fs.existsSync(exe)) return { executablePath: exe, cwd: path.join(outDir, dir) };
     }
   } else if (platform === 'darwin') {
-    // out/mac-arm64/AionUi.app/Contents/MacOS/AionUi  or  out/mac/AionUi.app/...
+    // out/mac-arm64/Wayland.app/Contents/MacOS/Wayland  or  out/mac/Wayland.app/...
     for (const dir of ['mac-arm64', 'mac-x64', 'mac', 'mac-universal']) {
       const macDir = path.join(outDir, dir);
       if (!fs.existsSync(macDir)) continue;
       const appBundle = fs.readdirSync(macDir).find((f) => f.endsWith('.app'));
       if (appBundle) {
-        const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', 'AionUi');
+        const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', 'Wayland');
         if (fs.existsSync(exe)) return { executablePath: exe, cwd: macDir };
       }
     }
   } else {
-    // Linux: out/linux-unpacked/aionui  (lowercase executable name)
+    // Linux: out/linux-unpacked/wayland  (lowercase executable name)
     for (const dir of ['linux-unpacked', 'linux-x64-unpacked', 'linux-arm64-unpacked']) {
       const dirPath = path.join(outDir, dir);
       if (!fs.existsSync(dirPath)) continue;
       // Try common executable names
-      for (const name of ['aionui', 'AionUi']) {
+      for (const name of ['wayland', 'Wayland']) {
         const exe = path.join(dirPath, name);
         if (fs.existsSync(exe)) return { executablePath: exe, cwd: dirPath };
       }
@@ -129,10 +129,10 @@ function shouldUsePackagedMode(): boolean {
  * Launch an Electron app with optional extra environment variables.
  *
  * AC-M1-14 fixture contract: ambient E2E uses this to launch a *second* Electron
- * process with `AIONUI_AMBIENT=1` while the singleton remains ambient-unaware.
+ * process with `WAYLAND_AMBIENT=1` while the singleton remains ambient-unaware.
  * Regular (non-ambient) tests call this without `extraEnv` via the singleton path.
  *
- * @param extraEnv — merged on top of `commonEnv` (e.g. `{ AIONUI_AMBIENT: '1' }`).
+ * @param extraEnv — merged on top of `commonEnv` (e.g. `{ WAYLAND_AMBIENT: '1' }`).
  *                   Callers wanting to clear a var can pass an empty string.
  */
 export async function launchAppWithEnv(extraEnv: Record<string, string> = {}): Promise<ElectronApplication> {
@@ -141,12 +141,12 @@ export async function launchAppWithEnv(extraEnv: Record<string, string> = {}): P
 
   const commonEnv = {
     ...process.env,
-    AIONUI_EXTENSIONS_PATH: process.env.AIONUI_EXTENSIONS_PATH || path.join(projectRoot, 'examples'),
-    AIONUI_EXTENSION_STATES_FILE: process.env.AIONUI_EXTENSION_STATES_FILE || e2eStateFile,
-    AIONUI_DISABLE_AUTO_UPDATE: '1',
-    AIONUI_DISABLE_DEVTOOLS: '1',
-    AIONUI_E2E_TEST: '1',
-    AIONUI_CDP_PORT: '0',
+    WAYLAND_EXTENSIONS_PATH: process.env.WAYLAND_EXTENSIONS_PATH || path.join(projectRoot, 'examples'),
+    WAYLAND_EXTENSION_STATES_FILE: process.env.WAYLAND_EXTENSION_STATES_FILE || e2eStateFile,
+    WAYLAND_DISABLE_AUTO_UPDATE: '1',
+    WAYLAND_DISABLE_DEVTOOLS: '1',
+    WAYLAND_E2E_TEST: '1',
+    WAYLAND_CDP_PORT: '0',
     ...extraEnv,
   };
 
@@ -160,7 +160,7 @@ export async function launchAppWithEnv(extraEnv: Record<string, string> = {}): P
     }
 
     console.log(
-      `[E2E] Launching PACKAGED app: ${packaged.executablePath}${extraEnv.AIONUI_AMBIENT === '1' ? ' (ambient)' : ''}`
+      `[E2E] Launching PACKAGED app: ${packaged.executablePath}${extraEnv.WAYLAND_AMBIENT === '1' ? ' (ambient)' : ''}`
     );
 
     const launchArgs: string[] = [];
@@ -179,7 +179,7 @@ export async function launchAppWithEnv(extraEnv: Record<string, string> = {}): P
       timeout: 60_000,
     });
 
-    const expectAmbient = commonEnv.AIONUI_AMBIENT === '1';
+    const expectAmbient = commonEnv.WAYLAND_AMBIENT === '1';
     await waitForExpectedWindow(electronApp, expectAmbient, 8_000).catch(() => {
       /* best-effort */
     });
@@ -187,7 +187,7 @@ export async function launchAppWithEnv(extraEnv: Record<string, string> = {}): P
   }
 
   // Dev mode: launch via electron .
-  console.log(`[E2E] Launching DEV app from: ${projectRoot}${extraEnv.AIONUI_AMBIENT === '1' ? ' (ambient)' : ''}`);
+  console.log(`[E2E] Launching DEV app from: ${projectRoot}${extraEnv.WAYLAND_AMBIENT === '1' ? ' (ambient)' : ''}`);
 
   const launchArgs = ['.'];
   if (process.platform === 'linux' && process.env.CI) {
@@ -211,11 +211,11 @@ export async function launchAppWithEnv(extraEnv: Record<string, string> = {}): P
   // (e.g. `tests/e2e/specs/ambient-mode/bubble.e2e.ts` guards on it). Wait
   // up to ~8s for a useful window so downstream tests see a stable app.
   //
-  // When AIONUI_AMBIENT=1 is set, we specifically wait for the ambient
+  // When WAYLAND_AMBIENT=1 is set, we specifically wait for the ambient
   // bubble window (title matches /ambient|bubble/) — the app creates the
   // main window first, then ambient, so waiting on ambient also guarantees
   // main is already up.
-  const expectAmbient = commonEnv.AIONUI_AMBIENT === '1';
+  const expectAmbient = commonEnv.WAYLAND_AMBIENT === '1';
   await waitForExpectedWindow(electronApp, expectAmbient, 12_000).catch(() => {
     // best-effort: if no window appears in 12s, let the individual spec decide
   });
@@ -387,7 +387,7 @@ registerCleanup();
 // ── Ambient Fixture (AC-M1-14) ──────────────────────────────────────────────
 //
 // Independent Electron app instance for ambient-mode specs. Uses
-// `AIONUI_AMBIENT=1` env var (AC-M1-11 feature flag — env var overrides
+// `WAYLAND_AMBIENT=1` env var (AC-M1-11 feature flag — env var overrides
 // settings). Runs as its own singleton so tests against ambient don't pollute
 // the main app's state (settings file, window state) and vice versa.
 //
@@ -449,14 +449,14 @@ export const ambientTest = base.extend<AmbientFixtures>({
   // eslint-disable-next-line no-empty-pattern
   ambientApp: async ({}, use) => {
     if (!sharedAmbientApp) {
-      sharedAmbientApp = await launchAppWithEnv({ AIONUI_AMBIENT: '1' });
+      sharedAmbientApp = await launchAppWithEnv({ WAYLAND_AMBIENT: '1' });
     }
     // Verify the app process is still alive; relaunch if it crashed
     try {
       await sharedAmbientApp.evaluate(() => true);
     } catch {
       console.log('[E2E ambient] App process lost – relaunching...');
-      sharedAmbientApp = await launchAppWithEnv({ AIONUI_AMBIENT: '1' });
+      sharedAmbientApp = await launchAppWithEnv({ WAYLAND_AMBIENT: '1' });
       sharedBubblePage = null;
     }
     await use(sharedAmbientApp);

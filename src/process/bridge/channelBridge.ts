@@ -69,7 +69,7 @@ export function initChannelBridge(channelRepo: IChannelRepository): void {
                 iconField.startsWith('https://') ||
                 iconField.startsWith('data:') ||
                 iconField.startsWith('file://') ||
-                iconField.startsWith('aion-asset://')
+                iconField.startsWith('wayland-asset://')
               ) {
                 extensionMeta.icon = iconField;
               } else {

@@ -254,7 +254,7 @@ export class WorkerTaskManagerJobExecutor implements ICronJobExecutor {
     ipcBridge.conversation.listChanged.emit({
       conversationId: conversation.id,
       action: 'created',
-      source: conversation.source || 'aionui',
+      source: conversation.source || 'wayland',
     });
 
     return conversation;

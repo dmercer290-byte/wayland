@@ -282,7 +282,7 @@ export function initModelBridge(): void {
           baseURL: openaiBaseUrl,
           apiKey: actualApiKey,
           defaultHeaders: {
-            'User-Agent': 'AionUI/1.0',
+            'User-Agent': 'Wayland/1.0',
           },
         });
 
@@ -436,7 +436,7 @@ export function initModelBridge(): void {
         // 使用自定义 User-Agent，避免某些 API 中转站（如 packyapi）拦截 OpenAI SDK 默认的 User-Agent
         // Use custom User-Agent to avoid some API proxies (like packyapi) blocking OpenAI SDK's default User-Agent
         defaultHeaders: {
-          'User-Agent': 'AionUI/1.0',
+          'User-Agent': 'Wayland/1.0',
         },
       });
 

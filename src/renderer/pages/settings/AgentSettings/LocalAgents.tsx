@@ -7,7 +7,7 @@
 import { ipcBridge } from '@/common';
 import { ConfigStorage } from '@/common/config/storage';
 import type { AcpBackendConfig } from '@/common/types/acpTypes';
-import AionModal from '@/renderer/components/base/AionModal';
+import WaylandModal from '@/renderer/components/base/WaylandModal';
 import { Button, Typography } from '@arco-design/web-react';
 import { Home, Plus } from '@icon-park/react';
 import React, { useCallback, useState } from 'react';
@@ -175,7 +175,7 @@ const LocalAgents: React.FC = () => {
         </div>
       )}
 
-      <AionModal
+      <WaylandModal
         visible={editorVisible}
         onCancel={() => {
           setEditorVisible(false);
@@ -204,7 +204,7 @@ const LocalAgents: React.FC = () => {
             setEditingAgent(null);
           }}
         />
-      </AionModal>
+      </WaylandModal>
 
       <div className='flex flex-col gap-4px px-0'>
         {customAgents?.map((agent) => (

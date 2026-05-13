@@ -8,7 +8,7 @@
 export { GeminiApprovalStore } from './GeminiApprovalStore';
 
 // src/core/ConfigManager.ts
-import { AIONUI_FILES_MARKER } from '@/common/config/constants';
+import { WAYLAND_FILES_MARKER } from '@/common/config/constants';
 import { NavigationInterceptor } from '@/common/chat/navigation';
 import type { TProviderWithModel } from '@/common/config/storage';
 import { uuid } from '@/common/utils';
@@ -543,7 +543,7 @@ export class GeminiAgent {
    * Handle message stream with resilience monitoring
    *
    * InvalidStream retry is handled by aioncli-core (geminiChat.ts streamWithRetries
-   * + client.ts "Please continue." mechanism). AionUi does NOT retry at this layer
+   * + client.ts "Please continue." mechanism). Wayland does NOT retry at this layer
    * to avoid redundant classifier-router calls and quota amplification.
    */
   private handleMessage(
@@ -754,7 +754,7 @@ export class GeminiAgent {
     const abortController = this.createAbortController();
 
     const stripFilesMarker = (text: string): string => {
-      const markerIndex = text.indexOf(AIONUI_FILES_MARKER);
+      const markerIndex = text.indexOf(WAYLAND_FILES_MARKER);
       if (markerIndex === -1) return text;
       return text.slice(0, markerIndex).trimEnd();
     };

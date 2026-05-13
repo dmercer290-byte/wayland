@@ -1344,18 +1344,18 @@ interface IAcpSessionRepository {
 
 ## 8. 部署模型
 
-AionUi 支持 4 类 Agent 来源，全部通过 2 种 AcpClient 实现覆盖：
+Wayland 支持 4 类 Agent 来源，全部通过 2 种 AcpClient 实现覆盖：
 
 | Agent 来源         | 启动方式                                     | AcpClient 实现     | 示例                  |
 | ------------------ | -------------------------------------------- | ------------------ | --------------------- |
 | 内置 agent         | 资源目录下的二进制，路径已知                 | ProcessAcpClient   | goose, gemini, aionrs |
-| Hub 安装的 agent   | AionHub 安装到固定目录 (`~/.aionui-agents/`) | ProcessAcpClient   | 社区 agent            |
+| Hub 安装的 agent   | WaylandHub 安装到固定目录 (`~/.wayland-agents/`) | ProcessAcpClient   | 社区 agent            |
 | npm 包分发的 agent | 内置 bun/bunx 启动                           | ProcessAcpClient   | Claude, Codex         |
 | 远程 agent         | WebSocket                                    | WebSocketAcpClient | 云端 agent            |
 
 **关键约束**:
 
-- AionUi **内置 bun/bunx**，不依赖系统 npm/npx。因此不需要 NpxBridgeConnector（原 D4 四种 Connector 中已删除）。
+- Wayland **内置 bun/bunx**，不依赖系统 npm/npx。因此不需要 NpxBridgeConnector（原 D4 四种 Connector 中已删除）。
 - Agent 路径解析（"找到 agent"）是 **Agent 发现层 (AcpDetector)** 的职责，不是 AcpClient 的。AcpDetector 输出完整的 `command` + `args`，通过 AgentConfig 传入 AcpClient。
 - AcpClient 只负责"给定命令，启动进程/建立连接 + 协议交互 + 生命周期监测"，不做任何发现或路径解析。
 

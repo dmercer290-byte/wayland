@@ -1,6 +1,6 @@
 /**
  * Generate a GET URL that mimics WeCom "verify callback URL" (echostr flow).
- * Use while AionUi WebUI is running and the WeCom channel plugin is enabled.
+ * Use while Wayland WebUI is running and the WeCom channel plugin is enabled.
  *
  * Usage:
  *   bunx tsx scripts/debug-wecom-verify-url.ts \
@@ -8,7 +8,7 @@
  *     --token YOUR_TOKEN \
  *     --aes YOUR_43_CHAR_ENCODING_AES_KEY
  *
- * Then curl the printed URL; response body should equal the plaintext (default: aionui-wecom-verify-ok).
+ * Then curl the printed URL; response body should equal the plaintext (default: wayland-wecom-verify-ok).
  */
 
 import { encryptPayload, sha1Sign } from '../src/process/channels/plugins/wecom/WecomCrypto';
@@ -35,7 +35,7 @@ function main(): void {
   const base = (args.base || 'http://127.0.0.1:25808').replace(/\/+$/, '');
   const token = args.token || '';
   const aes = args.aes || '';
-  const plain = args.plain || 'aionui-wecom-verify-ok';
+  const plain = args.plain || 'wayland-wecom-verify-ok';
 
   if (!token || !aes) {
     console.error('Missing --token or --aes');

@@ -109,7 +109,7 @@ describe('SpeechInputButton', () => {
     speechToTextEnabled = true;
 
     await act(async () => {
-      window.dispatchEvent(new CustomEvent('aionui:speech-to-text-config-changed'));
+      window.dispatchEvent(new CustomEvent('wayland:speech-to-text-config-changed'));
     });
 
     expect(

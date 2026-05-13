@@ -8,17 +8,17 @@
     "order": 70
   },
   {
-    "id": "aionui-home",
-    "name": "AionUI Home",
-    "entryPoint": "https://aionui.com/",
+    "id": "wayland-home",
+    "name": "Wayland Home",
+    "entryPoint": "https://wayland.app/",
     "icon": "assets/star-office-icon.svg",
     "position": { "anchor": "display", "placement": "after" },
     "order": 80
   },
   {
-    "id": "aionui-issues",
-    "name": "AionUI Issues",
-    "entryPoint": "https://github.com/AionUi/AionUi/issues",
+    "id": "wayland-issues",
+    "name": "Wayland Issues",
+    "entryPoint": "https://github.com/Wayland/Wayland/issues",
     "icon": "assets/star-office-icon.svg",
     "position": { "anchor": "display", "placement": "after" },
     "order": 81

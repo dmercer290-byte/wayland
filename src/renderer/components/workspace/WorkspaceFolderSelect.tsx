@@ -10,7 +10,7 @@ import { Check, Close, Down, Folder, FolderOpen, FolderPlus } from '@icon-park/r
 import { isElectronDesktop } from '@renderer/utils/platform';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-const DEFAULT_RECENT_WS_KEY = 'aionui:recent-workspaces';
+const DEFAULT_RECENT_WS_KEY = 'wayland:recent-workspaces';
 const MENU_GAP = 4;
 const VIEWPORT_MARGIN = 8;
 const MAX_MENU_HEIGHT = 320;

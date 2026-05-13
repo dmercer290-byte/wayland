@@ -20,7 +20,7 @@
  */
 import { Message } from '@arco-design/web-react';
 import coworkSvg from '@/renderer/assets/icons/cowork.svg';
-import AionScrollArea from '@/renderer/components/base/AionScrollArea';
+import WaylandScrollArea from '@/renderer/components/base/WaylandScrollArea';
 import { useSettingsViewMode } from '@/renderer/components/settings/SettingsModal/settingsViewContext';
 import {
   useDetectedAgents,
@@ -140,7 +140,7 @@ const AssistantSettings: React.FC = () => {
     <SettingsPageWrapper>
       <div className='flex flex-col h-full w-full'>
         {messageContext}
-        <AionScrollArea className='flex-1 min-h-0 pb-16px scrollbar-hide' disableOverflow={isPageMode}>
+        <WaylandScrollArea className='flex-1 min-h-0 pb-16px scrollbar-hide' disableOverflow={isPageMode}>
           <AssistantListPanel
             assistants={assistants}
             localeKey={localeKey}
@@ -247,7 +247,7 @@ const AssistantSettings: React.FC = () => {
             customPathValue={skills.customPathValue}
             setCustomPathValue={skills.setCustomPathValue}
           />
-        </AionScrollArea>
+        </WaylandScrollArea>
       </div>
     </SettingsPageWrapper>
   );

@@ -5,9 +5,9 @@
  */
 
 /**
- * Default Codex model list maintained by AionUi.
+ * Default Codex model list maintained by Wayland.
  * These are known models that Codex CLI supports.
- * Validation is done by Codex CLI itself — AionUi only passes the model name.
+ * Validation is done by Codex CLI itself — Wayland only passes the model name.
  *
  * The first entry is used as the default when the user hasn't made a selection.
  */

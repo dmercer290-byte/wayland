@@ -61,10 +61,10 @@ export interface WebFetchToolParams {
 }
 
 /**
- * Implementation of the WebFetch tool for AionUi - replaces built-in web_fetch for all models
+ * Implementation of the WebFetch tool for Wayland - replaces built-in web_fetch for all models
  */
 export class WebFetchTool extends BaseDeclarativeTool<WebFetchToolParams, ToolResult> {
-  static readonly Name: string = 'aionui_web_fetch';
+  static readonly Name: string = 'wayland_web_fetch';
 
   constructor(
     private readonly geminiClient: GeminiClient,

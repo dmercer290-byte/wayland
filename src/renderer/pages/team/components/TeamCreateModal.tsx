@@ -9,8 +9,8 @@ import type { AcpInitializeResult } from '@/common/types/acpTypes';
 import type { TTeam, TeamAgent } from '@/common/types/teamTypes';
 import { useAuth } from '@renderer/hooks/context/AuthContext';
 import { useConversationAgents } from '@renderer/pages/conversation/hooks/useConversationAgents';
-import AionModal from '@renderer/components/base/AionModal';
-import AionSelect from '@renderer/components/base/AionSelect';
+import WaylandModal from '@renderer/components/base/WaylandModal';
+import WaylandSelect from '@renderer/components/base/WaylandSelect';
 import { WorkspaceFolderSelect } from '@renderer/components/workspace';
 import {
   agentKey,
@@ -22,7 +22,7 @@ import {
 } from './agentSelectUtils';
 
 const FormItem = Form.Item;
-const { Option, OptGroup } = AionSelect;
+const { Option, OptGroup } = WaylandSelect;
 
 type Props = {
   visible: boolean;
@@ -131,7 +131,7 @@ const TeamCreateModal: React.FC<Props> = ({ visible, onClose, onCreated }) => {
     }
   };
   return (
-    <AionModal
+    <WaylandModal
       visible={visible}
       onCancel={handleClose}
       className='team-create-modal'
@@ -202,7 +202,7 @@ const TeamCreateModal: React.FC<Props> = ({ visible, onClose, onCreated }) => {
                   {t('team.create.noSupportedAgents', { defaultValue: 'No supported agents installed' })}
                 </div>
               ) : (
-                <AionSelect
+                <WaylandSelect
                   data-testid='team-create-leader-select'
                   showSearch
                   allowClear
@@ -250,7 +250,7 @@ const TeamCreateModal: React.FC<Props> = ({ visible, onClose, onCreated }) => {
                       })}
                     </OptGroup>
                   )}
-                </AionSelect>
+                </WaylandSelect>
               )}
             </div>
           </FormItem>
@@ -281,7 +281,7 @@ const TeamCreateModal: React.FC<Props> = ({ visible, onClose, onCreated }) => {
           </FormItem>
         </Form>
       </div>
-    </AionModal>
+    </WaylandModal>
   );
 };
 

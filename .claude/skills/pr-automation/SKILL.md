@@ -24,7 +24,7 @@ No arguments required. The daemon script `scripts/pr-automation.sh` manages the 
 ## Configuration
 
 ```
-TRUSTED_CONTRIBUTORS_TEAM: detected from REPO org (e.g. iOfficeAI/trusted-contributors)
+TRUSTED_CONTRIBUTORS_TEAM: detected from REPO org (e.g. TradeCanyon/trusted-contributors)
 CRITICAL_PATH_PATTERN: env var, default in scripts/pr-automation.conf
 LARGE_PR_FILE_THRESHOLD: env var (default: 50), also in scripts/pr-automation.conf
 PR_DAYS_LOOKBACK: env var (default: 7), also in scripts/pr-automation.conf
@@ -398,7 +398,7 @@ LATEST_COMMIT_TIME=$(gh pr view <PR_NUMBER> --json commits \
 
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
-WORKTREE_DIR="/tmp/aionui-pr-${PR_NUMBER}"
+WORKTREE_DIR="/tmp/wayland-pr-${PR_NUMBER}"
 
 # Clean up any stale worktree
 git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true

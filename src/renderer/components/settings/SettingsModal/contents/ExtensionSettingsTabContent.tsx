@@ -13,7 +13,7 @@ import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 const isExternalSettingsUrl = (url?: string): boolean => /^https?:\/\//i.test(url || '');
 
 interface ExtensionSettingsTabContentProps {
-  /** aion-asset:// local page URL or external https:// URL */
+  /** wayland-asset:// local page URL or external https:// URL */
   entryUrl: string;
   /** Tab ID for keying */
   tabId: string;
@@ -24,7 +24,7 @@ interface ExtensionSettingsTabContentProps {
 /**
  * Renders an extension-contributed settings tab page.
  * - External URLs (https://) → WebviewHost with link interception, navigation, partition cache.
- * - Local URLs (aion-asset://) → sandboxed iframe with postMessage bridge.
+ * - Local URLs (wayland-asset://) → sandboxed iframe with postMessage bridge.
  */
 const ExtensionSettingsTabContent: React.FC<ExtensionSettingsTabContentProps> = ({
   entryUrl,
@@ -66,7 +66,7 @@ const ExtensionSettingsTabContent: React.FC<ExtensionSettingsTabContentProps> = 
     }
   }, [extensionName, i18n.language, isExternalTab]);
 
-  // postMessage bridge for local iframe tabs (aion-asset://)
+  // postMessage bridge for local iframe tabs (wayland-asset://)
   useEffect(() => {
     if (isExternalTab) return;
 

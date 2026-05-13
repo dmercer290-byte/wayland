@@ -310,7 +310,7 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
             const isImageAvatar = Boolean(
               avatarImage &&
               (/\.(svg|png|jpe?g|webp|gif)$/i.test(avatarImage) ||
-                /^(https?:|aion-asset:\/\/|file:\/\/|data:)/i.test(avatarImage))
+                /^(https?:|wayland-asset:\/\/|file:\/\/|data:)/i.test(avatarImage))
             );
             return (
               <div

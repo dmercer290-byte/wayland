@@ -43,10 +43,10 @@ afterEach(() => {
 });
 
 describe('extensions/statePersistence', () => {
-  it('reads and writes extension states from AIONUI_EXTENSION_STATES_FILE when provided', async () => {
-    const sandbox = createTempDir('aionui-state-');
+  it('reads and writes extension states from WAYLAND_EXTENSION_STATES_FILE when provided', async () => {
+    const sandbox = createTempDir('wayland-state-');
     const statesFile = path.join(sandbox, 'isolated', 'extension-states.json');
-    process.env.AIONUI_EXTENSION_STATES_FILE = statesFile;
+    process.env.WAYLAND_EXTENSION_STATES_FILE = statesFile;
 
     const disabledAt = new Date('2026-03-08T00:00:00.000Z');
     const states = new Map<
@@ -81,9 +81,9 @@ describe('extensions/statePersistence', () => {
   });
 
   it('loadPersistedStates returns empty map without warning when file does not exist (ENOENT)', async () => {
-    const sandbox = createTempDir('aionui-enoent-');
+    const sandbox = createTempDir('wayland-enoent-');
     const statesFile = path.join(sandbox, 'nonexistent', 'extension-states.json');
-    process.env.AIONUI_EXTENSION_STATES_FILE = statesFile;
+    process.env.WAYLAND_EXTENSION_STATES_FILE = statesFile;
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -97,9 +97,9 @@ describe('extensions/statePersistence', () => {
   });
 
   it('loadPersistedStates warns for non-ENOENT errors', async () => {
-    const sandbox = createTempDir('aionui-bad-json-');
+    const sandbox = createTempDir('wayland-bad-json-');
     const statesFile = path.join(sandbox, 'extension-states.json');
-    process.env.AIONUI_EXTENSION_STATES_FILE = statesFile;
+    process.env.WAYLAND_EXTENSION_STATES_FILE = statesFile;
 
     // Write invalid JSON
     fs.writeFileSync(statesFile, '{{{invalid json', 'utf-8');
@@ -116,9 +116,9 @@ describe('extensions/statePersistence', () => {
   });
 
   it('savePersistedStates debounces rapid writes', async () => {
-    const sandbox = createTempDir('aionui-debounce-');
+    const sandbox = createTempDir('wayland-debounce-');
     const statesFile = path.join(sandbox, 'extension-states.json');
-    process.env.AIONUI_EXTENSION_STATES_FILE = statesFile;
+    process.env.WAYLAND_EXTENSION_STATES_FILE = statesFile;
 
     // Save three times rapidly
     const states1 = new Map([['ext-a', { enabled: true }]]) as any;
@@ -144,9 +144,9 @@ describe('extensions/statePersistence', () => {
 
   describe('markExtensionForReinstall', () => {
     it('should set installed to false for an existing extension', async () => {
-      const sandbox = createTempDir('aionui-reinstall-');
+      const sandbox = createTempDir('wayland-reinstall-');
       const statesFile = path.join(sandbox, 'extension-states.json');
-      process.env.AIONUI_EXTENSION_STATES_FILE = statesFile;
+      process.env.WAYLAND_EXTENSION_STATES_FILE = statesFile;
 
       const states = new Map([['ext-claude', { enabled: true, installed: true, lastVersion: '1.0.0' }]]);
       savePersistedStates(states);
@@ -163,9 +163,9 @@ describe('extensions/statePersistence', () => {
     });
 
     it('should be a no-op for an unknown extension', async () => {
-      const sandbox = createTempDir('aionui-reinstall-noop-');
+      const sandbox = createTempDir('wayland-reinstall-noop-');
       const statesFile = path.join(sandbox, 'extension-states.json');
-      process.env.AIONUI_EXTENSION_STATES_FILE = statesFile;
+      process.env.WAYLAND_EXTENSION_STATES_FILE = statesFile;
 
       const states = new Map([['ext-other', { enabled: true, installed: true }]]);
       savePersistedStates(states);

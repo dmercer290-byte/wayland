@@ -10,7 +10,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useModeModeList from '@renderer/hooks/agent/useModeModeList';
 import useProtocolDetection from '@renderer/hooks/system/useProtocolDetection';
-import AionModal from '@/renderer/components/base/AionModal';
+import WaylandModal from '@/renderer/components/base/WaylandModal';
 import ApiKeyEditorModal from './ApiKeyEditorModal';
 import {
   MODEL_PLATFORMS,
@@ -307,7 +307,7 @@ const AddPlatformModal = ModalHOC<{
       setLastDetectionInput(null); // 重置检测记录 / Reset detection record
       setModelProtocol('openai'); // 重置协议选择 / Reset protocol selection
 
-      // Pre-fill from deep link data (aionui:// protocol)
+      // Pre-fill from deep link data (wayland:// protocol)
       if (deepLinkData?.baseUrl || deepLinkData?.apiKey) {
         // Default to new-api platform for deep links (typical one-api/new-api usage)
         form.setFieldValue('platform', deepLinkData.platform || 'new-api');
@@ -383,7 +383,7 @@ const AddPlatformModal = ModalHOC<{
   };
 
   return (
-    <AionModal
+    <WaylandModal
       visible={modalProps.visible}
       onCancel={modalCtrl.close}
       header={{ title: t('settings.addModel'), showClose: true }}
@@ -690,7 +690,7 @@ const AddPlatformModal = ModalHOC<{
           }
         }}
       />
-    </AionModal>
+    </WaylandModal>
   );
 });
 

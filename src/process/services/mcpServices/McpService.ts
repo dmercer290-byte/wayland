@@ -10,7 +10,7 @@ import { ClaudeMcpAgent } from './agents/ClaudeMcpAgent';
 import { CodebuddyMcpAgent } from './agents/CodebuddyMcpAgent';
 import { QwenMcpAgent } from './agents/QwenMcpAgent';
 import { GeminiMcpAgent } from './agents/GeminiMcpAgent';
-import { AionuiMcpAgent } from './agents/AionuiMcpAgent';
+import { WaylandMcpAgent } from './agents/WaylandMcpAgent';
 import { CodexMcpAgent } from './agents/CodexMcpAgent';
 import { OpencodeMcpAgent } from './agents/OpencodeMcpAgent';
 import { AionrsMcpAgent } from './agents/AionrsMcpAgent';
@@ -22,7 +22,7 @@ import type { IMcpProtocol, DetectedMcpServer, McpConnectionTestResult, McpSyncR
  *
  * Agent 类型说明：
  * - AcpBackend ('claude', 'qwen', 'gemini', 'codex'等): 支持的 ACP 后端
- * - 'aionui': @office-ai/aioncli-core (AionUi 本地管理的 Gemini 实现)
+ * - 'wayland': @office-ai/aioncli-core (Wayland 本地管理的 Gemini 实现)
  */
 export class McpService {
   private agents: Map<McpSource, IMcpProtocol>;
@@ -86,7 +86,7 @@ export class McpService {
       ['codebuddy', new CodebuddyMcpAgent()],
       ['qwen', new QwenMcpAgent()],
       ['gemini', new GeminiMcpAgent()],
-      ['aionui', new AionuiMcpAgent()], // AionUi 本地 @office-ai/aioncli-core
+      ['wayland', new WaylandMcpAgent()], // Wayland 本地 @office-ai/aioncli-core
       ['codex', new CodexMcpAgent()],
       ['opencode', new OpencodeMcpAgent()],
       ['aionrs', new AionrsMcpAgent()], // Aion CLI (Rust binary, TOML config)
@@ -102,18 +102,18 @@ export class McpService {
 
   /**
    * 根据 agent 配置获取正确的 MCP agent 实例
-   * Fork Gemini (cliPath=undefined) 使用 AionuiMcpAgent
+   * Fork Gemini (cliPath=undefined) 使用 WaylandMcpAgent
    * Native Gemini (cliPath='gemini') 使用 GeminiMcpAgent
    *
    * Get the correct MCP agent instance based on agent config.
-   * Fork Gemini (cliPath=undefined) uses AionuiMcpAgent.
+   * Fork Gemini (cliPath=undefined) uses WaylandMcpAgent.
    * Native Gemini (cliPath='gemini') uses GeminiMcpAgent.
    */
   private getAgentForConfig(agent: { backend: string; cliPath?: string }): IMcpProtocol | undefined {
-    // Fork Gemini 使用 AionuiMcpAgent 管理 MCP 配置
-    // Fork Gemini uses AionuiMcpAgent to manage MCP config
+    // Fork Gemini 使用 WaylandMcpAgent 管理 MCP 配置
+    // Fork Gemini uses WaylandMcpAgent to manage MCP config
     if (agent.backend === 'gemini' && !agent.cliPath) {
-      return this.agents.get('aionui');
+      return this.agents.get('wayland');
     }
     return this.agents.get(agent.backend as McpSource);
   }
@@ -239,7 +239,7 @@ export class McpService {
 
   /**
    * Get supported transport types for a given agent config.
-   * Fork Gemini (backend='gemini', no cliPath) uses AionuiMcpAgent.
+   * Fork Gemini (backend='gemini', no cliPath) uses WaylandMcpAgent.
    */
   getSupportedTransportsForAgent(agent: { backend: string; cliPath?: string }): string[] {
     const agentInstance = this.getAgentForConfig(agent as { backend: string; cliPath?: string });

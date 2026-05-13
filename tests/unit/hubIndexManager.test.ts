@@ -38,7 +38,7 @@ function makeExt(overrides: Partial<IHubExtension> & { name: string }): IHubExte
     description: 'test',
     author: 'test',
     dist: { tarball: `${overrides.name}.zip`, integrity: 'sha512-abc', unpackedSize: 100 },
-    engines: { aionui: '>=1.0.0' },
+    engines: { wayland: '>=1.0.0' },
     hubs: ['acpAdapters'],
     ...overrides,
   };

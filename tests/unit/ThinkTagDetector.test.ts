@@ -152,15 +152,15 @@ After`;
 
     it('should preserve markdown spacing for content without think tags', () => {
       const input =
-        '现在这轮子进程看起来还可以。\n\n当前服务：\n- `aionui-webui.service` 已运行约 15 分钟\n- 主进程 `dist-server/server.mjs` PID `182448`';
+        '现在这轮子进程看起来还可以。\n\n当前服务：\n- `wayland-webui.service` 已运行约 15 分钟\n- 主进程 `dist-server/server.mjs` PID `182448`';
 
       expect(stripThinkTags(input)).toBe(input);
       expect(stripRendererThinkTags(input)).toBe(input);
     });
 
     it('should preserve list-leading newlines after removing think tags', () => {
-      const input = '<think>internal</think>\n\n当前服务：\n- `aionui-webui.service` 已运行约 15 分钟';
-      const expected = '\n\n当前服务：\n- `aionui-webui.service` 已运行约 15 分钟';
+      const input = '<think>internal</think>\n\n当前服务：\n- `wayland-webui.service` 已运行约 15 分钟';
+      const expected = '\n\n当前服务：\n- `wayland-webui.service` 已运行约 15 分钟';
 
       expect(stripThinkTags(input)).toBe(expected);
       expect(stripRendererThinkTags(input)).toBe(expected);
@@ -246,10 +246,10 @@ Line 2
     });
 
     it('should preserve markdown-leading blank lines when extracting think tags', () => {
-      const input = '<think>internal reasoning</think>\n\n当前服务：\n- `aionui-webui.service` 已运行约 15 分钟';
+      const input = '<think>internal reasoning</think>\n\n当前服务：\n- `wayland-webui.service` 已运行约 15 分钟';
       const result = extractAndStripThinkTags(input);
       expect(result.thinking).toBe('internal reasoning');
-      expect(result.content).toBe('\n\n当前服务：\n- `aionui-webui.service` 已运行约 15 分钟');
+      expect(result.content).toBe('\n\n当前服务：\n- `wayland-webui.service` 已运行约 15 分钟');
     });
 
     it('should handle empty/null input', () => {

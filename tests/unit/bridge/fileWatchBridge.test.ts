@@ -27,7 +27,7 @@ describe('fileWatchBridge office scan helpers', () => {
 
 describe('scanWorkspaceOfficeFiles', () => {
   it('returns only previewable Office files from non-ignored directories', async () => {
-    const workspace = await mkdtemp(path.join(os.tmpdir(), 'aionui-office-scan-'));
+    const workspace = await mkdtemp(path.join(os.tmpdir(), 'wayland-office-scan-'));
 
     try {
       await mkdir(path.join(workspace, 'docs', 'nested'), { recursive: true });

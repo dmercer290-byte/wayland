@@ -76,7 +76,7 @@ flowchart TD
 
 LobeHub 按独立市场拆分，每种类型一个 index repo：
 
-| 维度           | AionUI (当前+方案)                                         | LobeHub                                            |
+| 维度           | Wayland (当前+方案)                                         | LobeHub                                            |
 | -------------- | ---------------------------------------------------------- | -------------------------------------------------- |
 | **单元**       | Extension (含多种 contributes)                             | 每种类型独立 (agent/plugin 各自一个 repo)          |
 | **Agent 定义** | manifest → contextFile + presetAgentType + skills + models | 单个 JSON (system prompt + meta, 纯数据)           |
@@ -86,12 +86,12 @@ LobeHub 按独立市场拆分，每种类型一个 index repo：
 | **Index**      | 本地目录扫描 (待补远程 Registry)                           | 静态 index.json (CDN)                              |
 | **安装**       | 下载整个 Extension 包                                      | Agent: 无需安装 (纯 prompt 注入); Plugin: 配置 URL |
 
-**LobeHub 能做到纯 JSON 是因为它的 agent 就只是一段 system prompt，无代码、无文件依赖。** AionUI 的 contribution 类型更丰富（channelPlugin 需要 JS entryPoint, webui 需要 API routes, theme 需要 CSS 文件），有些天然需要打包在一起，强行拆开反而破坏内聚性。
+**LobeHub 能做到纯 JSON 是因为它的 agent 就只是一段 system prompt，无代码、无文件依赖。** Wayland 的 contribution 类型更丰富（channelPlugin 需要 JS entryPoint, webui 需要 API routes, theme 需要 CSS 文件），有些天然需要打包在一起，强行拆开反而破坏内聚性。
 
 **关键参考点:**
 
 - LobeHub 的 Agent 市场证明了"按 contribution 粒度展示"的 UX 是成立的
-- 但 AionUI 不需要照搬"每种类型独立 repo"的模式，因为 contribution 间存在耦合（如 ext-feishu 的 channelPlugin + webui）
+- 但 Wayland 不需要照搬"每种类型独立 repo"的模式，因为 contribution 间存在耦合（如 ext-feishu 的 channelPlugin + webui）
 - LobeHub 的"静态 index.json + CDN"分发模式值得借鉴，轻量且可自托管
 
 ## 4. agents 冗余分析
@@ -120,7 +120,7 @@ LobeHub 按独立市场拆分，每种类型一个 index repo：
 ```mermaid
 flowchart LR
   subgraph current["现有能力"]
-    LocalScan["本地目录扫描\nenv / ~/.aionui/ / appdata"]
+    LocalScan["本地目录扫描\nenv / ~/.wayland/ / appdata"]
     ManifestParse["Manifest 解析\nZod 校验"]
     EngineCheck["引擎兼容性\nsemver 校验"]
   end
@@ -225,7 +225,7 @@ flowchart LR
 | ------------------------ | ------------------------------------------------------------------------------------ |
 | Manifest Schema (Zod)    | 开发者提交扩展时自动校验 manifest 格式, 提取 displayName/description/icon 等展示信息 |
 | 10 种 Contribution 类型  | 每种是一个 Hub 的"商品"类型, 可按类型建立独立市场或统一市场分类展示                  |
-| Engine + Dependency 校验 | 安装前检查 AionUI 版本兼容性 + 依赖扩展是否已安装                                    |
+| Engine + Dependency 校验 | 安装前检查 Wayland 版本兼容性 + 依赖扩展是否已安装                                    |
 | Lifecycle hooks          | `onInstall` 用于安装后初始化, `onUninstall` 用于卸载清理                             |
 | State Persistence        | 记录用户对每个扩展的启用/禁用选择, 跨重启保持                                        |
 | Permission 声明 + 分析   | 在市场页面展示权限徽章, 安装前向用户展示风险等级                                     |

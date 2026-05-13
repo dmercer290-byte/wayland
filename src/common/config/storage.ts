@@ -185,7 +185,7 @@ export interface IConfigStorageRefer {
     customAgentId?: string;
     name?: string;
   };
-  // Skills Market: whether the aionui-skills builtin skill is enabled
+  // Skills Market: whether the wayland-skills builtin skill is enabled
   'skillsMarket.enabled'?: boolean;
   // Desktop Pet: whether the desktop pet feature is enabled
   'pet.enabled'?: boolean;
@@ -203,7 +203,7 @@ export interface IConfigStorageRefer {
 }
 
 export interface IEnvStorageRefer {
-  'aionui.dir': {
+  'wayland.dir': {
     workDir: string;
     cacheDir: string;
   };
@@ -213,7 +213,7 @@ export interface IEnvStorageRefer {
  * Conversation source type - identifies where the conversation was created
  * 会话来源类型 - 标识会话创建的来源
  */
-export type ConversationSource = 'aionui' | 'telegram' | 'lark' | 'dingtalk' | 'weixin' | 'wecom' | (string & {});
+export type ConversationSource = 'wayland' | 'telegram' | 'lark' | 'dingtalk' | 'weixin' | 'wecom' | (string & {});
 
 interface IChatConversation<T, Extra> {
   createTime: number;
@@ -225,7 +225,7 @@ interface IChatConversation<T, Extra> {
   extra: Extra;
   model: TProviderWithModel;
   status?: 'pending' | 'running' | 'finished' | undefined;
-  /** 会话来源，默认为 aionui / Conversation source, defaults to aionui */
+  /** 会话来源，默认为 wayland / Conversation source, defaults to wayland */
   source?: ConversationSource;
   /** Channel chat isolation ID (e.g. user:xxx, group:xxx) */
   channelChatId?: string;
@@ -612,7 +612,7 @@ export interface IMcpServer {
   createdAt: number;
   updatedAt: number;
   originalJson: string; // 存储原始JSON配置，用于编辑时的准确显示
-  /** Built-in MCP server managed by AionUi (hide edit/delete in UI) */
+  /** Built-in MCP server managed by Wayland (hide edit/delete in UI) */
   builtin?: boolean;
 }
 

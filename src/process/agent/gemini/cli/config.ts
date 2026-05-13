@@ -147,12 +147,12 @@ export async function loadCliConfig({
   // 创建虚拟 extension 来承载内置 skills
   // Create a virtual extension to hold builtin skills
   const builtinSkillsExtension: GeminiCLIExtension = {
-    name: 'aionui-builtin-skills',
+    name: 'wayland-builtin-skills',
     version: '1.0.0',
     isActive: true,
     path: skillsDir || '',
     contextFiles: [],
-    id: 'aionui-builtin-skills',
+    id: 'wayland-builtin-skills',
     skills: builtinSkills,
   };
 
@@ -215,8 +215,8 @@ export async function loadCliConfig({
       const allowedNames = new Set(settings.allowMCPServers.filter(Boolean));
       if (allowedNames.size > 0) {
         mcpServersConfig = Object.fromEntries(
-          // Team MCP servers (aionui-team-*) are always kept regardless of allowlist
-          Object.entries(mcpServersConfig).filter(([key]) => key.startsWith('aionui-team-') || allowedNames.has(key))
+          // Team MCP servers (wayland-team-*) are always kept regardless of allowlist
+          Object.entries(mcpServersConfig).filter(([key]) => key.startsWith('wayland-team-') || allowedNames.has(key))
         );
       }
     }
@@ -225,8 +225,8 @@ export async function loadCliConfig({
       const excludedNames = new Set(settings.excludeMCPServers.filter(Boolean));
       if (excludedNames.size > 0) {
         mcpServersConfig = Object.fromEntries(
-          // Team MCP servers (aionui-team-*) are never excluded
-          Object.entries(mcpServersConfig).filter(([key]) => key.startsWith('aionui-team-') || !excludedNames.has(key))
+          // Team MCP servers (wayland-team-*) are never excluded
+          Object.entries(mcpServersConfig).filter(([key]) => key.startsWith('wayland-team-') || !excludedNames.has(key))
         );
       }
     }
@@ -281,8 +281,8 @@ export async function loadCliConfig({
     userMemory: memoryContent,
     geminiMdFileCount: fileCount,
     approvalMode: argv.yolo || false ? ApprovalMode.YOLO : ApprovalMode.DEFAULT,
-    // AionUi 是桌面应用，支持用户交互确认，需要设置 interactive: true
-    // AionUi is a desktop app with user interaction support, needs interactive: true
+    // Wayland 是桌面应用，支持用户交互确认，需要设置 interactive: true
+    // Wayland is a desktop app with user interaction support, needs interactive: true
     interactive: true,
     showMemoryUsage: argv.showMemoryUsage || argv.show_memory_usage || settings.showMemoryUsage || false,
     accessibility: settings.accessibility,

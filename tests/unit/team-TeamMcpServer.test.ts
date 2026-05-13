@@ -198,7 +198,7 @@ describe('TeamMcpServer', () => {
 
     it('getStdioConfig returns correct structure', () => {
       const config = server.getStdioConfig();
-      expect(config.name).toContain('aionui-team-team-1');
+      expect(config.name).toContain('wayland-team-team-1');
       expect(config.command).toBe('node');
       expect(Array.isArray(config.args)).toBe(true);
       expect(config.env.some((e) => e.name === 'TEAM_MCP_PORT')).toBe(true);

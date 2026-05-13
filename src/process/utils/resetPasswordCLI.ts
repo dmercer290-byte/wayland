@@ -81,7 +81,7 @@ export async function resetPasswordCLI(username: string): Promise<void> {
     log.info(`Target user: ${username}`);
 
     // Get database path using the same logic as the main app
-    const dbPath = path.join(getDataPath(), 'aionui.db');
+    const dbPath = path.join(getDataPath(), 'wayland.db');
     log.info(`Database path: ${dbPath}`);
 
     const db = await getDatabase();
@@ -94,11 +94,11 @@ export async function resetPasswordCLI(username: string): Promise<void> {
     if (!hasUsersResult.data) {
       log.error('Database is not initialized yet');
       log.info('');
-      log.info('Please run AionUi at least once to initialize the database:');
-      log.info('  aionui --webui');
+      log.info('Please run Wayland at least once to initialize the database:');
+      log.info('  wayland --webui');
       log.info('');
       log.info('Then you can reset the password using:');
-      log.info('  aionui --resetpass <username>');
+      log.info('  wayland --resetpass <username>');
       process.exit(1);
     }
 

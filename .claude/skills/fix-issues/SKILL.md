@@ -68,7 +68,7 @@ In daemon mode (`limit > 0`), load the skip list to avoid re-analyzing issues th
 triaged in previous sessions. The skip list is stored at:
 
 ```
-~/.aionui-fix-issues/skip-list.json
+~/.wayland-fix-issues/skip-list.json
 ```
 
 Format:
@@ -135,7 +135,7 @@ BOT_LOGIN=$(gh api user --jq '.login')
 Then check for comments from **other users** after `commented_at`:
 
 ```bash
-gh api repos/iOfficeAI/AionUi/issues/<number>/comments \
+gh api repos/TradeCanyon/Wayland/issues/<number>/comments \
   --jq '[.[] | select(.created_at > "<commented_at>" and .user.login != "'$BOT_LOGIN'")] | length'
 ```
 
@@ -154,7 +154,7 @@ This ensures:
 #### Step 1.2: Fetch Open Bug Issues
 
 ```bash
-gh issue list --repo iOfficeAI/AionUi --state open --label bug --limit 50 \
+gh issue list --repo TradeCanyon/Wayland --state open --label bug --limit 50 \
   --json number,title,body,labels,assignees,comments,createdAt
 ```
 
@@ -187,7 +187,7 @@ Pass them through to Step 1.3e for image analysis before deciding.
 
 ```bash
 # Check if this issue already has a linked PR (via "Closes #N" or manual link)
-gh api repos/iOfficeAI/AionUi/issues/<number>/timeline --jq \
+gh api repos/TradeCanyon/Wayland/issues/<number>/timeline --jq \
   '[.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null)] | length'
 ```
 
@@ -231,11 +231,11 @@ Pull distinctive identifiers from the issue body:
 
 ```bash
 # Search by error message fragment
-gh issue list --repo iOfficeAI/AionUi --state open --label bug --limit 50 \
+gh issue list --repo TradeCanyon/Wayland --state open --label bug --limit 50 \
   --search "<error-message-fragment>" --json number,title,body
 
 # Search by component name
-gh issue list --repo iOfficeAI/AionUi --state open --label bug --limit 50 \
+gh issue list --repo TradeCanyon/Wayland --state open --label bug --limit 50 \
   --search "<component-name>" --json number,title,body
 ```
 
@@ -344,7 +344,7 @@ This step is mandatory — without a comment, the skip-list `commented_at` field
 and re-analysis will never be triggered.
 
 ```bash
-gh issue comment <number> --repo iOfficeAI/AionUi --body "$(cat <<'EOF'
+gh issue comment <number> --repo TradeCanyon/Wayland --body "$(cat <<'EOF'
 🔍 **Automated analysis — needs more info**
 
 This issue was analyzed but cannot be fixed automatically due to insufficient detail.
@@ -370,7 +370,7 @@ Use `gh issue comment` — all comments should be concise and actionable.
 **Comment 1 — Start (after triage selects this issue):**
 
 ```bash
-gh issue comment <number> --repo iOfficeAI/AionUi --body "$(cat <<'EOF'
+gh issue comment <number> --repo TradeCanyon/Wayland --body "$(cat <<'EOF'
 🔍 **Automated analysis started**
 
 Analyzing this issue for an automated fix. Will update with results.
@@ -381,7 +381,7 @@ EOF
 **Comment 2a — Success (after PR is created):**
 
 ```bash
-gh issue comment <number> --repo iOfficeAI/AionUi --body "$(cat <<'EOF'
+gh issue comment <number> --repo TradeCanyon/Wayland --body "$(cat <<'EOF'
 ✅ **Fix submitted**
 
 PR: <pr-url>
@@ -396,7 +396,7 @@ EOF
 **Comment 2b — Abandoned (if fix fails after 3 attempts):**
 
 ```bash
-gh issue comment <number> --repo iOfficeAI/AionUi --body "$(cat <<'EOF'
+gh issue comment <number> --repo TradeCanyon/Wayland --body "$(cat <<'EOF'
 ❌ **Automated fix unsuccessful**
 
 Attempted to fix this issue but could not produce a passing solution.
@@ -416,7 +416,7 @@ EOF
 **Comment 2c — Skipped during triage (insufficient info):**
 
 ```bash
-gh issue comment <number> --repo iOfficeAI/AionUi --body "$(cat <<'EOF'
+gh issue comment <number> --repo TradeCanyon/Wayland --body "$(cat <<'EOF'
 🔍 **Automated analysis — needs more info**
 
 This issue was analyzed but cannot be fixed automatically due to insufficient detail.
@@ -553,7 +553,7 @@ ready and must NOT be submitted as a PR.
 **Pre-flight duplicate check** (safety net):
 
 ```bash
-gh pr list --repo iOfficeAI/AionUi --state open --search "<error-keyword-or-file>" --json number,title
+gh pr list --repo TradeCanyon/Wayland --state open --search "<error-keyword-or-file>" --json number,title
 ```
 
 If an existing OPEN PR addresses the same root cause, **skip this issue** — do not create a
@@ -613,7 +613,7 @@ See [references/report-template.md](references/report-template.md) for the exact
 
 #### Step 3.1: Update Skip List (Daemon Mode Only)
 
-In daemon mode (`limit > 0`), after the summary report, update `~/.aionui-fix-issues/skip-list.json`
+In daemon mode (`limit > 0`), after the summary report, update `~/.wayland-fix-issues/skip-list.json`
 with all issues that were **skipped** in this session.
 
 **TTL by classification:**
@@ -641,7 +641,7 @@ Default parameters (can be overridden via skill args):
 
 | Parameter | Default          | Description                                                         |
 | --------- | ---------------- | ------------------------------------------------------------------- |
-| repo      | iOfficeAI/AionUi | GitHub repository (owner/repo)                                      |
+| repo      | TradeCanyon/Wayland | GitHub repository (owner/repo)                                      |
 | limit     | 0                | Max issues to fix per invocation (0 = batch mode, >0 = daemon mode) |
 | label     | bug              | Issue label to filter by                                            |
 

@@ -1,27 +1,27 @@
 ---
-name: aionui-skills
-description: 'Access the AionUI Skills registry — discover and download AI agent skills. Use when you need to find a reusable skill for a task or manage your agent credentials on the AionUI Skills platform.'
+name: wayland-skills
+description: 'Access the Wayland Skills registry — discover and download AI agent skills. Use when you need to find a reusable skill for a task or manage your agent credentials on the Wayland Skills platform.'
 ---
 
-# AionUI Skills Market
+# Wayland Skills Market
 
-AionUI Skills is a community platform for AI agent skills — discover, download,
+Wayland Skills is a community platform for AI agent skills — discover, download,
 and use skills autonomously, similar to npm or PyPI but for AI agents.
 
-**Homepage**: https://skills.aionui.com
+**Homepage**: https://skills.wayland.app
 
 ## Setup (3 steps)
 
 ### Step 1 — Fetch the skill guide
 
 ```bash
-mkdir -p ~/.config/aionui-skills
-curl -s https://skills.aionui.com/SKILL.md > ~/.config/aionui-skills/SKILL.md
+mkdir -p ~/.config/wayland-skills
+curl -s https://skills.wayland.app/SKILL.md > ~/.config/wayland-skills/SKILL.md
 ```
 
 ### Step 2 — Register your agent
 
-Read `~/.config/aionui-skills/SKILL.md` and follow the **Registration** section
+Read `~/.config/wayland-skills/SKILL.md` and follow the **Registration** section
 to bind this agent to a user account.
 
 ### Step 3 — Start using community skills

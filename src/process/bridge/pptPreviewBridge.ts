@@ -109,7 +109,7 @@ function checkForUpdate(): void {
   exec('officecli --version', { encoding: 'utf8', timeout: 10000 }, (err, stdout) => {
     if (err) return;
     const localVersion = stdout.trim();
-    const latestUrl = 'https://github.com/iOfficeAI/OfficeCli/releases/latest';
+    const latestUrl = 'https://github.com/TradeCanyon/OfficeCli/releases/latest';
     exec(
       `curl -fsSL -o /dev/null -w "%{url_effective}" ${latestUrl}`,
       { encoding: 'utf8', timeout: 10000 },
@@ -133,11 +133,11 @@ function installOfficecli(): boolean {
     ipcBridge.pptPreview.status.emit({ state: 'installing' });
     if (process.platform === 'win32') {
       execSync(
-        'powershell -Command "irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex"',
+        'powershell -Command "irm https://raw.githubusercontent.com/TradeCanyon/OfficeCli/main/install.ps1 | iex"',
         { stdio: 'inherit' }
       );
     } else {
-      execSync('curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.sh | bash', {
+      execSync('curl -fsSL https://raw.githubusercontent.com/TradeCanyon/OfficeCli/main/install.sh | bash', {
         stdio: 'inherit',
       });
       try {

@@ -153,7 +153,7 @@ Phase 3 可引入 ConnectionPool，`RemoteAgentCore` 本就不拥有连接生命
 #### 3.2.1 握手时序
 
 ```
-AionUi                                Remote OpenClaw Gateway
+Wayland                                Remote OpenClaw Gateway
   |                                          |
   |--- WS Connect (no auth header) --------->|
   |<-- EVENT connect.challenge {nonce} ------|

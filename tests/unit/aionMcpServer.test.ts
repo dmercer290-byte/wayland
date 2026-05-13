@@ -157,7 +157,7 @@ describe('TeamGuideMcpServer lifecycle', () => {
 
   it('getStdioConfig returns correct structure', () => {
     const config = service.getStdioConfig();
-    expect(config.name).toBe('aionui-team-guide');
+    expect(config.name).toBe('wayland-team-guide');
     expect(config.command).toBe('node');
     expect(Array.isArray(config.args)).toBe(true);
     expect(config.env.some((e) => e.name === 'AION_MCP_PORT')).toBe(true);

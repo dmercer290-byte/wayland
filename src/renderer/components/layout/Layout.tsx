@@ -325,7 +325,7 @@ const Layout: React.FC<{
       void navigate('/settings/about');
       // Trigger update modal after a short delay to ensure page is loaded
       setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('aionui-open-update-modal', { detail: { source: 'tray' } }));
+        window.dispatchEvent(new CustomEvent('wayland-open-update-modal', { detail: { source: 'tray' } }));
       }, 100);
     };
 
@@ -476,7 +476,7 @@ const Layout: React.FC<{
                     ></path>
                   </svg>
                 </div>
-                <div className='flex-1 text-20px text-1 collapsed-hidden font-bold'>AionUi</div>
+                <div className='flex-1 text-20px text-1 collapsed-hidden font-bold'>Wayland</div>
                 {isMobile && !collapsed && (
                   <button
                     type='button'

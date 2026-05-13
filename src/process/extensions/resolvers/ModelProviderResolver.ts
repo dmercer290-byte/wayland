@@ -21,7 +21,7 @@ export interface ResolvedModelProvider {
   baseUrl?: string;
   /** Default models */
   models: string[];
-  /** Logo URL (aion-asset://) */
+  /** Logo URL (wayland-asset://) */
   logo?: string;
   /** Source extension name */
   _extensionName: string;

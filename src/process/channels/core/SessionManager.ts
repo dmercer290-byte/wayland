@@ -217,7 +217,7 @@ export class SessionManager {
 
   /**
    * Clear session by conversation ID
-   * Used when a conversation is deleted from AionUI
+   * Used when a conversation is deleted from Wayland
    */
   async clearSessionByConversationId(conversationId: string): Promise<IChannelSession | null> {
     const db = await getDatabase();

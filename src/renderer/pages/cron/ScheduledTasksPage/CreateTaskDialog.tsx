@@ -242,7 +242,7 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
 
   const isGeminiMode = resolvedBackend === 'gemini' || resolvedBackend === 'aionrs';
 
-  // AionCLI does not support Google Auth — filter it out (mirrors GuidPage.tsx logic)
+  // WaylandCLI does not support Google Auth — filter it out (mirrors GuidPage.tsx logic)
   const filteredProviders = useMemo(
     () =>
       resolvedBackend === 'aionrs'

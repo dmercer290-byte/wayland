@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 
 let mockStartFn = vi.fn();
-const TEST_DATA_DIR = path.join(os.tmpdir(), 'aionui-test-weixin-actions');
+const TEST_DATA_DIR = path.join(os.tmpdir(), 'wayland-test-weixin-actions');
 
 async function loadPluginClass() {
   vi.resetModules();

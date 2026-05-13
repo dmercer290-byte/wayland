@@ -109,11 +109,11 @@ function installOfficecli(emitStatus: StatusEmitter): boolean {
     emitStatus({ state: 'installing' });
     if (process.platform === 'win32') {
       execSync(
-        'powershell -Command "irm https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.ps1 | iex"',
+        'powershell -Command "irm https://raw.githubusercontent.com/TradeCanyon/OfficeCli/main/install.ps1 | iex"',
         { stdio: 'inherit' }
       );
     } else {
-      execSync('curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCli/main/install.sh | bash', {
+      execSync('curl -fsSL https://raw.githubusercontent.com/TradeCanyon/OfficeCli/main/install.sh | bash', {
         stdio: 'inherit',
       });
       try {

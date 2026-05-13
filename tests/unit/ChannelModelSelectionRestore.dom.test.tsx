@@ -86,7 +86,7 @@ vi.mock('@/common/adapter/ipcBridge', async (importOriginal) => {
   };
 });
 
-vi.mock('@/renderer/components/base/AionScrollArea', () => ({
+vi.mock('@/renderer/components/base/WaylandScrollArea', () => ({
   default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 

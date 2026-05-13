@@ -13,7 +13,7 @@ export interface IPlatformPaths {
   getHomeDir(): string;
   /**
    * Application log directory.
-   * In standalone mode respects LOGS_DIR env var, falls back to <tmpdir>/aionui-logs.
+   * In standalone mode respects LOGS_DIR env var, falls back to <tmpdir>/wayland-logs.
    */
   getLogsDir(): string;
   /**

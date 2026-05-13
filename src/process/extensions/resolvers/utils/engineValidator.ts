@@ -9,10 +9,10 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * Current AionUI extension API version.
+ * Current Wayland extension API version.
  * Increment major for breaking changes, minor for new features, patch for fixes.
  */
-export const AIONUI_VERSION = getAionUIVersion();
+export const WAYLAND_VERSION = getAionUIVersion();
 export const EXTENSION_API_VERSION = '1.0.0';
 
 type ParsedVersion = { major: number; minor: number; patch: number };
@@ -65,7 +65,7 @@ function satisfiesVersion(version: string, range: string): boolean {
 }
 
 /**
- * Get the AionUI version from package.json.
+ * Get the Wayland version from package.json.
  * Falls back to '0.0.0' if not available.
  */
 function getAionUIVersion(): string {
@@ -111,10 +111,10 @@ export interface EngineValidationResult {
 }
 
 /**
- * Validate that an extension's engine requirements are satisfied by the current AionUI version.
+ * Validate that an extension's engine requirements are satisfied by the current Wayland version.
  *
  * Checks:
- * 1. engine.aionui — does the running AionUI version satisfy the required range?
+ * 1. engine.wayland — does the running Wayland version satisfy the required range?
  * 2. engine.extensionApi — (future) does the extension API version match?
  */
 export function validateEngineCompatibility(extension: LoadedExtension): EngineValidationResult {
@@ -127,12 +127,12 @@ export function validateEngineCompatibility(extension: LoadedExtension): EngineV
   const engine = extension.manifest.engine;
   const apiVersion = extension.manifest.apiVersion;
 
-  // Check AionUI core version compatibility
-  if (engine?.aionui) {
-    if (!satisfiesVersion(AIONUI_VERSION, engine.aionui)) {
+  // Check Wayland core version compatibility
+  if (engine?.wayland) {
+    if (!satisfiesVersion(WAYLAND_VERSION, engine.wayland)) {
       result.valid = false;
       result.issues.push(
-        `Extension "${extension.manifest.name}" requires AionUI ${engine.aionui} but current version is ${AIONUI_VERSION}`
+        `Extension "${extension.manifest.name}" requires Wayland ${engine.wayland} but current version is ${WAYLAND_VERSION}`
       );
     }
   }

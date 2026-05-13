@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const TEST_DIR = path.join(os.tmpdir(), `aionui-channel-send-${process.pid}`);
+const TEST_DIR = path.join(os.tmpdir(), `wayland-channel-send-${process.pid}`);
 const mockGetConversation = vi.fn();
 const TEST_DATA_ROOT = path.join(TEST_DIR, 'data-root');
 const TEST_CONFIG_ROOT = path.join(TEST_DIR, 'config-root');
@@ -14,9 +14,9 @@ function buildChannelSendProtocol(action: {
   fileName?: string;
   caption?: string;
 }): string {
-  return `[AIONUI_CHANNEL_SEND]
+  return `[WAYLAND_CHANNEL_SEND]
 ${JSON.stringify(action)}
-[/AIONUI_CHANNEL_SEND]`;
+[/WAYLAND_CHANNEL_SEND]`;
 }
 
 vi.mock('@process/services/database', () => ({
@@ -148,7 +148,7 @@ describe('channelSendProtocol', () => {
   it('still rejects arbitrary files that only happen to live under the app data root', async () => {
     const { resolveChannelSendProtocol } = await import('@process/channels/utils/channelSendProtocol');
     const workspace = path.join(TEST_DATA_ROOT, 'codex-temp-100');
-    const dbFile = path.join(TEST_DATA_ROOT, 'aionui.db');
+    const dbFile = path.join(TEST_DATA_ROOT, 'wayland.db');
 
     fs.mkdirSync(workspace, { recursive: true });
     fs.writeFileSync(dbFile, 'not-shareable');
@@ -157,8 +157,8 @@ describe('channelSendProtocol', () => {
     const parsed = await resolveChannelSendProtocol(
       buildChannelSendProtocol({
         type: 'file',
-        path: '../aionui.db',
-        fileName: 'aionui.db',
+        path: '../wayland.db',
+        fileName: 'wayland.db',
       }),
       'conv-reject-data-root-file'
     );
@@ -167,8 +167,8 @@ describe('channelSendProtocol', () => {
     expect(parsed.rejectedActions).toEqual([
       {
         type: 'file',
-        path: '../aionui.db',
-        fileName: 'aionui.db',
+        path: '../wayland.db',
+        fileName: 'wayland.db',
         reason: 'outside_allowed',
       },
     ]);

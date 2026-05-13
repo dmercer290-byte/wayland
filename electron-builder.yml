@@ -1,12 +1,12 @@
-appId: com.aionui.app
-productName: AionUi
-executableName: AionUi
-copyright: Copyright © 2024 AionUi
+appId: com.tradecanyon.wayland
+productName: Wayland
+executableName: Wayland
+copyright: Copyright © 2026 Trade Canyon
 
 protocols:
-  - name: AionUi Protocol
+  - name: Wayland Protocol
     schemes:
-      - aionui
+      - wayland
 
 asar:
   smartUnpack: true
@@ -172,17 +172,17 @@ linux:
   icon: resources/app.png
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
   category: Utility
-  maintainer: aionui
-  vendor: aionui
+  maintainer: wayland
+  vendor: wayland
   synopsis: ${description}
   description: ${description}
   desktop:
     entry:
-      Name: AionUi
+      Name: Wayland
       Comment: ${description}
-      Icon: aionui
+      Icon: wayland
       Categories: Office;Utility;
-      MimeType: x-scheme-handler/aionui;
+      MimeType: x-scheme-handler/wayland;
 
 npmRebuild: false
 buildDependenciesFromSource: false
@@ -224,7 +224,7 @@ electronDownload:
 
 publish:
   provider: github
-  owner: iOfficeAI
-  repo: AionUi
+  owner: TradeCanyon
+  repo: wayland
   publishAutoUpdate: true
   releaseType: release

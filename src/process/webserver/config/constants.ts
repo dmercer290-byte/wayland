@@ -9,7 +9,7 @@ import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
 
 // CSRF token cookie/header identifiers (shared by server & WebUI)
 // CSRF Token 的 Cookie / Header 名称（服务端与 WebUI 共享）
-export const CSRF_COOKIE_NAME = 'aionui-csrf-token';
+export const CSRF_COOKIE_NAME = 'wayland-csrf-token';
 export const CSRF_HEADER_NAME = 'x-csrf-token';
 /**
  * 集中配置管理
@@ -51,7 +51,7 @@ export const AUTH_CONFIG = {
   // Cookie 配置（Cookie configuration）
   COOKIE: {
     // Cookie 名称（Cookie name）
-    NAME: 'aionui-session' as const,
+    NAME: 'wayland-session' as const,
     OPTIONS: {
       // 仅允许 HTTP 访问 Cookie（httpOnly flag）
       httpOnly: true,
@@ -137,7 +137,7 @@ export const SERVER_CONFIG = {
  * Determine whether the request arrived over HTTPS (reverse-proxy aware)
  *
  * 信号来源（按优先级）：
- * 1. AIONUI_HTTPS=true 或 NODE_ENV=production + HTTPS=true（显式开关）
+ * 1. WAYLAND_HTTPS=true 或 NODE_ENV=production + HTTPS=true（显式开关）
  * 2. SERVER_BASE_URL 以 https:// 开头（显式配置公网入口为 HTTPS，例如 nginx TLS 终止）
  * 3. req.secure === true（Express 通过 app.set('trust proxy', ...) 启用后生效）
  *
@@ -146,7 +146,7 @@ export const SERVER_CONFIG = {
  * 或在 Express 层配置 trust proxy 让 req.secure 正确反映。
  *
  * Signals (by priority):
- * 1. AIONUI_HTTPS=true / NODE_ENV=production + HTTPS=true (explicit opt-in)
+ * 1. WAYLAND_HTTPS=true / NODE_ENV=production + HTTPS=true (explicit opt-in)
  * 2. SERVER_BASE_URL starts with https:// (explicit public entrypoint, e.g. nginx TLS)
  * 3. req.secure === true (only meaningful once Express trust proxy is configured)
  *
@@ -154,7 +154,7 @@ export const SERVER_CONFIG = {
  * would be spoofable. Use SERVER_BASE_URL or trust proxy + req.secure instead.
  */
 function detectHttps(req?: Request): boolean {
-  if (process.env.AIONUI_HTTPS === 'true' || (process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true')) {
+  if (process.env.WAYLAND_HTTPS === 'true' || (process.env.NODE_ENV === 'production' && process.env.HTTPS === 'true')) {
     return true;
   }
 

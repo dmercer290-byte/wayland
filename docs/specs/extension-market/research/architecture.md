@@ -44,7 +44,7 @@ block-beta
     end
 
     block:protocol["Protocol"]:1
-      AssetProto["aion-asset://\n本地资产 URL 协议"]
+      AssetProto["wayland-asset://\n本地资产 URL 协议"]
       UIProto["ExtensionUIBridge\niframe ↔ main\npostMessage 桥接"]
     end
   end
@@ -70,8 +70,8 @@ flowchart TD
   Start([应用启动]) --> LoadAll["ExtensionLoader.loadAll()"]
 
   subgraph scan["目录扫描 (优先级递减)"]
-    S1["1. AIONUI_EXTENSIONS_PATH\n环境变量 (可多路径)"]
-    S2["2. ~/.aionui/extensions/\n用户目录"]
+    S1["1. WAYLAND_EXTENSIONS_PATH\n环境变量 (可多路径)"]
+    S2["2. ~/.wayland/extensions/\n用户目录"]
     S3["3. appdata/extensions/\n应用数据目录"]
     S1 --> S2 --> S3
   end
@@ -227,7 +227,7 @@ flowchart LR
   TabData["IExtensionSettingsTab\n{entryUrl, tabId, extensionName}"]
   TabData --> CheckURL{"entryUrl\n协议判断"}
 
-  CheckURL -- "aion-asset://" --> Iframe["sandboxed iframe\nsandbox='allow-scripts\nallow-same-origin'"]
+  CheckURL -- "wayland-asset://" --> Iframe["sandboxed iframe\nsandbox='allow-scripts\nallow-same-origin'"]
   CheckURL -- "https://" --> Webview["Electron webview\npartition='persist:ext-settings-{tabId}'"]
 
   Iframe --> Bridge["postMessage 桥接\naion:init → locale + translations\naion:get-locale → 响应\nstar-office:request-snapshot → 活动快照"]
@@ -272,7 +272,7 @@ src/process/extensions/
 │   ├── permissions.ts                权限分析、风险等级分类
 │   └── pathSafety.ts                 路径遍历防护
 ├── protocol/
-│   ├── assetProtocol.ts              aion-asset:// 自定义协议
+│   ├── assetProtocol.ts              wayland-asset:// 自定义协议
 │   └── uiProtocol.ts                 iframe ↔ main 消息协议
 └── resolvers/
     ├── AcpAdapterResolver.ts         ACP Agent 适配器
@@ -289,6 +289,6 @@ src/process/extensions/
         ├── entryPointResolver.ts     dist-first 入口点回退
         ├── envResolver.ts            ${env:VAR} 模板解析
         ├── dependencyResolver.ts     依赖校验 + 拓扑排序
-        ├── engineValidator.ts        AionUI 版本 + API 版本兼容性
+        ├── engineValidator.ts        Wayland 版本 + API 版本兼容性
         └── fileResolver.ts           $file: 引用解析
 ```

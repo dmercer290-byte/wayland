@@ -16,29 +16,29 @@ import React from 'react';
  * @example
  * ```tsx
  * // 垂直滚动（默认）/ Vertical scroll (default)
- * <AionScrollArea className="h-400px">
+ * <WaylandScrollArea className="h-400px">
  *   <div>Content...</div>
- * </AionScrollArea>
+ * </WaylandScrollArea>
  *
  * // 水平滚动 / Horizontal scroll
- * <AionScrollArea direction="x" className="w-400px">
+ * <WaylandScrollArea direction="x" className="w-400px">
  *   <div className="whitespace-nowrap">Content...</div>
- * </AionScrollArea>
+ * </WaylandScrollArea>
  *
  * // 双向滚动 / Both directions
- * <AionScrollArea direction="both" className="h-400px w-400px">
+ * <WaylandScrollArea direction="both" className="h-400px w-400px">
  *   <div>Content...</div>
- * </AionScrollArea>
+ * </WaylandScrollArea>
  * ```
  */
-interface AionScrollAreaProps extends React.HTMLAttributes<HTMLDivElement> {
+interface WaylandScrollAreaProps extends React.HTMLAttributes<HTMLDivElement> {
   /** 滚动方向：y-垂直，x-水平，both-双向 / Scroll direction: y-vertical, x-horizontal, both-bidirectional */
   direction?: 'y' | 'x' | 'both';
   /** 是否禁用滚动（用于嵌入式页面展示） */
   disableOverflow?: boolean;
 }
 
-const AionScrollArea: React.FC<AionScrollAreaProps> = ({
+const WaylandScrollArea: React.FC<WaylandScrollAreaProps> = ({
   children,
   className,
   direction = 'y',
@@ -65,6 +65,6 @@ const AionScrollArea: React.FC<AionScrollAreaProps> = ({
   );
 };
 
-AionScrollArea.displayName = 'AionScrollArea';
+WaylandScrollArea.displayName = 'WaylandScrollArea';
 
-export default AionScrollArea;
+export default WaylandScrollArea;

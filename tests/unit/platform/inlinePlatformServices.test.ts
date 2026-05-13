@@ -31,7 +31,7 @@ describe('inline platform services getLogsDir fallback', () => {
   it('inline getLogsDir fallback logic produces correct result', () => {
     // Directly test the try-catch pattern used in both index.ts and
     // ElectronPlatformServices.ts to verify correctness
-    const userData = '/Users/test/Library/Application Support/AionUi';
+    const userData = '/Users/test/Library/Application Support/Wayland';
 
     // Simulate app.getPath('logs') throwing
     const failingApp = {

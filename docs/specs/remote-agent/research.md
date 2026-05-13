@@ -1,7 +1,7 @@
 # Remote Agent 生态调研报告
 
 > 调研日期：2026-03-24
-> 目的：为 AionUi 支持远程 Agent 连接提供协议选型和认证方案参考
+> 目的：为 Wayland 支持远程 Agent 连接提供协议选型和认证方案参考
 
 ## 1. 调研范围
 
@@ -94,7 +94,7 @@
 
 - 企业级安全，穿越 NAT
 - 复杂度高，适合大规模多用户场景
-- 非 AionUi 目标场景
+- 非 Wayland 目标场景
 
 **模式 E — MCP 协议**
 
@@ -135,12 +135,12 @@
 | 模式                             | 代表                             | 适用场景               | 复杂度 |
 | -------------------------------- | -------------------------------- | ---------------------- | :----: |
 | **Bearer Token (静态 API Key)**  | Daytona, E2B, Plandex, Nanobot   | 个人自建、机器对机器   |   低   |
-| **JWT (自签发/自验证)**          | Tabby, OpenHands, AionUi WebUI   | 需要过期/刷新的场景    |   中   |
+| **JWT (自签发/自验证)**          | Tabby, OpenHands, Wayland WebUI   | 需要过期/刷新的场景    |   中   |
 | **OAuth2 / OIDC**                | OpenHands, Coder, Daytona, Tabby | 多用户、企业 SSO       |   高   |
 | **DM Pairing (配对码)**          | OpenClaw, ZeroClaw               | 个人助手设备绑定       |   中   |
 | **WS 握手 + Challenge-Response** | OpenClaw (设备认证)              | 安全性要求高的设备配对 |  中高  |
 
-## 5. 对 AionUi 的关键结论
+## 5. 对 Wayland 的关键结论
 
 ### 5.1 协议选型
 
@@ -148,7 +148,7 @@
 
 理由：
 
-1. **现有基础**：AionUi 已有完整的 OpenClaw Gateway WS 连接实现（`OpenClawGatewayConnection.ts`），包含重连、心跳、Session Key
+1. **现有基础**：Wayland 已有完整的 OpenClaw Gateway WS 连接实现（`OpenClawGatewayConnection.ts`），包含重连、心跳、Session Key
 2. **ACP 兼容**：现有 ACP JSON-RPC 消息格式天然适配 WS 双向通信
 3. **行业主流**：OpenClaw (332k)、ZeroClaw (28.5k)、OpenHands (69k) 均以 WS 为主
 4. **功能需求**：思考块、工具调用、权限请求等需要双向实时推送，WS 是最佳选择
@@ -161,11 +161,11 @@
 
 1. Bearer Token 覆盖绝大多数自建场景（Daytona、E2B、Tabby 均如此）
 2. 实现简单，WS 握手时通过 HTTP Header 或首条消息传入
-3. AionUi 已有 JWT 认证基础（WebUI），可在第二期复用
+3. Wayland 已有 JWT 认证基础（WebUI），可在第二期复用
 
 ### 5.3 远程 OpenClaw 优先
 
-OpenClaw 的 Gateway WS 协议已被 AionUi 实现过一次（本地模式），远程模式的核心差异仅在于：
+OpenClaw 的 Gateway WS 协议已被 Wayland 实现过一次（本地模式），远程模式的核心差异仅在于：
 
 - 连接地址从本地变为远程 URL
 - 需要通过公网认证（Token / Tailscale）
@@ -176,7 +176,7 @@ OpenClaw 的 Gateway WS 协议已被 AionUi 实现过一次（本地模式），
 不同 Agent 的 Gateway 协议差异主要在消息格式，传输层趋同（WS/HTTP）。建议：
 
 - 传输层抽象为 `IRemoteTransport` 接口（WS / SSE 实现）
-- 消息适配层将不同 Agent 协议转换为 AionUi 内部 ACP 格式
+- 消息适配层将不同 Agent 协议转换为 Wayland 内部 ACP 格式
 - 认证层抽象为 `IAuthProvider` 接口（Bearer / OAuth2 / Custom）
 
 ## 6. 参考链接

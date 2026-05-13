@@ -68,7 +68,7 @@ vi.mock('@/renderer/utils/platform', () => ({
 const createAgent = (overrides: Partial<IHubAgentItem>): IHubAgentItem => ({
   name: 'claude-code',
   displayName: 'Claude Code',
-  description: 'Integrates Anthropic Claude Code as an ACP adapter in AionUi.',
+  description: 'Integrates Anthropic Claude Code as an ACP adapter in Wayland.',
   author: 'Anthropic',
   dist: {
     tarball: 'extensions/claude-code.tgz',
@@ -76,7 +76,7 @@ const createAgent = (overrides: Partial<IHubAgentItem>): IHubAgentItem => ({
     unpackedSize: 1,
   },
   engines: {
-    aionui: '^1.0.0',
+    wayland: '^1.0.0',
   },
   hubs: ['acpAdapters'],
   status: 'not_installed',
@@ -159,8 +159,8 @@ describe('AgentHubModal', () => {
 
     expect(screen.getByText('Want a new Agent listed here?')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open a PR on AionHub' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open a PR on WaylandHub' }));
 
-    expect(mockOpenExternalUrl).toHaveBeenCalledWith('https://github.com/iOfficeAI/AionHub');
+    expect(mockOpenExternalUrl).toHaveBeenCalledWith('https://github.com/TradeCanyon/WaylandHub');
   });
 });

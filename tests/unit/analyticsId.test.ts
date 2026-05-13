@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 function createSandbox(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'aionui-analytics-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'wayland-analytics-test-'));
 }
 
 function removeSandbox(dir: string): void {
