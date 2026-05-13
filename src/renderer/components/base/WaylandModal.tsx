@@ -13,12 +13,12 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useThemeContext } from '@/renderer/hooks/context/ThemeContext';
 
-// ==================== 类型定义导出 ====================
+// ==================== Type definition exports ====================
 
-/** 预设尺寸类型 */
+/** Preset size type */
 export type ModalSize = 'small' | 'medium' | 'large' | 'xlarge' | 'full';
 
-/** 预设尺寸配置 */
+/** Preset size configuration */
 export const MODAL_SIZES: Record<ModalSize, { width: string; height?: string }> = {
   small: { width: '400px', height: '300px' },
   medium: { width: '600px', height: '400px' },
@@ -27,74 +27,74 @@ export const MODAL_SIZES: Record<ModalSize, { width: string; height?: string }> 
   full: { width: '90vw', height: '90vh' },
 };
 
-/** Header 配置 */
+/** Header configuration */
 export interface ModalHeaderConfig {
-  /** 自定义完整 header 内容 */
+  /** Custom full header content */
   render?: () => React.ReactNode;
-  /** 标题文本或节点 */
+  /** Title text or node */
   title?: React.ReactNode;
-  /** 是否显示关闭按钮 */
+  /** Whether to show close button */
   showClose?: boolean;
-  /** 关闭按钮图标 */
+  /** Close button icon */
   closeIcon?: React.ReactNode;
-  /** Header 额外的类名 */
+  /** Extra Header class name */
   className?: string;
-  /** Header 额外的样式 */
+  /** Extra Header style */
   style?: CSSProperties;
 }
 
-/** Footer 配置 */
+/** Footer configuration */
 export interface ModalFooterConfig {
-  /** 自定义完整 footer 内容 */
+  /** Custom full footer content */
   render?: () => React.ReactNode;
-  /** Footer 额外的类名 */
+  /** Extra Footer class name */
   className?: string;
-  /** Footer 额外的样式 */
+  /** Extra Footer style */
   style?: CSSProperties;
 }
 
-/** Modal 内容区域样式配置 */
+/** Modal content area style configuration */
 export interface ModalContentStyleConfig {
-  /** 背景色，默认 var(--dialog-fill-0) */
+  /** Background color, defaults to var(--dialog-fill-0) */
   background?: string;
-  /** 圆角大小，默认 16px */
+  /** Border radius, defaults to 16px */
   borderRadius?: string | number;
-  /** 内边距，默认 0 */
+  /** Padding, defaults to 0 */
   padding?: string | number;
-  /** 内容区域滚动行为，默认 auto */
+  /** Content area scroll behavior, defaults to auto */
   overflow?: 'auto' | 'scroll' | 'hidden' | 'visible';
-  /** 内容区域高度（支持 number 或 px 字符串） */
+  /** Content area height (supports number or px string) */
   height?: string | number;
-  /** 内容区域最小高度 */
+  /** Content area min height */
   minHeight?: string | number;
-  /** 内容区域最大高度 */
+  /** Content area max height */
   maxHeight?: string | number;
 }
 
-/** WaylandModal 组件 Props */
+/** WaylandModal component Props */
 export interface WaylandModalProps extends Omit<ModalProps, 'title' | 'footer'> {
   children?: React.ReactNode;
 
-  /** 预设尺寸，会被 style 中的 width/height 覆盖 */
+  /** Preset size, overridden by width/height in style */
   size?: ModalSize;
 
-  /** Header 配置，可以是简单的 title 字符串或完整配置对象 */
+  /** Header configuration, can be a simple title string or a full config object */
   header?: React.ReactNode | ModalHeaderConfig;
 
-  /** Footer 配置，可以是 ReactNode 或配置对象 */
+  /** Footer configuration, can be ReactNode or config object */
   footer?: React.ReactNode | ModalFooterConfig | null;
 
-  /** Modal 内容区域样式配置 */
+  /** Modal content area style configuration */
   contentStyle?: ModalContentStyleConfig;
 
-  // === 向后兼容的 Props ===
-  /** @deprecated 请使用 header.title */
+  // === Backward-compatible Props ===
+  /** @deprecated use header.title */
   title?: React.ReactNode;
-  /** @deprecated 请使用 header.showClose */
+  /** @deprecated use header.showClose */
   showCustomClose?: boolean;
 }
 
-// ==================== 样式常量 / Style Constants ====================
+// ==================== Style Constants ====================
 
 const HEADER_BASE_CLASS = 'flex items-center justify-between pb-20px';
 const TITLE_BASE_CLASS = 'text-18px font-500 text-t-primary m-0';
@@ -103,31 +103,30 @@ const CLOSE_BUTTON_CLASS =
 const FOOTER_BASE_CLASS = 'flex-shrink-0 bg-transparent';
 
 /**
- * 自定义模态框组件 / Custom modal component
+ * Custom modal component
  *
- * 基于 Arco Design Modal 的封装，提供统一的样式主题、预设尺寸和字体缩放支持
  * Wrapper around Arco Design Modal with unified theme styling, preset sizes, and font scaling support
  *
  * @features
- * - 预设尺寸支持 / Preset size support (small/medium/large/xlarge/full)
- * - 响应字体缩放 / Responsive to font scale changes
- * - 灵活的 header/footer 配置 / Flexible header/footer configuration
- * - 向后兼容旧 API / Backward compatible with old API
- * - 自动视口适配 / Auto viewport adaptation
+ * - Preset size support (small/medium/large/xlarge/full)
+ * - Responsive to font scale changes
+ * - Flexible header/footer configuration
+ * - Backward compatible with old API
+ * - Auto viewport adaptation
  *
  * @example
  * ```tsx
- * // 基本用法 / Basic usage
+ * // Basic usage
  * <WaylandModal visible={true} onCancel={handleClose} header="标题">
  *   内容
  * </WaylandModal>
  *
- * // 预设尺寸 / Preset size
+ * // Preset size
  * <WaylandModal visible={true} size="large" header="大型弹窗">
  *   内容
  * </WaylandModal>
  *
- * // 自定义 header / Custom header
+ * // Custom header
  * <WaylandModal
  *   visible={true}
  *   header={{
@@ -139,7 +138,7 @@ const FOOTER_BASE_CLASS = 'flex-shrink-0 bg-transparent';
  *   内容
  * </WaylandModal>
  *
- * // 自定义 footer / Custom footer
+ * // Custom footer
  * <WaylandModal
  *   visible={true}
  *   header="标题"
@@ -168,7 +167,7 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
   header,
   footer,
   contentStyle,
-  // 向后兼容
+  // Backward compatibility
   title,
   showCustomClose = true,
   onCancel,
@@ -178,7 +177,7 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
 }) => {
   const { fontScale } = useThemeContext();
   const { t } = useTranslation();
-  // 处理 contentStyle 配置，转换为 CSS 变量
+  // Process contentStyle config and convert to CSS variables
   const contentBg = contentStyle?.background || 'var(--dialog-fill-0)';
   const contentBorderRadius = contentStyle?.borderRadius || '16px';
   const contentPadding = contentStyle?.padding || '0';
@@ -201,14 +200,14 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
     return value;
   };
 
-  // 处理尺寸缩放 / Handle size scaling
+  // Handle size scaling
   const modalSize = size ? MODAL_SIZES[size] : undefined;
   const baseStyle: CSSProperties = {
     ...modalSize,
     ...style,
   };
 
-  // 缩放尺寸相关属性（避免副作用）/ Scale size-related properties (avoid side effects)
+  // Scale size-related properties (avoid side effects)
   type DimensionStyle = Partial<Pick<CSSProperties, DimensionKey>>;
   const scaledStyle: DimensionStyle = {};
   dimensionKeys.forEach((key) => {
@@ -223,7 +222,7 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
     ...scaledStyle,
   };
 
-  // 自动设置最大宽高以适应视口 / Auto set max dimensions to fit viewport
+  // Auto set max dimensions to fit viewport
   if (typeof window !== 'undefined') {
     const viewportGap = 32;
     if (!mergedStyle.maxWidth) {
@@ -255,41 +254,40 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
     return style;
   }, [contentBg, paddingVal, contentOverflow, contentStyle?.height, contentStyle?.maxHeight, contentStyle?.minHeight]);
 
-  // 处理 Header 配置（向后兼容）
+  // Handle Header configuration (backward compatible)
   const headerConfig: ModalHeaderConfig = React.useMemo(() => {
-    // 如果使用新的 header 配置
+    // If using the new header config
     if (header !== undefined) {
-      // 如果是字符串或 ReactNode，转换为 title 配置
+      // If it's a string or ReactNode, convert to title config
       if (typeof header === 'string' || React.isValidElement(header)) {
         return {
           title: header,
           showClose: true,
         };
       }
-      // 如果是配置对象
+      // If it's a config object
       return header as ModalHeaderConfig;
     }
-    // 向后兼容旧的 title 和 showCustomClose
+    // Backward compat for old title and showCustomClose
     return {
       title,
       showClose: showCustomClose,
     };
   }, [header, title, showCustomClose]);
 
-  // 处理 Footer 配置
+  // Handle Footer configuration
   const footerConfig: ModalFooterConfig | null = React.useMemo(() => {
     if (footer === null) {
       return null;
     }
 
-    // 未提供 footer 时，使用默认模板
+    // When no footer provided, use the default template
     if (footer === undefined) {
       const cancelLabel = props.cancelText ?? t('common.cancel', { defaultValue: 'Cancel' });
       const okLabel = props.okText ?? t('common.confirm', { defaultValue: 'Confirm' });
       return {
         render: () => (
           <div className='flex justify-end gap-10px mt-10px'>
-            {/* 默认按钮提供统一圆角，文案可通过 cancelText/okText 覆盖 */}
             {/* Default buttons ship with rounded corners; text can be overridden via cancelText/okText */}
             <Button onClick={onCancel} className='px-20px min-w-80px' style={{ borderRadius: 8 }}>
               {cancelLabel}
@@ -308,7 +306,7 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
       };
     }
 
-    // 如果是 ReactNode，包装为配置对象
+    // If it's a ReactNode, wrap in a config object
     if (React.isValidElement(footer)) {
       return {
         render: () => footer,
@@ -317,9 +315,9 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
     return footer as ModalFooterConfig;
   }, [footer, onCancel, props.cancelText, props.okText, props.onOk, props.confirmLoading, t]);
 
-  // 渲染 Header
+  // Render Header
   const renderHeader = () => {
-    // 如果提供了自定义 render 函数
+    // If a custom render function was provided
     if (headerConfig.render) {
       return (
         <div className={headerConfig.className} style={headerConfig.style}>
@@ -328,12 +326,12 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
       );
     }
 
-    // 如果没有 title 也不显示关闭按钮，不渲染 header
+    // If there is no title and no close button, don't render header
     if (!headerConfig.title && !headerConfig.showClose) {
       return null;
     }
 
-    // 默认 header 布局
+    // Default header layout
     const headerClassName = classNames(HEADER_BASE_CLASS, headerConfig.className);
 
     const headerStyle: CSSProperties = {
@@ -353,7 +351,7 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
     );
   };
 
-  // 渲染 Footer
+  // Render Footer
   const renderFooter = () => {
     if (!footerConfig) {
       return null;
