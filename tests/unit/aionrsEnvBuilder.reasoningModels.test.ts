@@ -44,6 +44,28 @@ describe('defaultMaxTokensForModel', () => {
   it('matches case-insensitively', () => {
     expect(defaultMaxTokensForModel('Gemini-3.1-Pro-Preview')).toBe(32768);
   });
+
+  it('returns 32768 for OpenAI o-series reasoning models (o1, o3, o3-mini, o4, o4-mini)', () => {
+    expect(defaultMaxTokensForModel('o1')).toBe(32768);
+    expect(defaultMaxTokensForModel('o3')).toBe(32768);
+    expect(defaultMaxTokensForModel('o3-mini')).toBe(32768);
+    expect(defaultMaxTokensForModel('o4')).toBe(32768);
+    expect(defaultMaxTokensForModel('o4-mini')).toBe(32768);
+  });
+
+  it('matches o-series case-insensitively (O1, O3-Mini)', () => {
+    expect(defaultMaxTokensForModel('O1')).toBe(32768);
+    expect(defaultMaxTokensForModel('O3-Mini')).toBe(32768);
+  });
+
+  it('returns undefined for non-reasoning models with similar prefixes (gpt-4o, gpt-4o-mini)', () => {
+    expect(defaultMaxTokensForModel('gpt-4o')).toBeUndefined();
+    expect(defaultMaxTokensForModel('gpt-4o-mini')).toBeUndefined();
+  });
+
+  it('still routes o1-preview through the suffix pattern (already-covered case)', () => {
+    expect(defaultMaxTokensForModel('o1-preview')).toBe(32768);
+  });
 });
 
 describe('buildSpawnConfig — reasoning model max_tokens fallback', () => {
@@ -88,5 +110,27 @@ describe('buildSpawnConfig — reasoning model max_tokens fallback', () => {
   it('matches reasoning-model pattern case-insensitively (Gemini-3.1-Pro-Preview)', () => {
     const { args } = buildSpawnConfig(makeModel('gemini', 'Gemini-3.1-Pro-Preview'), { workspace });
     expect(maxTokensArg(args)).toBe('32768');
+  });
+});
+
+describe('buildSpawnConfig — resolvedMaxTokens return value', () => {
+  const workspace = '/tmp/test-workspace';
+
+  it('returns resolvedMaxTokens=32768 for a reasoning model when caller omits maxTokens', () => {
+    const { resolvedMaxTokens } = buildSpawnConfig(makeModel('gemini', 'gemini-2.5-pro'), { workspace });
+    expect(resolvedMaxTokens).toBe(32768);
+  });
+
+  it('returns resolvedMaxTokens matching the caller value when explicitly set', () => {
+    const { resolvedMaxTokens } = buildSpawnConfig(makeModel('gemini', 'gemini-2.5-pro'), {
+      workspace,
+      maxTokens: 12345,
+    });
+    expect(resolvedMaxTokens).toBe(12345);
+  });
+
+  it('returns resolvedMaxTokens=undefined for a non-reasoning model with no explicit maxTokens', () => {
+    const { resolvedMaxTokens } = buildSpawnConfig(makeModel('gemini', 'gemini-2.5-flash'), { workspace });
+    expect(resolvedMaxTokens).toBeUndefined();
   });
 });
