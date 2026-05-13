@@ -971,7 +971,7 @@ describe('CreateTaskDialog - schedule preset definitions', () => {
 
 describe('CreateTaskDialog - advanced settings workspace picker', () => {
   it('reuses the shared workspace picker styling inside advanced settings', () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/tmp/scheduled-workspace']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/tmp/scheduled-workspace']));
 
     const editJob: ICronJob = {
       id: 'job-workspace',
@@ -1278,7 +1278,7 @@ describe('CreateTaskDialog - advanced settings panel', () => {
   });
 
   it('clears the workspace via the close icon inside the picker', () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/tmp/ws']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/tmp/ws']));
 
     const editJob: ICronJob = {
       id: 'job-clear',

@@ -138,7 +138,7 @@ import { ProcessConfig } from '../../src/process/utils/initStorage';
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 const TEAM_MCP_CONFIG = {
-  name: 'aionui-team-abc',
+  name: 'wayland-team-abc',
   command: 'node',
   args: ['/app/scripts/team-mcp-stdio.mjs'],
   env: [
@@ -217,7 +217,7 @@ describe('Step 5: buildTeamMcpServer — null-guard and shape', () => {
 
   it('preserves TEAM_AGENT_SLOT_ID for per-agent identity', () => {
     const result = buildTeamMcpServer({
-      name: 'aionui-team-abc',
+      name: 'wayland-team-abc',
       command: 'node',
       args: [],
       env: [{ name: 'TEAM_AGENT_SLOT_ID', value: 'slot-leader' }],
@@ -245,7 +245,7 @@ describe('Step 6: loadBuiltinSessionMcpServers — builds servers list', () => {
     const agent = createCodexAgent({ teamMcpStdioConfig: TEAM_MCP_CONFIG });
     const servers = await callLoadBuiltin(agent);
     expect(servers).toHaveLength(1);
-    expect(servers[0]).toMatchObject({ name: 'aionui-team-abc', command: 'node' });
+    expect(servers[0]).toMatchObject({ name: 'wayland-team-abc', command: 'node' });
     expect(servers[0].env).toContainEqual({ name: 'TEAM_AGENT_SLOT_ID', value: 'slot-leader' });
   });
 
@@ -332,7 +332,7 @@ describe('Step 7a: createOrResumeSession — Codex vs non-Codex routing', () => 
     const opts = mockNewSession.mock.calls[0][1];
     expect(Array.isArray(opts.mcpServers)).toBe(true);
     expect(opts.mcpServers).toHaveLength(1);
-    expect(opts.mcpServers[0]).toMatchObject({ name: 'aionui-team-abc' });
+    expect(opts.mcpServers[0]).toMatchObject({ name: 'wayland-team-abc' });
   });
 
   it('fresh session (no prior sessionId) calls newSession with mcpServers', async () => {
@@ -408,9 +408,9 @@ describe('Step 7b PROOF-OF-FIX: Codex loadSession receives mcpServers (Task #1)'
     expect(mockLoadSession).toHaveBeenCalledOnce();
     const args = mockLoadSession.mock.calls[0];
     // On unfixed: args[2] is undefined → FAILS
-    // On fixed:   args[2] = [{name:'aionui-team-abc',...}] (direct array) → PASSES
+    // On fixed:   args[2] = [{name:'wayland-team-abc',...}] (direct array) → PASSES
     expect(args[2]).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: 'aionui-team-abc', command: 'node' })])
+      expect.arrayContaining([expect.objectContaining({ name: 'wayland-team-abc', command: 'node' })])
     );
     expect(args[2][0].env).toContainEqual({ name: 'TEAM_AGENT_SLOT_ID', value: 'slot-leader' });
   });
@@ -491,7 +491,7 @@ describe('Step 8: Task #3 IPC mcpStatus events', () => {
   it('emits degraded when team config is missing but mcpServers ends up empty', async () => {
     // Agent has teamId name pattern but somehow mcpServers is [] (e.g., command was empty)
     const agent = createCodexAgent({
-      teamMcpStdioConfig: { name: 'aionui-team-abc', command: '', args: [], env: [] },
+      teamMcpStdioConfig: { name: 'wayland-team-abc', command: '', args: [], env: [] },
     });
     await callCreateOrResume(agent);
 
@@ -506,7 +506,7 @@ describe('Step 8: Task #3 IPC mcpStatus events', () => {
     const readyCalls = mockMcpStatusEmit.mock.calls.filter((c) => c[0].phase === 'session_ready');
     expect(readyCalls.length).toBeGreaterThan(0);
     const payload = readyCalls[0][0];
-    // teamId extracted from 'aionui-team-abc' → 'abc'
+    // teamId extracted from 'wayland-team-abc' → 'abc'
     expect(payload.teamId).toBe('abc');
   });
 
@@ -532,10 +532,10 @@ describe('Step 8: Task #3 IPC mcpStatus events', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Checklist #8: End-to-end falsification plan
 //
-// How to verify "frontend can see MCP injection status" in a real AionUi env:
+// How to verify "frontend can see MCP injection status" in a real Wayland env:
 //
 // HAPPY PATH:
-//   1. Launch AionUi, open a Team with at least one ACP (claude/codex) agent
+//   1. Launch Wayland, open a Team with at least one ACP (claude/codex) agent
 //   2. Send first message to the team
 //   3. Open DevTools → search IPC event 'team.mcp.status'
 //      Expected sequence per agent:
@@ -559,8 +559,8 @@ describe('Step 8: Task #3 IPC mcpStatus events', () => {
 //      Frontend should NOT show MCP status for Gemini agents
 //
 // DIAGNOSIS COMMANDS:
-//   grep "Injecting team MCP server" ~/Library/Logs/AionUi/*.log
-//   sqlite3 ~/Library/.../aionui.db "SELECT extra FROM conversations WHERE id='<agentConvId>'"
+//   grep "Injecting team MCP server" ~/Library/Logs/Wayland/*.log
+//   sqlite3 ~/Library/.../wayland.db "SELECT extra FROM conversations WHERE id='<agentConvId>'"
 //     → extra.teamMcpStdioConfig should be non-null
 //   ACP_PERF_LOG=1 bun run dev
 //     → session/load or session/new request body logged, check mcpServers field

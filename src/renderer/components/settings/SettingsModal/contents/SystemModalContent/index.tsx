@@ -7,7 +7,7 @@
 import { ipcBridge } from '@/common';
 import type { IStartOnBootStatus } from '@/common/adapter/ipcBridge';
 import { ConfigStorage } from '@/common/config/storage';
-import AionScrollArea from '@/renderer/components/base/AionScrollArea';
+import WaylandScrollArea from '@/renderer/components/base/WaylandScrollArea';
 import LanguageSwitcher from '@/renderer/components/settings/LanguageSwitcher';
 import { AUTO_PREVIEW_OFFICE_FILES_SWR_KEY } from '@/renderer/hooks/system/useAutoPreviewOfficeFilesEnabled';
 import { iconColors } from '@/renderer/styles/colors';
@@ -325,7 +325,7 @@ const SystemModalContent: React.FC = () => {
     <div className='flex flex-col h-full w-full'>
       {modalContextHolder}
 
-      <AionScrollArea className='flex-1 min-h-0 pb-16px' disableOverflow={isPageMode}>
+      <WaylandScrollArea className='flex-1 min-h-0 pb-16px' disableOverflow={isPageMode}>
         <div className='space-y-16px'>
           <div className='px-[12px] md:px-[32px] py-16px bg-2 rd-16px space-y-12px'>
             <div className='w-full flex flex-col divide-y divide-border-2'>
@@ -411,7 +411,7 @@ const SystemModalContent: React.FC = () => {
           {/* Developer settings: DevTools + CDP (only visible in dev mode) */}
           <DevSettings />
         </div>
-      </AionScrollArea>
+      </WaylandScrollArea>
     </div>
   );
 };

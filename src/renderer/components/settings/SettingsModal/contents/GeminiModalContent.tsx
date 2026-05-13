@@ -6,7 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import { ConfigStorage } from '@/common/config/storage';
-import AionScrollArea from '@/renderer/components/base/AionScrollArea';
+import WaylandScrollArea from '@/renderer/components/base/WaylandScrollArea';
 import { useThemeContext } from '@/renderer/hooks/context/ThemeContext';
 import { Button, Divider, Form, Input, Message } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -156,7 +156,7 @@ const GeminiModalContent: React.FC = () => {
       {messageContext}
 
       {/* Content Area */}
-      <AionScrollArea className='flex-1 min-h-0' disableOverflow={isPageMode}>
+      <WaylandScrollArea className='flex-1 min-h-0' disableOverflow={isPageMode}>
         <div className='space-y-16px'>
           <div className='px-[12px] py-[24px] md:px-[32px] bg-2 rd-12px md:rd-16px border border-border-2'>
             <Form
@@ -261,7 +261,7 @@ const GeminiModalContent: React.FC = () => {
             </Form>
           </div>
         </div>
-      </AionScrollArea>
+      </WaylandScrollArea>
     </div>
   );
 };

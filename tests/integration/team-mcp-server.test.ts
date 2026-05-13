@@ -804,7 +804,7 @@ describe('TeamMcpServer — TCP tool interface', () => {
   describe('getStdioConfig', () => {
     it('returns valid stdio config with port and token', () => {
       const config = server.getStdioConfig();
-      expect(config.name).toContain('aionui-team-');
+      expect(config.name).toContain('wayland-team-');
       expect(config.command).toBe('node');
       expect(config.args).toHaveLength(1);
       expect(config.env).toContainEqual(expect.objectContaining({ name: 'TEAM_MCP_PORT', value: String(port) }));

@@ -80,7 +80,7 @@ export class TeamGuideMcpServer {
   getStdioConfig(): StdioMcpConfig {
     const scriptPath = path.join(resolveMcpScriptDir(), 'team-guide-mcp-stdio.js');
     return {
-      name: 'aionui-team-guide',
+      name: 'wayland-team-guide',
       command: 'node',
       args: [scriptPath],
       env: [
@@ -223,7 +223,7 @@ export class TeamGuideMcpServer {
       ipcBridge.conversation.listChanged.emit({
         conversationId: callerConversationId,
         action: 'updated',
-        source: 'aionui',
+        source: 'wayland',
       });
     }
 

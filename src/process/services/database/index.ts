@@ -104,10 +104,10 @@ const extractSearchPreviewText = (rawContent: string): string => {
 };
 
 /**
- * Main database class for AionUi
+ * Main database class for Wayland
  * Uses a pluggable ISqliteDriver for SQLite operations
  */
-export class AionUIDatabase {
+export class WaylandUIDatabase {
   private db: ISqliteDriver;
   private readonly defaultUserId = 'system_default_user';
   private readonly systemPasswordPlaceholder = '';
@@ -117,10 +117,10 @@ export class AionUIDatabase {
   }
 
   /**
-   * Create a new AionUIDatabase instance with corruption recovery.
+   * Create a new WaylandUIDatabase instance with corruption recovery.
    * This is the only way to obtain an instance — the constructor is private.
    */
-  static async create(dbPath: string): Promise<AionUIDatabase> {
+  static async create(dbPath: string): Promise<WaylandUIDatabase> {
     const dir = path.dirname(dbPath);
     ensureDirectory(dir);
 
@@ -129,7 +129,7 @@ export class AionUIDatabase {
     try {
       const driver = await createDriver(dbPath);
       failedDriver = driver;
-      const instance = new AionUIDatabase(driver);
+      const instance = new WaylandUIDatabase(driver);
       instance.initialize();
       return instance;
     } catch (error) {
@@ -198,7 +198,7 @@ export class AionUIDatabase {
 
     // Retry with fresh file
     const driver = await createDriver(dbPath);
-    const instance = new AionUIDatabase(driver);
+    const instance = new WaylandUIDatabase(driver);
     instance.initialize();
     return instance;
   }
@@ -269,7 +269,7 @@ export class AionUIDatabase {
   }
   /**
    * Expose the underlying SQLite driver for repositories that need raw SQL access.
-   * Prefer using dedicated methods on AionUIDatabase where possible.
+   * Prefer using dedicated methods on WaylandUIDatabase where possible.
    */
   getDriver(): ISqliteDriver {
     return this.db;
@@ -1681,17 +1681,17 @@ export class AionUIDatabase {
 }
 
 // Async singleton with Promise cache
-let dbInstancePromise: Promise<AionUIDatabase> | null = null;
+let dbInstancePromise: Promise<WaylandUIDatabase> | null = null;
 // Synchronous reference to the resolved instance — used for safe close on exit
-let dbResolved: AionUIDatabase | null = null;
+let dbResolved: WaylandUIDatabase | null = null;
 
 function resolveDbPath(): string {
-  return path.join(getDataPath(), 'aionui.db');
+  return path.join(getDataPath(), 'wayland.db');
 }
 
-export function getDatabase(): Promise<AionUIDatabase> {
+export function getDatabase(): Promise<WaylandUIDatabase> {
   if (!dbInstancePromise) {
-    dbInstancePromise = AionUIDatabase.create(resolveDbPath()).then((db) => {
+    dbInstancePromise = WaylandUIDatabase.create(resolveDbPath()).then((db) => {
       dbResolved = db;
       return db;
     });

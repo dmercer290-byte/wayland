@@ -110,7 +110,7 @@ export class TeamMcpServer {
     }
 
     return {
-      name: `aionui-team-${this.params.teamId}`,
+      name: `wayland-team-${this.params.teamId}`,
       command: 'node',
       args: [scriptPath],
       env,

@@ -8,7 +8,7 @@ import fs from 'fs';
 
 let mockStartFn = vi.fn();
 
-const TEST_DATA_DIR = path.join(os.tmpdir(), 'aionui-test-weixin');
+const TEST_DATA_DIR = path.join(os.tmpdir(), 'wayland-test-weixin');
 
 async function loadPluginClass() {
   vi.resetModules();
@@ -65,13 +65,13 @@ describe('Weixin channel send protocol', () => {
   it('extracts valid protocol blocks and keeps invalid blocks visible', () => {
     const parsed = extractChannelSendProtocol(`Done
 
-[AIONUI_CHANNEL_SEND]
+[WAYLAND_CHANNEL_SEND]
 {"type":"image","path":"./chart.png","caption":"Chart"}
-[/AIONUI_CHANNEL_SEND]
+[/WAYLAND_CHANNEL_SEND]
 
-[AIONUI_CHANNEL_SEND]
+[WAYLAND_CHANNEL_SEND]
 not-json
-[/AIONUI_CHANNEL_SEND]`);
+[/WAYLAND_CHANNEL_SEND]`);
 
     expect(parsed.visibleText).toContain('Done');
     expect(parsed.visibleText).toContain('not-json');

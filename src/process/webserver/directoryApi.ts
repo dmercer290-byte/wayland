@@ -209,7 +209,7 @@ router.get('/browse', fileOperationLimiter, (req, res) => {
       });
     }
 
-    // 默认打开 AionUi 运行目录，而不是用户 home 目录
+    // 默认打开 Wayland 运行目录，而不是用户 home 目录
     const rawPath = queryPath || process.cwd();
 
     // Validate path to prevent directory traversal / 验证路径以防止目录遍历
@@ -388,7 +388,7 @@ router.get('/shortcuts', fileOperationLimiter, (_req, res) => {
   try {
     const shortcuts = [
       {
-        name: 'AionUi Directory',
+        name: 'Wayland Directory',
         path: process.cwd(),
         icon: '🤖',
       },

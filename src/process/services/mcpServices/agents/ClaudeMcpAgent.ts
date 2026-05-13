@@ -223,8 +223,8 @@ export class ClaudeMcpAgent extends AbstractMcpAgent {
     const removeOperation = async () => {
       try {
         // 使用Claude CLI命令删除MCP服务器（尝试不同作用域）
-        // 按顺序尝试: user (AionUi默认) -> local -> project
-        // user scope优先，因为AionUi安装时使用user scope
+        // 按顺序尝试: user (Wayland默认) -> local -> project
+        // user scope优先，因为Wayland安装时使用user scope
         const scopes = ['user', 'local', 'project'] as const;
         const candidateNames = Array.from(
           new Set(

@@ -2,7 +2,7 @@
 
 > 日期：2026-03-31 (初版) · 2026-03-31 (更新: Bug #4/#5 已修复)
 > 关联：[security-model.md](security-model.md) · [architecture.md](architecture.md)
-> PR：[#1991](https://github.com/iOfficeAI/AionUi/pull/1991)
+> PR：[#1991](https://github.com/TradeCanyon/Wayland/pull/1991)
 
 ## 1. 进程模型总览
 

@@ -23,7 +23,7 @@ vi.mock('@office-ai/aioncli-core', () => ({
 vi.mock('../../../src/common/platform', () => ({
   getPlatformServices: () => ({
     paths: {
-      getDataDir: () => '/tmp/aionui-data',
+      getDataDir: () => '/tmp/wayland-data',
     },
   }),
 }));
@@ -51,7 +51,7 @@ describe('ConversationToolConfig', () => {
       useModel: 'gemini-2.5-flash',
     });
 
-    const expectedDir = path.join('/tmp/aionui-data', 'runtime', 'gemini-websearch');
+    const expectedDir = path.join('/tmp/wayland-data', 'runtime', 'gemini-websearch');
 
     expect(result.options['cwd']).toBe(expectedDir);
     expect(result.options['targetDir']).toBe(expectedDir);

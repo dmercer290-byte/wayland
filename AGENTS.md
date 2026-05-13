@@ -1,4 +1,4 @@
-# AionUi - Project Guide
+# Wayland - Project Guide
 
 All contributors (human and AI) must follow [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. ([Chinese version](CONTRIBUTING.zh.md))
 
@@ -125,7 +125,7 @@ Detailed rules and guidelines are organized into Skills for better modularity:
 
 本仓库运行 PR 自动化 agent，定期处理 open PR（review、fix、合并）。
 
-- **运行方式**：`scripts/pr-automation.sh` 作为 daemon 持续运行，每轮间隔 30 秒；日志默认写入 `~/Library/Logs/AionUi/`，可通过 `LOG_DIR=...` 覆盖
+- **运行方式**：`scripts/pr-automation.sh` 作为 daemon 持续运行，每轮间隔 30 秒；日志默认写入 `~/Library/Logs/Wayland/`，可通过 `LOG_DIR=...` 覆盖
 - **状态追踪**：通过 `bot:*` label（`bot:reviewing`、`bot:fixing`、`bot:ready-to-fix`、`bot:ci-waiting`、`bot:needs-human-review`、`bot:ready-to-merge`、`bot:done`）
 - **详细说明**：[docs/contributing/pr-automation.md](docs/contributing/pr-automation.md)
 

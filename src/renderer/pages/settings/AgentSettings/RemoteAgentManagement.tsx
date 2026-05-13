@@ -22,7 +22,7 @@ import {
   Tag,
   Typography,
 } from '@arco-design/web-react';
-import AionModal from '@/renderer/components/base/AionModal';
+import WaylandModal from '@/renderer/components/base/WaylandModal';
 import { Attention, Edit, Plus, ReduceOne, Robot, Speed } from '@icon-park/react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -32,7 +32,7 @@ const FormItem = Form.Item;
 
 const PAIRING_POLL_INTERVAL = 5_000;
 const PAIRING_TIMEOUT = 5 * 60 * 1000;
-const REMOTE_AGENT_GUIDE_URL = 'https://github.com/iOfficeAI/AionUi/wiki/Remote-Agent-Guide-Chinese';
+const REMOTE_AGENT_GUIDE_URL = 'https://github.com/TradeCanyon/Wayland/wiki/Remote-Agent-Guide-Chinese';
 
 type PairingState = 'idle' | 'handshaking' | 'pending' | 'timeout';
 
@@ -216,7 +216,7 @@ const RemoteAgentFormModal: React.FC<{
   // Render pairing waiting UI
   if (pairingState === 'pending' || pairingState === 'timeout') {
     return (
-      <AionModal
+      <WaylandModal
         visible={visible}
         onCancel={handleCancelPairing}
         header={{
@@ -259,12 +259,12 @@ const RemoteAgentFormModal: React.FC<{
             </>
           )}
         </div>
-      </AionModal>
+      </WaylandModal>
     );
   }
 
   return (
-    <AionModal
+    <WaylandModal
       visible={visible}
       onCancel={onClose}
       header={{
@@ -402,7 +402,7 @@ const RemoteAgentFormModal: React.FC<{
           </Button>
         </Form>
       </div>
-    </AionModal>
+    </WaylandModal>
   );
 };
 

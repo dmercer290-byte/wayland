@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-当前 AionUi 的 Agent 体系全部基于**本地 CLI 进程**：通过 `ForkTask` 派生子进程，使用 ACP JSON-RPC 协议（stdin/stdout）通信。唯一的"远程"形态是 OpenClaw Gateway（WebSocket），但它也依赖本地 CLI 启动或本地网关配置。
+当前 Wayland 的 Agent 体系全部基于**本地 CLI 进程**：通过 `ForkTask` 派生子进程，使用 ACP JSON-RPC 协议（stdin/stdout）通信。唯一的"远程"形态是 OpenClaw Gateway（WebSocket），但它也依赖本地 CLI 启动或本地网关配置。
 
 现在需要支持用户添加**纯远程 Agent**——通过 URL 连接到远端 ACP 兼容服务，无需本地安装任何 CLI。
 

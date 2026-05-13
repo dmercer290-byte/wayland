@@ -69,7 +69,7 @@ describe('getNpxCacheDir', () => {
 
   it('returns ~/.npm-cache/_npx on POSIX when the newer cache dir exists', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' });
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'aionui-home-'));
+    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'wayland-home-'));
     mkdirSync(path.join(tempHome, '.npm-cache'), { recursive: true });
 
     try {
@@ -99,7 +99,7 @@ describe('getNpxCacheDir', () => {
 
   it('falls back to ~/.npm/_npx on POSIX when only the legacy .npm cache exists', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' });
-    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'aionui-home-'));
+    const tempHome = mkdtempSync(path.join(os.tmpdir(), 'wayland-home-'));
     mkdirSync(path.join(tempHome, '.npm'), { recursive: true });
 
     try {

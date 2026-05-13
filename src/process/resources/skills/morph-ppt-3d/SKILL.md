@@ -14,10 +14,10 @@ This file covers **3D-specific additions** and an **enriched design system** com
 
 If `officecli` is missing:
 
-- **macOS / Linux**: `curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash`
-- **Windows (PowerShell)**: `irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex`
+- **macOS / Linux**: `curl -fsSL https://raw.githubusercontent.com/TradeCanyon/OfficeCLI/main/install.sh | bash`
+- **Windows (PowerShell)**: `irm https://raw.githubusercontent.com/TradeCanyon/OfficeCLI/main/install.ps1 | iex`
 
-Verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If install fails, download a binary from https://github.com/iOfficeAI/OfficeCLI/releases.
+Verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If install fails, download a binary from https://github.com/TradeCanyon/OfficeCLI/releases.
 
 ## Use when
 

@@ -8,7 +8,7 @@ import { isCodexAutoApproveMode } from '@/common/types/codex/codexModes';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { transformMessage } from '@/common/chat/chatLib';
 import type { IConfigStorageRefer } from '@/common/config/storage';
-import { AIONUI_FILES_MARKER } from '@/common/config/constants';
+import { WAYLAND_FILES_MARKER } from '@/common/config/constants';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import { parseError, uuid } from '@/common/utils';
 import type {
@@ -798,9 +798,9 @@ ${collectedResponses.join('\n')}`;
         return;
       }
 
-      // Auto-approve team MCP tools — internal tools provided by AionUi.
+      // Auto-approve team MCP tools — internal tools provided by Wayland.
       const toolTitle = toolCall.title || '';
-      if (toolTitle.includes('aionui-team') && options.length > 0) {
+      if (toolTitle.includes('wayland-team') && options.length > 0) {
         const autoOption = options[0];
         setTimeout(() => {
           void this.confirm(v.msg_id, toolCall.toolCallId || v.msg_id, autoOption);
@@ -824,7 +824,7 @@ ${collectedResponses.join('\n')}`;
         type: 'error',
         conversation_id: this.conversation_id,
         msg_id: v.msg_id,
-        data: 'Permission required. Please open AionUi and confirm the pending request in the conversation panel.',
+        data: 'Permission required. Please open Wayland and confirm the pending request in the conversation panel.',
       });
       return;
     }
@@ -1009,8 +1009,8 @@ ${collectedResponses.join('\n')}`;
 
       if (data.msg_id && data.content) {
         let contentToSend = data.content;
-        if (contentToSend.includes(AIONUI_FILES_MARKER)) {
-          contentToSend = contentToSend.split(AIONUI_FILES_MARKER)[0].trimEnd();
+        if (contentToSend.includes(WAYLAND_FILES_MARKER)) {
+          contentToSend = contentToSend.split(WAYLAND_FILES_MARKER)[0].trimEnd();
         }
 
         // 首条消息时注入预设规则和 skills

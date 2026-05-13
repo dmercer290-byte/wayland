@@ -326,7 +326,7 @@ const GuidPage: React.FC = () => {
     const isImageAvatar = Boolean(
       avatarImage &&
       (/\.(svg|png|jpe?g|webp|gif)$/i.test(avatarImage) ||
-        /^(https?:|aion-asset:\/\/|file:\/\/|data:)/i.test(avatarImage))
+        /^(https?:|wayland-asset:\/\/|file:\/\/|data:)/i.test(avatarImage))
     );
     if (isImageAvatar && avatarImage) {
       return { kind: 'image' as const, value: avatarImage };

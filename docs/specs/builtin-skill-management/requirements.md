@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-AionUi 支持 skill 系统，agent 可以加载 skill（以 SKILL.md 文件存储的指令）来扩展能力。Skill 分为三类：
+Wayland 支持 skill 系统，agent 可以加载 skill（以 SKILL.md 文件存储的指令）来扩展能力。Skill 分为三类：
 
 - **内置自动注入 skill**（`_builtin/` 目录）：每个会话自动加载（如 `cron`、`office-cli`）
 - **捆绑 skill**：随应用发布，用户可在助手预设中选择启用

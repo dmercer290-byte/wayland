@@ -1,8 +1,8 @@
 # Sandbox 修复与 Lifecycle 进程隔离 — 实现方案
 
 > 日期：2026-03-31 (问题 1-3) · 2026-04-01 (问题 4)
-> PR：[#1991](https://github.com/iOfficeAI/AionUi/pull/1991) (问题 1-3)
-> Issue：[#1990](https://github.com/iOfficeAI/AionUi/issues/1990)
+> PR：[#1991](https://github.com/TradeCanyon/Wayland/pull/1991) (问题 1-3)
+> Issue：[#1990](https://github.com/TradeCanyon/Wayland/issues/1990)
 > 关联：[research/sandbox-architecture.md](research/sandbox-architecture.md) · [research/security-model.md](research/security-model.md)
 
 ## 概述
@@ -85,7 +85,7 @@ case 'api-call': {
 
 #### 3. ExtensionStorage 作为 storage 后端
 
-JSON 文件 KV 存储，每个扩展一个文件 `~/.aionui/extension-storage/{name}.json`：
+JSON 文件 KV 存储，每个扩展一个文件 `~/.wayland/extension-storage/{name}.json`：
 
 ```typescript
 // ExtensionStorage.ts

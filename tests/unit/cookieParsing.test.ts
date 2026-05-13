@@ -27,27 +27,27 @@ describe('extractWebSocketToken – cookie parsing with special characters', () 
   }
 
   it('extracts token from a normal cookie', () => {
-    const req = fakeReq({ cookie: 'aionui-session=mytoken123' });
+    const req = fakeReq({ cookie: 'wayland-session=mytoken123' });
     expect(TokenMiddleware.extractWebSocketToken(req)).toBe('mytoken123');
   });
 
   it('extracts token when cookie value contains = characters', () => {
-    const req = fakeReq({ cookie: 'other=a=b=c; aionui-session=tok=en' });
+    const req = fakeReq({ cookie: 'other=a=b=c; wayland-session=tok=en' });
     expect(TokenMiddleware.extractWebSocketToken(req)).toBe('tok=en');
   });
 
   it('extracts token when other cookies contain malformed % sequences', () => {
-    const req = fakeReq({ cookie: 'bad=test%XY; aionui-session=goodtoken' });
+    const req = fakeReq({ cookie: 'bad=test%XY; wayland-session=goodtoken' });
     expect(TokenMiddleware.extractWebSocketToken(req)).toBe('goodtoken');
   });
 
   it('extracts token when cookie value is a bare % character', () => {
-    const req = fakeReq({ cookie: 'noise=%; aionui-session=valid' });
+    const req = fakeReq({ cookie: 'noise=%; wayland-session=valid' });
     expect(TokenMiddleware.extractWebSocketToken(req)).toBe('valid');
   });
 
   it('handles token value that itself contains %', () => {
-    const req = fakeReq({ cookie: 'aionui-session=token%25with%25percent' });
+    const req = fakeReq({ cookie: 'wayland-session=token%25with%25percent' });
     expect(TokenMiddleware.extractWebSocketToken(req)).toBe('token%with%percent');
   });
 
@@ -64,7 +64,7 @@ describe('extractWebSocketToken – cookie parsing with special characters', () 
   it('prefers Authorization header over cookie', () => {
     const req = fakeReq({
       authorization: 'Bearer headertoken',
-      cookie: 'aionui-session=cookietoken',
+      cookie: 'wayland-session=cookietoken',
     });
     expect(TokenMiddleware.extractWebSocketToken(req)).toBe('headertoken');
   });

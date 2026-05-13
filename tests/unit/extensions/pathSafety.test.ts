@@ -15,7 +15,7 @@ describe('extensions/pathSafety', () => {
   let root = '';
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aionui-path-safety-'));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wayland-path-safety-'));
     root = path.join(tempDir, 'safe-root');
     await fs.mkdir(root, { recursive: true });
   });

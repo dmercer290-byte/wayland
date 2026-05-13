@@ -153,7 +153,7 @@ export async function prepareCleanEnv(): Promise<Record<string, string | undefin
   delete merged.NODE_INSPECT;
   delete merged.NODE_DEBUG;
   // Remove CLAUDECODE env var to prevent claude-agent-sdk from detecting
-  // a nested session when AionUi itself is launched from Claude Code.
+  // a nested session when Wayland itself is launched from Claude Code.
   delete merged.CLAUDECODE;
   // Strip npm lifecycle vars inherited from parent `npm start` process.
   // These (npm_config_*, npm_lifecycle_*, npm_package_*) can cause npx to

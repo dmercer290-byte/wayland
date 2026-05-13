@@ -1,7 +1,7 @@
 # Extension 系统深度调研
 
 > 日期：2026-03-30 (初版) · 2026-03-31 (更新: 沙箱 bug 修复)
-> 目的：深度调研 AionUI Extension 系统现状，为 Agent Hub / Assistant Hub / MCP Hub / Skill Hub 等市场化建设提供基础
+> 目的：深度调研 Wayland Extension 系统现状，为 Agent Hub / Assistant Hub / MCP Hub / Skill Hub 等市场化建设提供基础
 
 ## 文档索引
 
@@ -65,7 +65,7 @@ contributes.acpAdapters 非空 → 出现在 Agent Hub
 
 ## Extension 系统概览
 
-Extension 系统是 AionUI 的插件化基础设施，允许第三方通过声明式 manifest (`aion-extension.json`) 向 AionUI 贡献多种能力类型。系统横跨 Electron 主进程、渲染进程和 Worker Thread 三层。
+Extension 系统是 Wayland 的插件化基础设施，允许第三方通过声明式 manifest (`aion-extension.json`) 向 Wayland 贡献多种能力类型。系统横跨 Electron 主进程、渲染进程和 Worker Thread 三层。
 
 ### Manifest 结构 (`aion-extension.json`)
 
@@ -76,7 +76,7 @@ aion-extension.json
 ├── version       (semver)
 ├── description?, author?, icon?, homepage?
 ├── apiVersion?   (^semver, API 兼容性声明)
-├── engine?       { aionui: "^x.y.z" }
+├── engine?       { wayland: "^x.y.z" }
 ├── dependencies? { extName: "^x.y.z" }
 ├── i18n?         { localesDir, defaultLocale }
 ├── lifecycle?    { onInstall, onActivate, onDeactivate, onUninstall }
@@ -105,12 +105,12 @@ aion-extension.json
 | `src/process/extensions/resolvers/utils/*.ts` | 5 个              | 依赖解析、引擎校验、环境变量、文件引用、入口点           |
 | `src/process/extensions/lifecycle/*.ts`       | 4 个              | 生命周期钩子、事件总线、状态持久化、热重载               |
 | `src/process/extensions/sandbox/*.ts`         | 5 个              | Worker 沙箱、权限分析、路径安全、扩展存储                |
-| `src/process/extensions/protocol/*.ts`        | 2 个              | aion-asset:// 协议、iframe UI 通信桥                     |
+| `src/process/extensions/protocol/*.ts`        | 2 个              | wayland-asset:// 协议、iframe UI 通信桥                     |
 | `src/process/bridge/extensionsBridge.ts`      | 265               | IPC Bridge, 16 个通道                                    |
 | `src/common/adapter/ipcBridge.ts`             | ~120 行(ext 部分) | IPC 类型定义                                             |
 
 ### 成熟度结论
 
 - Extension 系统的核心架构（Loader → Registry → Resolvers → Lifecycle → IPC）已经 production-ready。
-- Worker Thread 沙箱的消息路由已修复（PR [#1991](https://github.com/iOfficeAI/AionUi/pull/1991)：Worker→Host RPC、事件转发、storage API），但 `createSandbox()` 尚未被实际调用（ChannelPlugin 和 Lifecycle hooks 仍在主进程裸跑，待迁移）。
+- Worker Thread 沙箱的消息路由已修复（PR [#1991](https://github.com/TradeCanyon/Wayland/pull/1991)：Worker→Host RPC、事件转发、storage API），但 `createSandbox()` 尚未被实际调用（ChannelPlugin 和 Lifecycle hooks 仍在主进程裸跑，待迁移）。
 - 市场化所需的**分发链路**（远程安装、包格式、签名验证、市场 Registry）和**安全执行**（权限强制、沙箱隔离接入）是两个需要从零建设的方向。

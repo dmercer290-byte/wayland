@@ -15,7 +15,7 @@ describe('extensions/fileResolver', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    extensionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aionui-ext-file-resolver-'));
+    extensionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wayland-ext-file-resolver-'));
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
 
@@ -70,7 +70,7 @@ describe('extensions/fileResolver', () => {
   });
 
   it('应阻止通过符号链接读取扩展目录外的文件', async () => {
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aionui-ext-outside-'));
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wayland-ext-outside-'));
     const outsideFile = path.join(outsideDir, 'secret.txt');
     const symlinkDir = path.join(extensionDir, 'linked');
 

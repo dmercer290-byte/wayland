@@ -12,7 +12,7 @@ import { isPathWithinDirectory } from '../sandbox/pathSafety';
 import { resolveRuntimeEntryPath } from './utils/entryPointResolver';
 import { toAssetUrl } from '../protocol/assetProtocol';
 
-const DEBUG_ENABLED = process.env.AIONUI_EXTENSION_DEBUG === '1' || process.env.AIONUI_EXTENSION_DEBUG === 'true';
+const DEBUG_ENABLED = process.env.WAYLAND_EXTENSION_DEBUG === '1' || process.env.WAYLAND_EXTENSION_DEBUG === 'true';
 
 function logSecurity(message: string): void {
   if (DEBUG_ENABLED) {
@@ -196,9 +196,9 @@ export function resolveChannelPlugins(extensions: LoadedExtension[]): Map<string
           ? (PluginClass as typeof BasePlugin)
           : createDuckTypedWrapper(plugin.type, PluginClass as new (config?: unknown) => LegacyExternalPlugin);
 
-        // Resolve icon path to absolute URL (aion-asset://) for frontend
+        // Resolve icon path to absolute URL (wayland-asset://) for frontend
         let iconUrl = plugin.icon;
-        if (plugin.icon && !plugin.icon.match(/^(https?:|data:|aion-asset:|file:)/)) {
+        if (plugin.icon && !plugin.icon.match(/^(https?:|data:|wayland-asset:|file:)/)) {
           const absPath = path.resolve(ext.directory, plugin.icon);
           iconUrl = toAssetUrl(absPath);
         }

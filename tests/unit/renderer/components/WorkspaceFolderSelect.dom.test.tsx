@@ -70,7 +70,7 @@ describe('WorkspaceFolderSelect', () => {
 
   it('opens upward and becomes scrollable when space below is limited', () => {
     localStorage.setItem(
-      'aionui:recent-workspaces',
+      'wayland:recent-workspaces',
       JSON.stringify(['/tmp/a', '/tmp/b', '/tmp/c', '/tmp/d', '/tmp/e'])
     );
 
@@ -105,7 +105,7 @@ describe('WorkspaceFolderSelect', () => {
   });
 
   it('opens downward when there is enough space below the trigger', () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/tmp/a']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/tmp/a']));
 
     render(
       <WorkspaceFolderSelect
@@ -230,12 +230,12 @@ describe('WorkspaceFolderSelect - browse interactions', () => {
     );
     fireEvent.click(screen.getByTestId('ws-trigger'));
     await waitFor(() => expect(mockShowOpen).toHaveBeenCalled());
-    const stored = JSON.parse(localStorage.getItem('aionui:recent-workspaces') ?? '[]');
+    const stored = JSON.parse(localStorage.getItem('wayland:recent-workspaces') ?? '[]');
     expect(stored).toContain('/chosen/path');
   });
 
   it('opens browse picker via the "choose different" button inside the menu', async () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/old']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/old']));
     mockShowOpen.mockResolvedValue(['/new/path']);
     const onChange = vi.fn();
     render(
@@ -256,7 +256,7 @@ describe('WorkspaceFolderSelect - browse interactions', () => {
   });
 
   it('selects a recent workspace and closes the menu', () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/tmp/project-a', '/tmp/project-b']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/tmp/project-a', '/tmp/project-b']));
     const onChange = vi.fn();
     render(
       <WorkspaceFolderSelect
@@ -277,7 +277,7 @@ describe('WorkspaceFolderSelect - browse interactions', () => {
   });
 
   it('highlights the selected recent workspace and shows a check icon', () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/tmp/selected', '/tmp/other']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/tmp/selected', '/tmp/other']));
     render(
       <WorkspaceFolderSelect
         value='/tmp/selected'
@@ -294,7 +294,7 @@ describe('WorkspaceFolderSelect - browse interactions', () => {
   });
 
   it('handles corrupted localStorage data gracefully', () => {
-    localStorage.setItem('aionui:recent-workspaces', 'not-valid-json{');
+    localStorage.setItem('wayland:recent-workspaces', 'not-valid-json{');
     render(
       <WorkspaceFolderSelect
         value=''
@@ -360,7 +360,7 @@ describe('WorkspaceFolderSelect - outside click', () => {
   });
 
   it('closes the dropdown when clicking outside', () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/tmp/ws']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/tmp/ws']));
     render(
       <WorkspaceFolderSelect
         value=''

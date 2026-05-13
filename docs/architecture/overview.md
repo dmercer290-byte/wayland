@@ -2,7 +2,7 @@
 
 ## Multi-Process Model
 
-AionUi is an Electron app with three types of processes:
+Wayland is an Electron app with three types of processes:
 
 - **Main Process** (`src/process/`, `src/index.ts`) — application logic, database, IPC handling. No DOM APIs available.
 - **Renderer Process** (`src/renderer/`) — React UI. No Node.js APIs available.
@@ -26,7 +26,7 @@ Located in `src/process/webserver/`.
 
 ## Run Modes
 
-AionUi can run in four modes. The WebSocket channel is the browser-side equivalent of
+Wayland can run in four modes. The WebSocket channel is the browser-side equivalent of
 Electron IPC — both transports reach the same bridge handlers and services.
 
 ```

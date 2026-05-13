@@ -6,7 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import type { IMessageSearchItem } from '@/common/types/database';
-import AionModal from '@/renderer/components/base/AionModal';
+import WaylandModal from '@/renderer/components/base/WaylandModal';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { useOptionalConversationTabs } from '@/renderer/pages/conversation/hooks/ConversationTabsContext';
 import { getAgentLogo } from '@/renderer/utils/model/agentLogo';
@@ -495,7 +495,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
         </button>
       )}
 
-      <AionModal
+      <WaylandModal
         visible={visible}
         onCancel={handleClose}
         footer={null}
@@ -570,7 +570,7 @@ const ConversationSearchPopover: React.FC<ConversationSearchPopoverProps> = ({
 
           <div className='flex-1 min-h-0'>{resultContent}</div>
         </div>
-      </AionModal>
+      </WaylandModal>
     </>
   );
 };

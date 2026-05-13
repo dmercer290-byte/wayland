@@ -93,7 +93,7 @@ function makeExtInfo(name: string, bundled = false) {
     description: 'test',
     author: 'test',
     dist: { tarball: `extensions/${name}.zip`, integrity: 'sha512-abc', unpackedSize: 100 },
-    engines: { aionui: '>=1.0.0' },
+    engines: { wayland: '>=1.0.0' },
     hubs: ['acpAdapters'],
     bundled,
   };

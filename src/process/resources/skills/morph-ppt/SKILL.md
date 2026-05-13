@@ -13,10 +13,10 @@ When the pptx base rules cover it, the text here says `→ see pptx v2 §X`. Rea
 
 If `officecli` is missing:
 
-- **macOS / Linux**: `curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash`
-- **Windows (PowerShell)**: `irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex`
+- **macOS / Linux**: `curl -fsSL https://raw.githubusercontent.com/TradeCanyon/OfficeCLI/main/install.sh | bash`
+- **Windows (PowerShell)**: `irm https://raw.githubusercontent.com/TradeCanyon/OfficeCLI/main/install.ps1 | iex`
 
-Verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If install fails, download a binary from https://github.com/iOfficeAI/OfficeCLI/releases.
+Verify with `officecli --version` (open a new terminal if PATH hasn't picked up). If install fails, download a binary from https://github.com/TradeCanyon/OfficeCLI/releases.
 
 ## ⚠️ Help-First Rule
 
@@ -526,7 +526,7 @@ Every morph deck ships with three artifacts, each as a standalone file:
 **Pre-deliver reminder to the user (verbatim-safe wording):**
 
 - "The deck is ready with morph transitions. Open it in PowerPoint 365 / Keynote / WPS to see the motion — LibreOffice and web viewers render static."
-- "While the build script is running, the `.pptx` may be rewritten several times. If you want to preview progress, use `officecli watch "$FILE"` and open the live preview in AionUi — do NOT click 'Open with system app' during the build, or you'll hit a file lock."
+- "While the build script is running, the `.pptx` may be rewritten several times. If you want to preview progress, use `officecli watch "$FILE"` and open the live preview in Wayland — do NOT click 'Open with system app' during the build, or you'll hit a file lock."
 
 ## Adjustments after creation
 

@@ -30,21 +30,21 @@ export function getElectronConfigCandidatePaths(): string[] {
   const home = os.homedir();
   if (process.platform === 'darwin') {
     return [
-      path.join(home, '.aionui-config', 'aionui-config.txt'),
-      path.join(home, '.aionui-config-dev', 'aionui-config.txt'),
+      path.join(home, '.wayland-config', 'wayland-config.txt'),
+      path.join(home, '.wayland-config-dev', 'wayland-config.txt'),
     ];
   }
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
     return [
-      path.join(appData, 'AionUi', 'config', 'aionui-config.txt'),
-      path.join(appData, 'AionUi-Dev', 'config', 'aionui-config.txt'),
+      path.join(appData, 'Wayland', 'config', 'wayland-config.txt'),
+      path.join(appData, 'Wayland-Dev', 'config', 'wayland-config.txt'),
     ];
   }
   // Linux and other platforms
   return [
-    path.join(home, '.config', 'AionUi', 'config', 'aionui-config.txt'),
-    path.join(home, '.config', 'AionUi-Dev', 'config', 'aionui-config.txt'),
+    path.join(home, '.config', 'Wayland', 'config', 'wayland-config.txt'),
+    path.join(home, '.config', 'Wayland-Dev', 'config', 'wayland-config.txt'),
   ];
 }
 
@@ -91,7 +91,7 @@ export async function migrateFromElectronConfig(configStore: ConfigStore): Promi
     // Decode — if result is empty, the file is missing/corrupted; do NOT set flag
     const sourceData = decodeConfigFile(sourcePath);
     if (Object.keys(sourceData).length === 0) {
-      console.warn('[AionUi] Config migration: source file appears empty or corrupted, will retry next startup');
+      console.warn('[Wayland] Config migration: source file appears empty or corrupted, will retry next startup');
       return;
     }
 
@@ -116,16 +116,16 @@ export async function migrateFromElectronConfig(configStore: ConfigStore): Promi
     }
 
     await configStore.set('migration.electronConfigImported', true);
-    console.log('[AionUi] Config migrated from Electron desktop config:', sourcePath);
+    console.log('[Wayland] Config migrated from Electron desktop config:', sourcePath);
   } catch (error) {
-    console.warn('[AionUi] Config migration from Electron failed:', error);
+    console.warn('[Wayland] Config migration from Electron failed:', error);
   }
 }
 
 /**
  * Manual import: copy whitelisted keys from a specified config file into the
  * server config store. Runs on every startup when IMPORT_CONFIG_FROM is set.
- * @param sourcePath - absolute path to an aionui-config.txt file
+ * @param sourcePath - absolute path to an wayland-config.txt file
  * @param overwrite  - if true, overwrite existing keys; if false, skip them
  * @param configStore - injected config store (uses ProcessConfig in production)
  */
@@ -138,13 +138,13 @@ export async function importConfigFromFile(
     // Warn on relative paths and resolve them
     if (!path.isAbsolute(sourcePath)) {
       const resolved = path.resolve(process.cwd(), sourcePath);
-      console.warn('[AionUi] IMPORT_CONFIG_FROM: relative path provided, resolving to:', resolved);
+      console.warn('[Wayland] IMPORT_CONFIG_FROM: relative path provided, resolving to:', resolved);
       sourcePath = resolved;
     }
 
     const sourceData = decodeConfigFile(sourcePath);
     if (Object.keys(sourceData).length === 0) {
-      console.warn('[AionUi] IMPORT_CONFIG_FROM: file is missing, empty, or corrupted:', sourcePath);
+      console.warn('[Wayland] IMPORT_CONFIG_FROM: file is missing, empty, or corrupted:', sourcePath);
       return;
     }
 
@@ -169,8 +169,8 @@ export async function importConfigFromFile(
       await configStore.set(key, sourceValue as IConfigStorageRefer[typeof key]);
     }
 
-    console.log('[AionUi] Config imported from:', sourcePath, '(overwrite:', overwrite, ')');
+    console.log('[Wayland] Config imported from:', sourcePath, '(overwrite:', overwrite, ')');
   } catch (error) {
-    console.warn('[AionUi] IMPORT_CONFIG_FROM failed:', error);
+    console.warn('[Wayland] IMPORT_CONFIG_FROM failed:', error);
   }
 }

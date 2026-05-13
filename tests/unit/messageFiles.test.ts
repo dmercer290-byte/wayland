@@ -40,8 +40,8 @@ describe('buildDisplayMessage', () => {
     expect(result).toBe('hello');
   });
 
-  it('strips AIONUI timestamp separators from filenames while keeping prefix', () => {
-    const files = [`${workspace}/uploads/photo_aionui_1234567890123.jpg`];
+  it('strips WAYLAND timestamp separators from filenames while keeping prefix', () => {
+    const files = [`${workspace}/uploads/photo_wayland_1234567890123.jpg`];
     const result = buildDisplayMessage('hello', files, workspace);
     expect(result).toContain(`${workspace}/uploads/photo.jpg`);
   });

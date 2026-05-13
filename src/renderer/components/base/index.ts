@@ -5,7 +5,7 @@
  */
 
 /**
- * AionUi 基础组件库统一导出 / AionUi base components unified exports
+ * Wayland 基础组件库统一导出 / Wayland base components unified exports
  *
  * 提供所有基础组件和类型的统一导出入口
  * Provides unified export entry for all base components and types
@@ -13,29 +13,29 @@
 
 // ==================== 组件导出 / Component Exports ====================
 
-export { default as AionModal } from './AionModal';
-export { default as AionCollapse } from './AionCollapse';
-export { default as AionSelect } from './AionSelect';
-export { default as AionScrollArea } from './AionScrollArea';
-export { default as AionSteps } from './AionSteps';
+export { default as WaylandModal } from './WaylandModal';
+export { default as WaylandCollapse } from './WaylandCollapse';
+export { default as WaylandSelect } from './WaylandSelect';
+export { default as WaylandScrollArea } from './WaylandScrollArea';
+export { default as WaylandSteps } from './WaylandSteps';
 
 // ==================== 类型导出 / Type Exports ====================
 
-// AionModal 类型 / AionModal types
+// WaylandModal 类型 / WaylandModal types
 export type {
   ModalSize,
   ModalHeaderConfig,
   ModalFooterConfig,
   ModalContentStyleConfig,
-  AionModalProps,
-} from './AionModal';
-export { MODAL_SIZES } from './AionModal';
+  WaylandModalProps,
+} from './WaylandModal';
+export { MODAL_SIZES } from './WaylandModal';
 
-// AionCollapse 类型 / AionCollapse types
-export type { AionCollapseProps, AionCollapseItemProps } from './AionCollapse';
+// WaylandCollapse 类型 / WaylandCollapse types
+export type { WaylandCollapseProps, WaylandCollapseItemProps } from './WaylandCollapse';
 
-// AionSelect 类型 / AionSelect types
-export type { AionSelectProps } from './AionSelect';
+// WaylandSelect 类型 / WaylandSelect types
+export type { WaylandSelectProps } from './WaylandSelect';
 
-// AionSteps 类型 / AionSteps types
-export type { AionStepsProps } from './AionSteps';
+// WaylandSteps 类型 / WaylandSteps types
+export type { WaylandStepsProps } from './WaylandSteps';

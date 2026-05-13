@@ -129,7 +129,7 @@ describeOrSkip('ccSwitchModelSource', () => {
   });
 
   it('reads the current Claude provider from cc-switch files', () => {
-    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'aionui-cc-switch-'));
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'wayland-cc-switch-'));
     tempDirs.push(tempDir);
 
     const settingsPath = path.join(tempDir, 'settings.json');
@@ -177,7 +177,7 @@ describeOrSkip('ccSwitchModelSource', () => {
   });
 
   it('returns null when cc-switch files do not describe a Claude provider', () => {
-    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'aionui-cc-switch-'));
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'wayland-cc-switch-'));
     tempDirs.push(tempDir);
 
     const settingsPath = path.join(tempDir, 'settings.json');
@@ -202,7 +202,7 @@ describeOrSkip('ccSwitchModelSource', () => {
   });
 
   it('returns null when the settings file does not exist', () => {
-    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'aionui-cc-switch-'));
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'wayland-cc-switch-'));
     tempDirs.push(tempDir);
 
     expect(
@@ -214,7 +214,7 @@ describeOrSkip('ccSwitchModelSource', () => {
   });
 
   it('reads the current Claude provider env from cc-switch files', () => {
-    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'aionui-cc-switch-'));
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'wayland-cc-switch-'));
     tempDirs.push(tempDir);
 
     const settingsPath = path.join(tempDir, 'settings.json');

@@ -1,7 +1,7 @@
 # Remote Agent — 现有架构分析
 
 > 日期：2026-03-24
-> 目的：梳理 AionUi 现有 Agent 架构和代码风格，为远程 Agent 实现提供设计依据
+> 目的：梳理 Wayland 现有 Agent 架构和代码风格，为远程 Agent 实现提供设计依据
 
 ## 1. Agent 管理层
 

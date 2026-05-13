@@ -47,7 +47,7 @@ vi.mock('@process/channels/agent/ChannelEventBus', () => ({
 vi.mock('@process/services/database', () => ({
   getDatabase: vi.fn(async () => ({
     updateConversation: vi.fn(),
-    getConversation: vi.fn(() => ({ success: true, data: { extra: {}, source: 'aionui' } })),
+    getConversation: vi.fn(() => ({ success: true, data: { extra: {}, source: 'wayland' } })),
   })),
 }));
 

@@ -58,19 +58,19 @@ vi.mock('@arco-design/web-react', () => ({
   }) => <button onClick={onClick}>{children}</button>,
 }));
 
-import AionModal from '@/renderer/components/base/AionModal';
+import WaylandModal from '@/renderer/components/base/WaylandModal';
 
 const arcoOverrideCss = readFileSync(resolve(process.cwd(), 'src/renderer/styles/arco-override.css'), 'utf8');
 
-describe('AionModal', () => {
+describe('WaylandModal', () => {
   it('uses dialog fill as the default content background', () => {
     const { container } = render(
-      <AionModal visible onCancel={vi.fn()} header='Modal title'>
+      <WaylandModal visible onCancel={vi.fn()} header='Modal title'>
         content
-      </AionModal>
+      </WaylandModal>
     );
 
-    const body = container.querySelector('.aionui-modal-body-content');
+    const body = container.querySelector('.wayland-modal-body-content');
 
     expect(body).toBeTruthy();
     expect(body).toHaveStyle({ background: 'var(--dialog-fill-0)' });
@@ -78,12 +78,12 @@ describe('AionModal', () => {
 
   it('preserves an explicit content background override', () => {
     const { container } = render(
-      <AionModal visible onCancel={vi.fn()} header='Modal title' contentStyle={{ background: 'rgb(var(--primary-1))' }}>
+      <WaylandModal visible onCancel={vi.fn()} header='Modal title' contentStyle={{ background: 'rgb(var(--primary-1))' }}>
         content
-      </AionModal>
+      </WaylandModal>
     );
 
-    const body = container.querySelector('.aionui-modal-body-content');
+    const body = container.querySelector('.wayland-modal-body-content');
 
     expect(body).toBeTruthy();
     expect(body).toHaveStyle({ background: 'rgb(var(--primary-1))' });

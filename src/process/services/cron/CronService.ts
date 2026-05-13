@@ -39,7 +39,7 @@ export type CreateCronJobParams = {
 };
 
 /**
- * CronService - Core scheduling service for AionUI
+ * CronService - Core scheduling service for Wayland
  *
  * Manages scheduled tasks that send messages to conversations at specified times.
  * Handles conflicts when conversation is busy.
@@ -342,7 +342,7 @@ export class CronService {
             ipcBridge.conversation.listChanged.emit({
               conversationId: conv.id,
               action: 'deleted',
-              source: conv.source || 'aionui',
+              source: conv.source || 'wayland',
             });
           }
           if (childConversations.length > 0) {

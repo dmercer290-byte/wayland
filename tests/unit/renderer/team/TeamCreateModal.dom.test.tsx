@@ -98,7 +98,7 @@ vi.mock('@/common/config/storage', () => ({
   },
 }));
 
-vi.mock('@/renderer/components/base/AionModal', () => ({
+vi.mock('@/renderer/components/base/WaylandModal', () => ({
   default: ({
     children,
     visible,
@@ -213,7 +213,7 @@ describe('TeamCreateModal', () => {
   });
 
   it('uses brighter surface tokens for workspace picker', () => {
-    localStorage.setItem('aionui:recent-workspaces', JSON.stringify(['/tmp/workspace-one']));
+    localStorage.setItem('wayland:recent-workspaces', JSON.stringify(['/tmp/workspace-one']));
 
     render(<TeamCreateModal visible onClose={vi.fn()} onCreated={vi.fn()} />);
 

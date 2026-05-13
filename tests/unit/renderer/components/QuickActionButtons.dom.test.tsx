@@ -75,7 +75,7 @@ describe('QuickActionButtons', () => {
     );
 
     fireEvent.click(screen.getByText('conversation.welcome.quickActionStar').closest('div') as HTMLElement);
-    expect(onOpenLink).toHaveBeenCalledWith('https://github.com/iOfficeAI/AionUi');
+    expect(onOpenLink).toHaveBeenCalledWith('https://github.com/TradeCanyon/Wayland');
     expect(onOpenBugReport).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText(/settings\.webui/).closest('div') as HTMLElement);

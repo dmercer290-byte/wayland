@@ -15,13 +15,13 @@ import React from 'react';
  */
 type NativeSelectProps = Omit<SelectProps, 'size'>;
 type NativeSelectSize = NonNullable<SelectProps['size']>;
-type AionSelectSize = NativeSelectSize | 'middle';
+type WaylandSelectSize = NativeSelectSize | 'middle';
 
-export interface AionSelectProps extends NativeSelectProps {
+export interface WaylandSelectProps extends NativeSelectProps {
   /** 额外的类名 / Additional class name */
   className?: string;
   /** 统一尺寸，新增 middle（32px）/ Unified size with additional "middle" (32px) */
-  size?: AionSelectSize;
+  size?: WaylandSelectSize;
 }
 
 /**
@@ -75,42 +75,42 @@ const defaultGetPopupContainer = (): HTMLElement => {
  * @example
  * ```tsx
  * // 基本用法 / Basic usage
- * <AionSelect placeholder="请选择" style={{ width: 200 }}>
- *   <AionSelect.Option value="1">选项1</AionSelect.Option>
- *   <AionSelect.Option value="2">选项2</AionSelect.Option>
- * </AionSelect>
+ * <WaylandSelect placeholder="请选择" style={{ width: 200 }}>
+ *   <WaylandSelect.Option value="1">选项1</WaylandSelect.Option>
+ *   <WaylandSelect.Option value="2">选项2</WaylandSelect.Option>
+ * </WaylandSelect>
  *
  * // 多选 / Multiple selection
- * <AionSelect mode="multiple" placeholder="请选择多个">
- *   <AionSelect.Option value="1">选项1</AionSelect.Option>
- *   <AionSelect.Option value="2">选项2</AionSelect.Option>
- * </AionSelect>
+ * <WaylandSelect mode="multiple" placeholder="请选择多个">
+ *   <WaylandSelect.Option value="1">选项1</WaylandSelect.Option>
+ *   <WaylandSelect.Option value="2">选项2</WaylandSelect.Option>
+ * </WaylandSelect>
  *
  * // 分组 / Grouped options
- * <AionSelect placeholder="请选择">
- *   <AionSelect.OptGroup label="分组1">
- *     <AionSelect.Option value="1">选项1</AionSelect.Option>
- *   </AionSelect.OptGroup>
- *   <AionSelect.OptGroup label="分组2">
- *     <AionSelect.Option value="2">选项2</AionSelect.Option>
- *   </AionSelect.OptGroup>
- * </AionSelect>
+ * <WaylandSelect placeholder="请选择">
+ *   <WaylandSelect.OptGroup label="分组1">
+ *     <WaylandSelect.Option value="1">选项1</WaylandSelect.Option>
+ *   </WaylandSelect.OptGroup>
+ *   <WaylandSelect.OptGroup label="分组2">
+ *     <WaylandSelect.Option value="2">选项2</WaylandSelect.Option>
+ *   </WaylandSelect.OptGroup>
+ * </WaylandSelect>
  * ```
  *
  * @see arco-override.css for theme-related styles (.aion-select)
  */
-const mapSizeToNative = (size?: AionSelectSize): NativeSelectSize | undefined => {
+const mapSizeToNative = (size?: WaylandSelectSize): NativeSelectSize | undefined => {
   if (!size) return undefined;
   if (size === 'middle') return 'default';
   return size;
 };
 
-type AionSelectComponent = React.ForwardRefExoticComponent<AionSelectProps & React.RefAttributes<SelectHandle>> & {
+type WaylandSelectComponent = React.ForwardRefExoticComponent<WaylandSelectProps & React.RefAttributes<SelectHandle>> & {
   Option: typeof Select.Option;
   OptGroup: typeof Select.OptGroup;
 };
 
-const InternalSelect = React.forwardRef<SelectHandle, AionSelectProps>(
+const InternalSelect = React.forwardRef<SelectHandle, WaylandSelectProps>(
   ({ className, getPopupContainer, size = 'middle', ...rest }, ref) => {
     const normalizedSize = mapSizeToNative(size);
     return (
@@ -125,12 +125,12 @@ const InternalSelect = React.forwardRef<SelectHandle, AionSelectProps>(
   }
 );
 
-const AionSelect = InternalSelect as AionSelectComponent;
+const WaylandSelect = InternalSelect as WaylandSelectComponent;
 
-AionSelect.displayName = 'AionSelect';
+WaylandSelect.displayName = 'WaylandSelect';
 
 // 导出子组件 / Export sub-components
-AionSelect.Option = Select.Option;
-AionSelect.OptGroup = Select.OptGroup;
+WaylandSelect.Option = Select.Option;
+WaylandSelect.OptGroup = Select.OptGroup;
 
-export default AionSelect;
+export default WaylandSelect;

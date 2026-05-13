@@ -54,7 +54,7 @@ vi.mock('@/renderer/hooks/context/ThemeContext', () => ({
   useThemeContext: () => ({ theme: 'light' }),
 }));
 
-vi.mock('@/renderer/components/base/AionModal', () => ({
+vi.mock('@/renderer/components/base/WaylandModal', () => ({
   default: ({ visible, children, onOk, onCancel, okButtonProps, header }: any) =>
     visible ? (
       <div data-testid='aion-modal'>

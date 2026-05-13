@@ -16,7 +16,7 @@ block-beta
 
   block:structural["结构层 (已实现)"]:2
     PathSafety["pathSafety.ts\nisPathWithinDirectory()\n路径遍历防护"]
-    AssetProto["aion-asset://\n协议隔离\n绕过 file:// CSP"]
+    AssetProto["wayland-asset://\n协议隔离\n绕过 file:// CSP"]
   end
 
   block:isolation["隔离层 (部分实现)"]:2
@@ -120,7 +120,7 @@ flowchart LR
 
 | 权限         | 值                   | 风险等级  | 说明                                      |
 | ------------ | -------------------- | --------- | ----------------------------------------- |
-| `storage`    | `true`               | safe      | 读写 AionUI 持久化存储                    |
+| `storage`    | `true`               | safe      | 读写 Wayland 持久化存储                    |
 | `events`     | `true`               | safe      | 跨扩展事件通信                            |
 | `network`    | `false`              | safe      | 无网络访问                                |
 | `network`    | `{ allowedDomains }` | moderate  | 受限域名列表 (支持 `*.github.com` 通配符) |
@@ -140,7 +140,7 @@ flowchart LR
 
 **状态: 消息通道已修复, 隔离未完成, 未接入**
 
-> 消息路由修复详情见 [sandbox-architecture.md](sandbox-architecture.md) 和 PR [#1991](https://github.com/iOfficeAI/AionUi/pull/1991)。
+> 消息路由修复详情见 [sandbox-architecture.md](sandbox-architecture.md) 和 PR [#1991](https://github.com/TradeCanyon/Wayland/pull/1991)。
 
 ```mermaid
 flowchart TD
@@ -153,7 +153,7 @@ flowchart TD
 
   subgraph WorkerThread["Worker Thread"]
     Console["sandboxConsole\n替换 globalThis.console\n转发日志到主线程"]
-    AionProxy["globalThis.aion\nextensionName\nextensionDir\npostToUI()\nemitEvent()\nstorage.get/set/delete"]
+    WaylandProxy["globalThis.aion\nextensionName\nextensionDir\npostToUI()\nemitEvent()\nstorage.get/set/delete"]
     ExtCode["扩展入口代码\n通过 eval('require') 加载"]
   end
 
@@ -211,7 +211,7 @@ flowchart TD
 
 | 类型                      | 隔离方式                                             | 安全属性            |
 | ------------------------- | ---------------------------------------------------- | ------------------- |
-| 本地 HTML (aion-asset://) | `<iframe sandbox='allow-scripts allow-same-origin'>` | 脚本执行 + 同源访问 |
+| 本地 HTML (wayland-asset://) | `<iframe sandbox='allow-scripts allow-same-origin'>` | 脚本执行 + 同源访问 |
 | 外部 URL (https://)       | `<webview>` + 独立 partition                         | 独立进程 + 缓存隔离 |
 
 **已知问题:**

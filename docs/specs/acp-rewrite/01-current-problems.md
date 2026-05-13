@@ -1,7 +1,7 @@
 # ACP 层现状问题分析
 
 > **版本**: v1.0 | **最后更新**: 2026-04-14 | **状态**: Draft
-> **摘要**: 系统化分析 AionUi 当前 ACP 实现的 6 大架构问题，论证为什么需要全面重构而非局部修补
+> **摘要**: 系统化分析 Wayland 当前 ACP 实现的 6 大架构问题，论证为什么需要全面重构而非局部修补
 > **受众**: ACP 重构实现开发者、新加入团队的开发者
 
 ---
@@ -23,7 +23,7 @@
 
 ## 1. 背景
 
-AionUi 是一个 Electron 桌面客户端，通过 ACP (Agent Client Protocol) 与 25+ 种 AI Agent 后端通信（Anthropic Claude、Google Gemini、OpenAI Codex、阿里通义千问等）。ACP 是一个基于 JSON-RPC 2.0 的会话式 AI Agent 通信协议，定义了 session 管理、prompt 交互、权限控制等标准化接口。ACP 层是 AionUi 最复杂的子系统，负责进程管理、协议通信、会话生命周期、权限系统、配置同步等核心功能。
+Wayland 是一个 Electron 桌面客户端，通过 ACP (Agent Client Protocol) 与 25+ 种 AI Agent 后端通信（Anthropic Claude、Google Gemini、OpenAI Codex、阿里通义千问等）。ACP 是一个基于 JSON-RPC 2.0 的会话式 AI Agent 通信协议，定义了 session 管理、prompt 交互、权限控制等标准化接口。ACP 层是 Wayland 最复杂的子系统，负责进程管理、协议通信、会话生命周期、权限系统、配置同步等核心功能。
 
 当前 ACP 实现位于 `src/process/agent/acp/`，主要由以下文件构成：
 

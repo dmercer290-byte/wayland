@@ -67,7 +67,7 @@ vi.mock('@arco-design/web-react', () => ({
   ),
 }));
 
-vi.mock('@/renderer/components/base/AionModal', () => ({
+vi.mock('@/renderer/components/base/WaylandModal', () => ({
   default: ({
     children,
     visible,

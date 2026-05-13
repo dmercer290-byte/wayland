@@ -144,7 +144,7 @@ describe('RemoteAgentManagement', () => {
     fireEvent.click(screen.getByText('settings.remoteAgent.guideAction'));
 
     expect(mockOpenExternalUrl).toHaveBeenCalledWith(
-      'https://github.com/iOfficeAI/AionUi/wiki/Remote-Agent-Guide-Chinese'
+      'https://github.com/TradeCanyon/Wayland/wiki/Remote-Agent-Guide-Chinese'
     );
   });
 

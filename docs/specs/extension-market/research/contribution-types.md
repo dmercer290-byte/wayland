@@ -7,12 +7,12 @@
 
 | #   | 类型             | Hub 映射      | ID 规则            | 解析方式                  | 备注                                    |
 | --- | ---------------- | ------------- | ------------------ | ------------------------- | --------------------------------------- |
-| 1   | `acpAdapters`    | Agent Hub     | 原始 `id`          | 同步, 平铺                | icon→aion-asset://, connectionType 分支 |
+| 1   | `acpAdapters`    | Agent Hub     | 原始 `id`          | 同步, 平铺                | icon→wayland-asset://, connectionType 分支 |
 | 2   | `mcpServers`     | MCP Hub       | `ext-{ext}-{name}` | 同步, 平铺                | transport 4 种类型, 保留 originalJson   |
 | 3   | `assistants`     | Assistant Hub | `ext-{id}`         | **异步**, 读文件          | 读 contextFile 内容, path 安全检查      |
 | 4   | ~~`agents`~~     | —             | `ext-{id}`         | **异步**, 读文件          | **冗余, 待废弃** — 见下方分析           |
 | 5   | `skills`         | Skill Hub     | 原始 `name`        | 同步, 仅验证路径          | 不读文件, 只验证存在性                  |
-| 6   | `themes`         | Theme Hub     | `ext-{ext}-{id}`   | 同步, **readFileSync**    | 内联 CSS 内容, cover→aion-asset://      |
+| 6   | `themes`         | Theme Hub     | `ext-{ext}-{id}`   | 同步, **readFileSync**    | 内联 CSS 内容, cover→wayland-asset://      |
 | 7   | `channelPlugins` | Channel Hub   | `type`             | 同步, **dynamic require** | duck-typing + wrapper, eval('require')  |
 | 8   | `webui`          | —             | 路径命名空间       | 同步, 路径校验            | 强制 `/{extName}/` 前缀, 保留路径黑名单 |
 | 9   | `settingsTabs`   | —             | `ext-{ext}-{id}`   | 同步, URL 解析            | 位置锚定系统 (anchor + before/after)    |
@@ -32,7 +32,7 @@ flowchart LR
 
   subgraph 字段映射
     CT["connectionType\ncli | stdio | websocket | http"]
-    Icon["icon\nHTTP → 直传\n相对路径 → aion-asset://"]
+    Icon["icon\nHTTP → 直传\n相对路径 → wayland-asset://"]
     API["apiKeyFields[]\n用户可配置的密钥字段"]
     Health["healthCheck\nversionCommand + timeout"]
   end
@@ -105,7 +105,7 @@ flowchart TD
 | `models[]`        | 否   | 推荐模型列表                                                                  |
 | `enabledSkills[]` | 否   | 启用的 skill 名称                                                             |
 | `prompts[]`       | 否   | 提示词列表                                                                    |
-| `avatar`          | 否   | 头像路径 (aion-asset:// 或 HTTP)                                              |
+| `avatar`          | 否   | 头像路径 (wayland-asset:// 或 HTTP)                                              |
 
 **特殊:** 这是少数异步 resolver 之一, 因为需要读取 contextFile 文件内容。
 
@@ -162,14 +162,14 @@ flowchart TD
 | `id`    | 是   | 主题 ID                                             |
 | `name`  | 是   | 主题名称 (输出时追加扩展名)                         |
 | `file`  | 是   | CSS 文件相对路径 (**resolve 时 readFileSync 读取**) |
-| `cover` | 否   | 封面图相对路径 → aion-asset://                      |
+| `cover` | 否   | 封面图相对路径 → wayland-asset://                      |
 
 **解析逻辑:**
 
 - ID: `ext-{extensionName}-{themeId}`
 - Name: `"{themeName} ({extensionDisplayName})"`
 - **同步读取 CSS 文件内容** (`readFileSync`), 直接内联到输出的 `css` 字段
-- Cover 图: 路径安全检查 + 存在性检查 → aion-asset:// URL
+- Cover 图: 路径安全检查 + 存在性检查 → wayland-asset:// URL
 - 输出 `ICssTheme` 对象 (含 `isPreset: true`, 时间戳)
 
 ---
@@ -257,7 +257,7 @@ flowchart TD
 | `name`     | 是   | 显示名称                                                        |
 | `baseUrl`  | 否   | API 基础 URL                                                    |
 | `models[]` | 否   | 默认模型列表                                                    |
-| `logo`     | 否   | Logo 文件路径 → aion-asset://                                   |
+| `logo`     | 否   | Logo 文件路径 → wayland-asset://                                   |
 
 **特殊:** 唯一使用强类型输出 (`ResolvedModelProvider` 接口) 的 resolver (多数 resolver 输出 `Record<string, unknown>`)。
 
@@ -272,13 +272,13 @@ flowchart TD
 | `entryPointResolver` | `utils/entryPointResolver.ts` | dist-first 入口点解析 (src→dist, .ts→.js 回退) |
 | `envResolver`        | `utils/envResolver.ts`        | `${env:VAR}` 模板替换 (支持 strict mode)       |
 | `dependencyResolver` | `utils/dependencyResolver.ts` | 扩展间依赖校验 + 拓扑排序 (semver ^/~/exact)   |
-| `engineValidator`    | `utils/engineValidator.ts`    | AionUI 版本 + API 版本兼容性校验               |
+| `engineValidator`    | `utils/engineValidator.ts`    | Wayland 版本 + API 版本兼容性校验               |
 | `fileResolver`       | `utils/fileResolver.ts`       | `$file:` 引用展开 (递归, 防循环, 支持 JSONC)   |
 
 ### 跨 Resolver 共性模式
 
 1. **路径安全**: 所有 resolver 使用 `isPathWithinDirectory()` 防止目录遍历
-2. **资产协议**: 本地文件路径 → `aion-asset://` URL (绕过 `file://` CSP)
+2. **资产协议**: 本地文件路径 → `wayland-asset://` URL (绕过 `file://` CSP)
 3. **ID 命名空间**: `ext-` 前缀避免与内置冲突
 4. **元数据标记**: `_source: 'extension'` + `_extensionName` 用于溯源
 5. **优雅降级**: 无效贡献跳过 + `console.warn`, 不崩溃整个解析流程

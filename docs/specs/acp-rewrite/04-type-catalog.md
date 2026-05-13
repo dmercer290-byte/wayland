@@ -479,7 +479,7 @@ type PromptContent = ContentBlock[];
 // 边界: Session -> Application（AcpSession 的唯一输出通道）
 
 interface SessionCallbacks {
-  /** 高频: 流式消息（TMessage 是 AionUi 应用类型） */
+  /** 高频: 流式消息（TMessage 是 Wayland 应用类型） */
   onMessage(message: TMessage): void;
   /** Session ID 更新（创建/恢复 session 时） */
   onSessionId(sessionId: string): void;
@@ -1051,7 +1051,7 @@ classDiagram
 | 36  | `AuthMethod`                | SDK 原样     | Session -> App   | SDK import                                |
 | 37  | ~~`AuthInputField`~~        | -            | -                | (已移除，SDK `AuthEnvVar` 替代)           |
 | 38  | `ConfigOption`              | SDK 简化     | Session <-> App  | types.ts                                  |
-| 39  | `TMessage`                  | 现有(AionUi) | Session -> App   | types.ts (占位)                           |
+| 39  | `TMessage`                  | 现有(Wayland) | Session -> App   | types.ts (占位)                           |
 | 40  | `QueuedPrompt`              | 新定义       | Session 内部     | types.ts                                  |
 | 41  | `PendingPermission`         | 新定义       | Session 内部     | session/types.ts                          |
 | 42  | `SessionOptions`            | 新定义       | Session 内部     | session/types.ts                          |

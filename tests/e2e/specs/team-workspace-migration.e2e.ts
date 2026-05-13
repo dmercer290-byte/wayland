@@ -27,7 +27,7 @@ test.describe('Team Workspace Migration', () => {
   let teamId: string | undefined;
 
   test.beforeAll(async () => {
-    targetWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'aionui-target-'));
+    targetWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'wayland-target-'));
   });
 
   test.afterAll(async () => {
