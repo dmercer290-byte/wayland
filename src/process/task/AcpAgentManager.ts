@@ -628,9 +628,20 @@ ${collectedResponses.join('\n')}`;
    * full pipeline: filter → transform → persist → emit to all buses.
    */
   private handleStreamEvent(message: IResponseMessage, backend: AcpBackend): void {
-    // During bootstrap (warmup), suppress UI stream events to avoid
-    // triggering sidebar loading spinner before user sends a message.
-    if (this.bootstrapping) return;
+    // During bootstrap (warmup or session/load replay), suppress UI stream
+    // events to avoid (a) triggering sidebar loading spinner before user
+    // sends a message and (b) re-inserting replayed turns as new SQLite rows
+    // on ACP session resume (upstream #2887 / H9).
+    //
+    // Allowlist: `agent_status` frames are emitted directly to the IPC bus
+    // (no transform / no DB write) so init progress remains visible to the UI
+    // while replayed content events stay gated.
+    if (this.bootstrapping) {
+      if (message.type === 'agent_status') {
+        ipcBridge.acpConversation.responseStream.emit(message);
+      }
+      return;
+    }
 
     this.markTrackedTurnRuntimeActivity();
 
@@ -958,9 +969,15 @@ ${collectedResponses.join('\n')}`;
     msg?: string;
     message?: string;
   }> {
-    // Allow stream events through once user actually sends a message,
-    // so initAgent progress (agent_status) is visible during the wait.
-    this.bootstrapping = false;
+    // NOTE: Do NOT flip `bootstrapping = false` here. On ACP session resume
+    // (Claude Code / Codex / Qwen / Goose), `initAgent → agent.start()` triggers
+    // a `session/load` replay that emits historical events. If `bootstrapping`
+    // is false during that replay, those events flow through transformMessage
+    // → addOrUpdateMessage and get inserted as fresh SQLite rows with new
+    // client-side UUIDs (upstream aionui-org/AionUi#2887 / H9). The bootstrap
+    // gate is now released only inside initAgent() AFTER `agent.start()`
+    // resolves; the `agent_status` allowlist in handleStreamEvent keeps init
+    // progress visible to the UI in the meantime.
     this._lastActivityAt = Date.now();
 
     const managerSendStart = Date.now();
