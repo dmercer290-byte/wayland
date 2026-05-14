@@ -6,6 +6,7 @@
 
 import type { WebSocketServer } from 'ws';
 import { registerWebSocketBroadcaster, getBridgeEmitter } from '@/common/adapter/registry';
+import { isAllowedInboundName } from '@/common/adapter/bridgeAllowlist';
 import { WebSocketManager } from './websocket/WebSocketManager';
 
 // Store unregister function for cleanup when server stops
@@ -29,8 +30,13 @@ export function initWebAdapter(wss: WebSocketServer): void {
     wsManager.broadcast(name, data);
   });
 
-  // Setup WebSocket message handler to forward messages to bridge emitter
+  // Setup WebSocket message handler to forward messages to bridge emitter.
+  // C1: reject any name not in the bridge allowlist before dispatching.
   wsManager.setupConnectionHandler((name, data, _ws) => {
+    if (!isAllowedInboundName(name)) {
+      console.error('[adapter] Rejected disallowed WebSocket bridge event:', name);
+      return;
+    }
     const emitter = getBridgeEmitter();
     if (emitter) {
       emitter.emit(name, data);

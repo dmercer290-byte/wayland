@@ -6,6 +6,9 @@
 import { EventEmitter } from 'events';
 import { bridge } from '@office-ai/platform';
 import { broadcastToAll, setBridgeEmitter } from './registry';
+import { isAllowedInboundName } from './bridgeAllowlist';
+// Side-effect import: register all provider/emitter keys into the allowlist.
+import './ipcBridge';
 
 const internalEmitter = new EventEmitter();
 internalEmitter.setMaxListeners(100);
@@ -18,8 +21,14 @@ bridge.adapter({
   on(bridgeEmitterRef) {
     // Persist reference so webserver/adapter.ts can route incoming WS messages
     setBridgeEmitter(bridgeEmitterRef);
-    // Route messages dispatched via dispatchMessage() into the bridge handlers
+    // Route messages dispatched via dispatchMessage() into the bridge handlers.
+    // C1: enforce the inbound allowlist here too — `dispatchMessage` is the
+    // standalone equivalent of the Electron preload IPC handler.
     internalEmitter.on('message', ({ name, data }: { name: string; data: unknown }) => {
+      if (!isAllowedInboundName(name)) {
+        console.error('[adapter] Rejected disallowed standalone bridge event:', name);
+        return;
+      }
       bridgeEmitterRef.emit(name, data);
     });
   },

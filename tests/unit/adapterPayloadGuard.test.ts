@@ -21,6 +21,11 @@ vi.mock('@office-ai/platform', () => ({
       const fakeEmitter = { emit: vi.fn() };
       on(fakeEmitter);
     }),
+    // C1: ipcBridge.ts is loaded as a side-effect from adapter/main.ts and
+    // calls buildProvider/buildEmitter through the allowlist wrapper. These
+    // stubs make those calls inert during the unit tests.
+    buildProvider: vi.fn(() => ({ provider: vi.fn(), invoke: vi.fn() })),
+    buildEmitter: vi.fn(() => ({ emit: vi.fn(), on: vi.fn() })),
   },
 }));
 

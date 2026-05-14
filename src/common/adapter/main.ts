@@ -9,6 +9,12 @@ import { ipcMain } from 'electron';
 
 import { bridge } from '@office-ai/platform';
 import { ADAPTER_BRIDGE_EVENT_KEY } from './constant';
+import { isAllowedInboundName } from './bridgeAllowlist';
+// Importing ipcBridge for its side effect: every buildProvider/buildEmitter
+// call records its key into the allowlist. Without this load, the allowlist
+// would be empty when the IPC handler is hit and every renderer call would
+// be rejected. Keep this import even though no exported symbol is used here.
+import './ipcBridge';
 import { registerWebSocketBroadcaster, getBridgeEmitter, setBridgeEmitter, broadcastToAll } from './registry';
 
 /**
@@ -77,6 +83,14 @@ bridge.adapter({
 
     ipcMain.handle(ADAPTER_BRIDGE_EVENT_KEY, (_event, info) => {
       const { name, data } = JSON.parse(info) as BridgeEventData;
+      // C1: reject any name not declared via buildProvider/buildEmitter.
+      // This blocks a renderer XSS from invoking dangerous providers
+      // (fs.writeFile, fs.removeEntry, shell.openExternal, ...) directly
+      // through the preload bridge.
+      if (!isAllowedInboundName(name)) {
+        console.error('[adapter] Rejected disallowed inbound bridge event:', name);
+        return Promise.reject(new Error(`Bridge event not allowed: ${name}`));
+      }
       return Promise.resolve(emitter.emit(name, data));
     });
   },
