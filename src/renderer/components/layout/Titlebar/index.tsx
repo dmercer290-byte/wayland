@@ -28,13 +28,22 @@ interface TitlebarProps {
 }
 
 const WaylandLogoMark: React.FC = () => (
-  <svg className='app-titlebar__brand-logo' viewBox='0 0 80 80' fill='none' aria-hidden='true' focusable='false'>
-    <path
-      d='M40 20 Q38 22 25 40 Q23 42 26 42 L30 42 Q32 40 40 30 Q48 40 50 42 L54 42 Q57 42 55 40 Q42 22 40 20'
-      fill='currentColor'
-    ></path>
-    <circle cx='40' cy='46' r='3' fill='currentColor'></circle>
-    <path d='M18 50 Q40 70 62 50' stroke='currentColor' strokeWidth='3.5' fill='none' strokeLinecap='round'></path>
+  <svg
+    className='app-titlebar__brand-logo'
+    viewBox='0 0 24 24'
+    fill='none'
+    stroke='#ff6b35'
+    strokeWidth='2'
+    strokeLinecap='round'
+    strokeLinejoin='round'
+    aria-hidden='true'
+    focusable='false'
+  >
+    <path d='M20.341 6.484A10 10 0 0 1 10.266 21.85' />
+    <path d='M3.659 17.516A10 10 0 0 1 13.74 2.152' />
+    <circle cx='12' cy='12' r='3' />
+    <circle cx='19' cy='5' r='2' />
+    <circle cx='5' cy='19' r='2' />
   </svg>
 );
 
