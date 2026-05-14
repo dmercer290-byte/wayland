@@ -254,10 +254,15 @@ export function registerAuthRoutes(app: Express): void {
     AuthMiddleware.authenticateToken,
     authenticatedActionLimiter,
     (req: Request, res: Response) => {
-      // Blacklist current token
+      // Blacklist current token and revoke its family so any sibling
+      // refresh-token attempt is rejected (H5 — bounded sliding window).
       const token = TokenUtils.extractFromRequest(req);
       if (token) {
         AuthService.blacklistToken(token);
+        const family = AuthService.decodeFamily(token);
+        if (family) {
+          void AuthService.revokeFamily(family);
+        }
       }
 
       res.clearCookie(AUTH_CONFIG.COOKIE.NAME);
@@ -365,6 +370,10 @@ export function registerAuthRoutes(app: Express): void {
         // Update password
         await UserRepository.updatePassword(user.id, newPasswordHash);
         await AuthService.invalidateAllTokens();
+        // H5: also revoke every refresh-token family for this user so any
+        // already-issued tokens cannot be exchanged for new ones, even if
+        // an attacker captured the JWT secret rotation window.
+        await AuthService.revokeAllFamiliesForUser(user.id);
 
         res.json({
           success: true,

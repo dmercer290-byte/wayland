@@ -106,6 +106,18 @@ export function initSchema(db: ISqliteDriver): void {
   )`);
   db.exec('CREATE INDEX IF NOT EXISTS idx_mailbox_to ON mailbox(team_id, to_agent_id, read)');
 
+  // Token family table (H5 — bounded sliding window for /api/auth/refresh)
+  // Tracks JWT refresh-token families so a stolen token cannot be refreshed
+  // indefinitely. Families are revoked on logout and password change.
+  const tokenFamilyDdl = `CREATE TABLE IF NOT EXISTS token_family (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER
+  )`;
+  db.exec(tokenFamilyDdl);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_token_family_user_id ON token_family(user_id)');
+
   // Team tasks table (team tasks)
   db.exec(`CREATE TABLE IF NOT EXISTS team_tasks (
     id TEXT PRIMARY KEY,
@@ -151,4 +163,4 @@ export function setDatabaseVersion(db: ISqliteDriver, version: number): void {
  * Current database schema version
  * Update this when adding new migrations in migrations.ts
  */
-export const CURRENT_DB_VERSION = 26;
+export const CURRENT_DB_VERSION = 28;

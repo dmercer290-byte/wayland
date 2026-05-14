@@ -9,12 +9,18 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import type { AuthUser } from '../repository/UserRepository';
 import { UserRepository } from '../repository/UserRepository';
+import { TokenFamilyRepository } from '../repository/TokenFamilyRepository';
 import { AUTH_CONFIG } from '../../config/constants';
 
 interface TokenPayload {
   userId: string;
   username: string;
   tokenId: string;
+  // Optional because legacy pre-H5 tokens have no family claim. The
+  // refresh path (H5) treats absent family as a hard reject; passive
+  // verification still accepts them so existing sessions keep working
+  // until they naturally expire.
+  family?: string;
   iat?: number;
   exp?: number;
 }
@@ -22,6 +28,17 @@ interface TokenPayload {
 type RawTokenPayload = Omit<TokenPayload, 'userId'> & {
   userId: string | number;
 };
+
+/**
+ * H5 refresh-token sliding window bounds.
+ *
+ * MAX_IAT_AGE_MS — a token cannot be refreshed once it is older than 7 days
+ *   from its original issue time (the absolute ceiling of a single session).
+ * MAX_EXP_GRACE_MS — once a token has been expired for more than 1 hour, the
+ *   sliding window is closed and the user must re-login.
+ */
+const REFRESH_MAX_IAT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const REFRESH_MAX_EXP_GRACE_MS = 60 * 60 * 1000;
 
 interface UserCredentials {
   username: string;
@@ -217,13 +234,36 @@ export class AuthService {
   }
 
   /**
-   * Generate standard WebUI session token
+   * Generate standard WebUI session token.
+   *
+   * When `familyId` is omitted a new family is created and recorded in the
+   * `token_family` table — this is the login path. When `familyId` is
+   * passed, the new token reuses the existing family so refresh stays
+   * inside the bounded sliding window (H5).
    */
-  public static async generateToken(user: Pick<AuthUser, 'id' | 'username'>): Promise<string> {
+  public static async generateToken(
+    user: Pick<AuthUser, 'id' | 'username'>,
+    familyId?: string
+  ): Promise<string> {
+    const family = familyId ?? crypto.randomUUID();
+    if (!familyId) {
+      // First-issue path — record the family so revoke is meaningful.
+      try {
+        await TokenFamilyRepository.create(family, user.id);
+      } catch (error) {
+        // The repository depends on the SQLite layer; if it is unavailable
+        // (e.g. during early bootstrap before getDatabase() can resolve) we
+        // still want login to succeed — the refresh path treats an unknown
+        // family as revoked (fail closed), forcing re-login next time.
+        console.error('[AuthService] Failed to record token family:', error);
+      }
+    }
+
     const payload: TokenPayload = {
       userId: user.id,
       username: user.username,
       tokenId: crypto.randomUUID(),
+      family,
     };
 
     return jwt.sign(payload, await this.getJwtSecret(), {
@@ -231,6 +271,48 @@ export class AuthService {
       issuer: 'wayland',
       audience: 'wayland-webui',
     });
+  }
+
+  /**
+   * Read the family id off a token without verifying it. Returns null when
+   * the token is malformed or carries no family claim (legacy pre-H5 tokens).
+   *
+   * Routes use this to revoke the family on logout / password-change.
+   */
+  public static decodeFamily(token: string): string | null {
+    try {
+      const decoded = jwt.decode(token) as { family?: unknown } | null;
+      if (decoded && typeof decoded.family === 'string' && decoded.family.length > 0) {
+        return decoded.family;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Revoke a single token family. Idempotent.
+   * Called from the logout route.
+   */
+  public static async revokeFamily(familyId: string): Promise<void> {
+    try {
+      await TokenFamilyRepository.revoke(familyId);
+    } catch (error) {
+      console.error('[AuthService] Failed to revoke token family:', error);
+    }
+  }
+
+  /**
+   * Revoke every token family belonging to a user. Called on password
+   * change so any stolen token loses refresh capability on every device.
+   */
+  public static async revokeAllFamiliesForUser(userId: string): Promise<void> {
+    try {
+      await TokenFamilyRepository.revokeAllForUser(userId);
+    } catch (error) {
+      console.error('[AuthService] Failed to revoke all token families for user:', error);
+    }
   }
 
   /**
@@ -311,7 +393,21 @@ export class AuthService {
   }
 
   /**
-   * Refresh a session token without enforcing expiry check
+   * Refresh a session token under a bounded sliding window (H5).
+   *
+   * Rules:
+   *   1. Signature must verify (against current JWT secret + iss/aud).
+   *   2. `iat` must not be older than REFRESH_MAX_IAT_AGE_MS (7 days) —
+   *      the absolute lifetime of any single session, regardless of how
+   *      many refreshes it accumulated.
+   *   3. `exp` must not be older than REFRESH_MAX_EXP_GRACE_MS (1 hour)
+   *      past now — once the sliding window has closed the user must
+   *      re-login.
+   *   4. The token's `family` must exist and not be revoked. Unknown
+   *      families fail closed (treated as revoked).
+   *
+   * On success: the previous token is blacklisted and a new token is
+   * issued reusing the same family id.
    */
   public static async refreshToken(token: string): Promise<string | null> {
     if (this.isTokenBlacklisted(token)) {
@@ -339,13 +435,57 @@ export class AuthService {
       return null;
     }
 
+    // H5 bound 1: token-too-old (iat). A token issued more than 7 days
+    // ago cannot be refreshed — force re-login.
+    const nowSec = Math.floor(Date.now() / 1000);
+    const iat = typeof decoded.iat === 'number' ? decoded.iat : null;
+    if (iat === null) {
+      // No iat claim → cannot reason about age, fail closed.
+      return null;
+    }
+    if (iat < nowSec - REFRESH_MAX_IAT_AGE_MS / 1000) {
+      return null;
+    }
+
+    // H5 bound 2: sliding window closed (exp). A token expired more than
+    // 1 hour ago can no longer be refreshed.
+    const exp = typeof decoded.exp === 'number' ? decoded.exp : null;
+    if (exp === null) {
+      return null;
+    }
+    if (exp < nowSec - REFRESH_MAX_EXP_GRACE_MS / 1000) {
+      return null;
+    }
+
+    // H5 bound 3: family revocation. Tokens issued before the family
+    // claim was introduced (legacy) carry no `family` and cannot be
+    // refreshed — they must re-login to acquire one.
+    const family = typeof decoded.family === 'string' ? decoded.family : null;
+    if (!family) {
+      return null;
+    }
+    try {
+      if (await TokenFamilyRepository.isRevoked(family)) {
+        return null;
+      }
+    } catch (error) {
+      // Fail closed on storage errors — better to force re-login than
+      // accept a token whose revocation state cannot be verified.
+      console.error('[AuthService] Failed to read token family on refresh:', error);
+      return null;
+    }
+
     this.blacklistToken(token);
 
-    // Skip expiry check when refreshing token
-    return this.generateToken({
-      id: this.normalizeUserId(decoded.userId),
-      username: decoded.username,
-    });
+    // Reissue inside the same family so subsequent refreshes stay
+    // bounded by the original iat ceiling.
+    return this.generateToken(
+      {
+        id: this.normalizeUserId(decoded.userId),
+        username: decoded.username,
+      },
+      family
+    );
   }
 
   /**

@@ -1247,6 +1247,39 @@ const migration_v27: IMigration = {
 };
 
 /**
+ * Migration v27 -> v28: Add token_family table (H5 — bounded refresh sliding window)
+ *
+ * Tracks JWT refresh-token families so the /api/auth/refresh endpoint can no
+ * longer be used to extend a stolen token indefinitely. A family is created
+ * at login and revoked on logout and password change.
+ */
+const migration_v28: IMigration = {
+  version: 28,
+  name: 'Add token_family table',
+  up: (db) => {
+    const ddl = [
+      'CREATE TABLE IF NOT EXISTS token_family (',
+      '  id TEXT PRIMARY KEY,',
+      '  user_id TEXT NOT NULL,',
+      '  created_at INTEGER NOT NULL,',
+      '  revoked_at INTEGER',
+      ')',
+    ].join('\n');
+    const idxDdl = 'CREATE INDEX IF NOT EXISTS idx_token_family_user_id ON token_family(user_id)';
+    const run = (sql: string) => db.exec(sql);
+    run(ddl);
+    run(idxDdl);
+    console.log('[Migration v28] Added token_family table');
+  },
+  down: (db) => {
+    const run = (sql: string) => db.exec(sql);
+    run('DROP INDEX IF EXISTS idx_token_family_user_id');
+    run('DROP TABLE IF EXISTS token_family');
+    console.log('[Migration v28] Rolled back: Removed token_family table');
+  },
+};
+
+/**
  * All migrations in order
  */
 // prettier-ignore
@@ -1255,7 +1288,7 @@ export const ALL_MIGRATIONS: IMigration[] = [
   migration_v7, migration_v8, migration_v9, migration_v10, migration_v11, migration_v12,
   migration_v13, migration_v14, migration_v15, migration_v16, migration_v17, migration_v18,
   migration_v19, migration_v20, migration_v21, migration_v22, migration_v23, migration_v24,
-  migration_v25, migration_v26, migration_v27,
+  migration_v25, migration_v26, migration_v27, migration_v28,
 ];
 
 /**
