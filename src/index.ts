@@ -22,6 +22,7 @@ import { pathToFileURL } from 'url';
 import { initMainAdapterWithWindow } from './common/adapter/main';
 import { ipcBridge } from './common';
 import { AION_ASSET_PROTOCOL } from '@process/extensions';
+import { resolveAllowedAssetPath } from '@process/extensions/protocol/assetAllowlist';
 import { initializeProcess } from './process';
 import { ProcessConfig } from './process/utils/initStorage';
 import { loadShellEnvironmentAsync, logEnvironmentDiagnostics, mergePaths } from './process/utils/shellEnv';
@@ -414,6 +415,11 @@ const handleAppReady = async (): Promise<void> => {
   // Register wayland-asset:// protocol handler.
   // Converts wayland-asset://asset/C:/path/to/file.svg → file:///C:/path/to/file.svg
   // and serves the local file through Electron's net module.
+  //
+  // SECURITY: The renderer can render untrusted LLM output, so we must NOT
+  // serve arbitrary files. The path is resolved against an allowlist of
+  // extension dirs + bundled hub resources to prevent
+  // wayland-asset://asset//etc/passwd and similar arbitrary-read attacks.
   protocol.handle(AION_ASSET_PROTOCOL, (request) => {
     const url = new URL(request.url);
     // pathname is /C:/path/to/file.svg — strip leading slash on Windows
@@ -421,10 +427,16 @@ const handleAppReady = async (): Promise<void> => {
     if (process.platform === 'win32' && filePath.startsWith('/') && /^\/[A-Za-z]:/.test(filePath)) {
       filePath = filePath.slice(1);
     }
-    if (!fs.existsSync(filePath)) {
-      console.warn(`[wayland-asset] File not found: ${request.url} -> ${filePath}`);
+    const allowedPath = resolveAllowedAssetPath(filePath);
+    if (!allowedPath) {
+      console.warn(`[wayland-asset] Rejected request outside allowlist: ${request.url} -> ${filePath}`);
+      return new Response('Forbidden', { status: 403 });
     }
-    return net.fetch(pathToFileURL(filePath).href);
+    if (!fs.existsSync(allowedPath)) {
+      console.warn(`[wayland-asset] File not found: ${request.url} -> ${allowedPath}`);
+      return new Response('Not Found', { status: 404 });
+    }
+    return net.fetch(pathToFileURL(allowedPath).href);
   });
 
   // Set dock icon in development mode on macOS
