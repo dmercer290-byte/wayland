@@ -197,12 +197,36 @@ export const SECURITY_CONFIG = {
     XSS_PROTECTION: '1; mode=block',
     // Referrer policy
     REFERRER_POLICY: 'strict-origin-when-cross-origin',
-    // Content-Security-Policy for development
-    CSP_DEV:
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ws: wss: blob:; media-src 'self' blob:;",
-    // Content-Security-Policy for production
-    CSP_PROD:
-      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ws: wss: blob:; media-src 'self' blob:;",
+    // Content-Security-Policy builder for development.
+    // Keeps 'unsafe-eval' for Vite HMR; still nonce-gates inline scripts.
+    // style-src retains 'unsafe-inline' because Arco Design injects runtime styles.
+    buildCspDev(nonce: string): string {
+      return (
+        `default-src 'self'; ` +
+        `script-src 'self' 'nonce-${nonce}' 'unsafe-eval'; ` +
+        `style-src 'self' 'unsafe-inline'; ` +
+        `img-src 'self' data: blob: https:; ` +
+        `font-src 'self' data:; ` +
+        `connect-src 'self' ws: wss: blob:; ` +
+        `media-src 'self' blob:;`
+      );
+    },
+    // Content-Security-Policy builder for production.
+    // Drops 'unsafe-inline' from script-src — every inline <script> must carry
+    // the per-request nonce (see cspNonceMiddleware). Renderer & QR-login HTML
+    // inject the nonce server-side before responding.
+    // style-src retains 'unsafe-inline' because Arco Design injects runtime styles.
+    buildCspProd(nonce: string): string {
+      return (
+        `default-src 'self'; ` +
+        `script-src 'self' 'nonce-${nonce}'; ` +
+        `style-src 'self' 'unsafe-inline'; ` +
+        `img-src 'self' data: blob: https:; ` +
+        `font-src 'self' data:; ` +
+        `connect-src 'self' ws: wss: blob:; ` +
+        `media-src 'self' blob:;`
+      );
+    },
   },
   CSRF: {
     COOKIE_NAME: CSRF_COOKIE_NAME,

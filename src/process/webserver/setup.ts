@@ -83,6 +83,9 @@ export function setupBasicMiddleware(app: Express): void {
   app.use(attachCsrfToken); // Attach token to response headers
 
   // Security middleware
+  // cspNonceMiddleware MUST run before securityHeadersMiddleware so the CSP header
+  // and any server-rendered HTML can share the same per-request nonce.
+  app.use(AuthMiddleware.cspNonceMiddleware);
   app.use(AuthMiddleware.securityHeadersMiddleware);
   app.use(AuthMiddleware.requestLoggingMiddleware);
 }

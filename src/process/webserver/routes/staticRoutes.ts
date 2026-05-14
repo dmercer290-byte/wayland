@@ -127,8 +127,16 @@ function registerProductionStaticRoutes(expressApp: Express, staticRoot: string,
       }
 
       const htmlContent = fs.readFileSync(indexHtmlPath, 'utf8');
+      // Inject per-request CSP nonce into every <script> tag (inline + module).
+      // The renderer's built index.html ships static theme-restore scripts and a
+      // module script for main.tsx; strict CSP requires all of them to carry
+      // the nonce minted by cspNonceMiddleware.
+      const nonce = typeof res.locals.cspNonce === 'string' ? res.locals.cspNonce : '';
+      const noncedHtml = nonce
+        ? htmlContent.replace(/<script(?![^>]*\bnonce=)([^>]*)>/g, `<script nonce="${nonce}"$1>`)
+        : htmlContent;
       res.setHeader('Content-Type', 'text/html');
-      res.send(htmlContent);
+      res.send(noncedHtml);
     } catch (error) {
       console.error('Error serving index.html:', error);
       res.status(500).send('Internal Server Error');

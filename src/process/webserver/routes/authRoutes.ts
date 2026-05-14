@@ -15,10 +15,17 @@ import { authRateLimiter, authenticatedActionLimiter, apiRateLimiter } from '../
 import { verifyQRTokenDirect } from '@process/bridge/webuiQR';
 
 /**
- * QR login page HTML (static, no user input embedded)
- * JavaScript reads token directly from URL params to prevent XSS
+ * QR login page HTML.
+ *
+ * Inline scripts are nonce-gated to comply with the strict production CSP
+ * (no 'unsafe-inline'). The nonce is minted by cspNonceMiddleware on every
+ * request and injected into the <script> tag below.
+ *
+ * No user input is embedded — JavaScript reads the QR token from URL params
+ * on the client side.
  */
-const QR_LOGIN_PAGE_HTML = `<!DOCTYPE html>
+function renderQrLoginPage(nonce: string): string {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -105,7 +112,7 @@ const QR_LOGIN_PAGE_HTML = `<!DOCTYPE html>
     <div class="spinner"></div>
     <p class="loading">Verifying QR code…</p>
   </div>
-  <script>
+  <script nonce="${nonce}">
     (async function() {
       var container = document.getElementById('content');
       var SVG_NS = 'http://www.w3.org/2000/svg';
@@ -172,6 +179,7 @@ const QR_LOGIN_PAGE_HTML = `<!DOCTYPE html>
   </script>
 </body>
 </html>`;
+}
 
 /**
  * Register authentication routes
@@ -512,7 +520,11 @@ export function registerAuthRoutes(app: Express): void {
    * Security: Return static HTML, JavaScript reads token from URL to prevent XSS
    */
   app.get('/qr-login', (_req: Request, res: Response) => {
-    res.send(QR_LOGIN_PAGE_HTML);
+    // cspNonceMiddleware (registered in setup.ts) populates res.locals.cspNonce
+    // for every request; fall back to empty string if it's somehow absent so
+    // we never silently emit an unauthenticated nonce.
+    const nonce = typeof res.locals.cspNonce === 'string' ? res.locals.cspNonce : '';
+    res.send(renderQrLoginPage(nonce));
   });
 }
 

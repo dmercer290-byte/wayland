@@ -5,6 +5,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { AuthService } from '../service/AuthService';
 import { createAuthMiddleware } from './TokenMiddleware';
 import { SECURITY_CONFIG } from '../../config/constants';
@@ -41,9 +42,23 @@ export class AuthMiddleware {
   }
 
   /**
+   * Per-request CSP nonce middleware.
+   *
+   * Mints a cryptographically random nonce and exposes it on res.locals.cspNonce
+   * so downstream middleware can (a) include it in the Content-Security-Policy
+   * header and (b) inject it into any server-rendered inline <script> tags.
+   *
+   * Must run BEFORE securityHeadersMiddleware.
+   */
+  public static cspNonceMiddleware(_req: Request, res: Response, next: NextFunction): void {
+    res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+    next();
+  }
+
+  /**
    * Security headers middleware
    */
-  public static securityHeadersMiddleware(req: Request, res: Response, next: NextFunction): void {
+  public static securityHeadersMiddleware(_req: Request, res: Response, next: NextFunction): void {
     // Prevent clickjacking
     res.header('X-Frame-Options', SECURITY_CONFIG.HEADERS.FRAME_OPTIONS);
 
@@ -56,9 +71,20 @@ export class AuthMiddleware {
     // Referrer policy
     res.header('Referrer-Policy', SECURITY_CONFIG.HEADERS.REFERRER_POLICY);
 
-    // Content Security Policy (relaxed in development for webpack-dev-server)
+    // Content Security Policy: nonce-gated inline scripts (no 'unsafe-inline').
+    // Falls back to a freshly minted nonce if cspNonceMiddleware was skipped.
+    const nonce =
+      typeof res.locals.cspNonce === 'string' && res.locals.cspNonce.length > 0
+        ? (res.locals.cspNonce as string)
+        : crypto.randomBytes(16).toString('base64');
+    if (res.locals.cspNonce !== nonce) {
+      res.locals.cspNonce = nonce;
+    }
+
     const isDevelopment = process.env.NODE_ENV === 'development';
-    const cspPolicy = isDevelopment ? SECURITY_CONFIG.HEADERS.CSP_DEV : SECURITY_CONFIG.HEADERS.CSP_PROD;
+    const cspPolicy = isDevelopment
+      ? SECURITY_CONFIG.HEADERS.buildCspDev(nonce)
+      : SECURITY_CONFIG.HEADERS.buildCspProd(nonce);
 
     res.header('Content-Security-Policy', cspPolicy);
 
