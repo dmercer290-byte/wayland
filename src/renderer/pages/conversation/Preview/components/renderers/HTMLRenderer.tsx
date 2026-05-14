@@ -288,6 +288,24 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
     return displayedContent;
   }, [hasRelativeResources, filePath, inlinedHtmlContent, content, displayedContent]);
 
+  // Render the browser-fallback iframe via a Blob URL so the iframe has an
+  // opaque origin. This lets us drop `allow-same-origin` from the sandbox,
+  // which would otherwise let untrusted preview HTML execute as the app
+  // origin (H2). Revoke the URL on unmount/content change to avoid leaks.
+  const browserBlobUrl = useMemo(() => {
+    if (isElectron) return '';
+    if (typeof window === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return '';
+    const blob = new Blob([browserHtmlContent ?? ''], { type: 'text/html;charset=utf-8' });
+    return URL.createObjectURL(blob);
+  }, [browserHtmlContent, isElectron]);
+
+  useEffect(() => {
+    if (!browserBlobUrl) return;
+    return () => {
+      URL.revokeObjectURL(browserBlobUrl);
+    };
+  }, [browserBlobUrl]);
+
   // Calculate webview src
   const webviewSrc = useMemo(() => {
     // If has relative resource references and has file path, load directly via file:// URL
@@ -594,14 +612,17 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
       ) : (
         <iframe
           ref={iframeRef}
-          srcDoc={browserHtmlContent}
+          src={browserBlobUrl}
           className='w-full h-full border-0'
           style={{
             display: 'block',
             width: '100%',
             height: '100%',
           }}
-          sandbox='allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
+          // Blob URL gives the iframe an opaque origin, so `allow-same-origin`
+          // is intentionally dropped. `allow-popups`/`allow-modals` removed as
+          // well — preview HTML has no documented need for them.
+          sandbox='allow-scripts allow-forms'
         />
       )}
     </div>

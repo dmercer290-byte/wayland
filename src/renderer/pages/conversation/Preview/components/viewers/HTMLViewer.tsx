@@ -23,87 +23,12 @@ interface SelectedElement {
 }
 
 /**
- * HTML preview component
- * - Supports live preview and code editing
- * - Supports element inspector (DevTools-like)
- * - Supports bidirectional locating: preview <-> code
+ * Element inspector script. Serialized into the iframe document (which has an
+ * opaque origin because it loads from a Blob URL) and communicates back to the
+ * parent via window.parent.postMessage — which works cross-origin and does not
+ * require `allow-same-origin` on the iframe sandbox.
  */
-const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, filePath, hideToolbar = false }) => {
-  const { t } = useTranslation();
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [editMode, setEditMode] = useState(false);
-  const [htmlCode, setHtmlCode] = useState(content);
-  const [inspectorMode, setInspectorMode] = useState(false);
-  const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; element: SelectedElement } | null>(null);
-  const [messageApi, messageContextHolder] = Message.useMessage();
-  const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>(() => {
-    return (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'light';
-  });
-
-  // Monitor theme changes
-  useEffect(() => {
-    const updateTheme = () => {
-      const theme = (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'light';
-      setCurrentTheme(theme);
-    };
-
-    const observer = new MutationObserver(updateTheme);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
-    });
-
-    return () => observer.disconnect();
-  }, []);
-
-  // Initialize iframe content
-  useEffect(() => {
-    if (!iframeRef.current) return;
-
-    const iframe = iframeRef.current;
-    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-
-    if (!iframeDoc) return;
-
-    // Write HTML content
-    iframeDoc.open();
-
-    // Inject <base> tag to support relative paths
-    let finalHtml = htmlCode;
-    if (filePath) {
-      // Get directory of the file
-      const fileDir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
-      // Construct file:// protocol base URL
-      const baseUrl = `file://${fileDir}`;
-
-      // Check if base tag exists
-      if (!finalHtml.match(/<base\s+href=/i)) {
-        if (finalHtml.match(/<head>/i)) {
-          finalHtml = finalHtml.replace(/<head>/i, `<head><base href="${baseUrl}">`);
-        } else if (finalHtml.match(/<html>/i)) {
-          finalHtml = finalHtml.replace(/<html>/i, `<html><head><base href="${baseUrl}"></head>`);
-        } else {
-          finalHtml = `<head><base href="${baseUrl}"></head>${finalHtml}`;
-        }
-      }
-    }
-
-    iframeDoc.write(finalHtml);
-    iframeDoc.close();
-
-    // Inject element inspector script
-    if (inspectorMode) {
-      injectInspectorScript(iframeDoc);
-    }
-  }, [htmlCode, inspectorMode]);
-
-  /**
-   * Inject element inspector script into iframe
-   */
-  const injectInspectorScript = (iframeDoc: Document) => {
-    const script = iframeDoc.createElement('script');
-    script.textContent = `
+const INSPECTOR_SCRIPT_SOURCE = `
       (function() {
         let hoveredElement = null;
         let overlay = null;
@@ -223,8 +148,87 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, filePath, hideToolba
         });
       })();
     `;
-    iframeDoc.body.appendChild(script);
-  };
+
+/**
+ * HTML preview component
+ * - Supports live preview and code editing
+ * - Supports element inspector (DevTools-like)
+ * - Supports bidirectional locating: preview <-> code
+ */
+const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, filePath, hideToolbar = false }) => {
+  const { t } = useTranslation();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [htmlCode, setHtmlCode] = useState(content);
+  const [inspectorMode, setInspectorMode] = useState(false);
+  const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; element: SelectedElement } | null>(null);
+  const [messageApi, messageContextHolder] = Message.useMessage();
+  const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>(() => {
+    return (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'light';
+  });
+
+  // Monitor theme changes
+  useEffect(() => {
+    const updateTheme = () => {
+      const theme = (document.documentElement.getAttribute('data-theme') as 'light' | 'dark') || 'light';
+      setCurrentTheme(theme);
+    };
+
+    const observer = new MutationObserver(updateTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
+  // Build the iframe document (HTML + optional inspector script) and serve it
+  // via a Blob URL so the iframe has an opaque origin. This lets us drop
+  // `allow-same-origin` from the sandbox, closing H2 (untrusted preview HTML
+  // executing as the app origin).
+  const [iframeBlobUrl, setIframeBlobUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
+
+    // Inject <base> tag to support relative paths
+    let finalHtml = htmlCode;
+    if (filePath) {
+      // Get directory of the file
+      const fileDir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
+      // Construct file:// protocol base URL
+      const baseUrl = `file://${fileDir}`;
+
+      // Check if base tag exists
+      if (!finalHtml.match(/<base\s+href=/i)) {
+        if (finalHtml.match(/<head>/i)) {
+          finalHtml = finalHtml.replace(/<head>/i, `<head><base href="${baseUrl}">`);
+        } else if (finalHtml.match(/<html>/i)) {
+          finalHtml = finalHtml.replace(/<html>/i, `<html><head><base href="${baseUrl}"></head>`);
+        } else {
+          finalHtml = `<head><base href="${baseUrl}"></head>${finalHtml}`;
+        }
+      }
+    }
+
+    if (inspectorMode) {
+      const inspectorTag = `<script>${INSPECTOR_SCRIPT_SOURCE}</script>`;
+      if (finalHtml.match(/<\/body>/i)) {
+        finalHtml = finalHtml.replace(/<\/body>/i, `${inspectorTag}</body>`);
+      } else {
+        finalHtml = `${finalHtml}${inspectorTag}`;
+      }
+    }
+
+    const blob = new Blob([finalHtml], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    setIframeBlobUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [htmlCode, inspectorMode, filePath]);
 
   /**
    * Listen for iframe messages
@@ -402,8 +406,12 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, filePath, hideToolba
         <div className={`${editMode ? 'flex-1' : 'w-full'} overflow-auto bg-white`}>
           <iframe
             ref={iframeRef}
+            src={iframeBlobUrl}
             className='w-full h-full border-0'
-            sandbox='allow-scripts allow-same-origin'
+            // Blob URL gives the iframe an opaque origin, so `allow-same-origin`
+            // is intentionally dropped (H2). The element inspector talks back
+            // through window.parent.postMessage, which works cross-origin.
+            sandbox='allow-scripts'
             title='HTML Preview'
           />
         </div>
