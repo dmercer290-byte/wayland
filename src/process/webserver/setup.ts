@@ -150,8 +150,12 @@ export function setupCors(app: Express, port: number, allowRemote: boolean): voi
           return;
         }
 
+        // Reject opaque origins (Origin: null). Sandboxed iframes, srcDoc
+        // documents, data: URLs, and file: URLs all send `Origin: null`, and
+        // allowing them effectively whitelists any attacker-controlled page
+        // that can spawn such a context.
         if (origin === 'null') {
-          callback(null, true);
+          callback(null, false);
           return;
         }
 
