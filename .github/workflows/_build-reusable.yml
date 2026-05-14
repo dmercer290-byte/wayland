@@ -29,6 +29,10 @@ env:
   WAYLAND_HUB_TAG: 'dist-ebc6a2b'
   # aionrs binary version to bundle (used by scripts/prepareAionrs.js)
   AIONRS_VERSION: 'latest'
+  # Pinned Bun runtime bundled into the packaged app. Must match
+  # PINNED_BUN_VERSION in scripts/prepareBundledBun.js and the
+  # corresponding entry in scripts/bundled-bun-shasums.json.
+  WAYLAND_BUN_VERSION: '1.3.14'
 
 jobs:
   code-quality:
