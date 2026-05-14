@@ -1,5 +1,6 @@
 import React, { Suspense } from 'react';
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { ErrorBoundary } from '@renderer/components/ErrorBoundary';
 import AppLoader from '@renderer/components/layout/AppLoader';
 import { useAuth } from '@renderer/hooks/context/AuthContext';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
@@ -54,7 +55,10 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
         <Route element={<ProtectedLayout layout={layout} />}>
           <Route index element={<Navigate to='/guid' replace />} />
           <Route path='/guid' element={withRouteFallback(Guid)} />
-          <Route path='/conversation/:id' element={withRouteFallback(Conversation)} />
+          <Route
+            path='/conversation/:id'
+            element={<ErrorBoundary>{withRouteFallback(Conversation)}</ErrorBoundary>}
+          />
           <Route path='/settings/aionrs' element={withRouteFallback(WCoreSettings)} />
           <Route
             path='/team/:id'

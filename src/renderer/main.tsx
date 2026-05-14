@@ -60,6 +60,7 @@ import './services/i18n';
 import { registerPwa } from './services/registerPwa';
 
 // Components and utilities
+import { ErrorBoundary } from './components/ErrorBoundary';
 import Layout from './components/layout/Layout';
 import Router from './components/layout/Router';
 import Sider from './components/layout/Sider';
@@ -138,4 +139,6 @@ const App = HOC.Wrapper(Config)(Main);
 void registerPwa();
 
 const root = createRoot(document.getElementById('root')!);
-root.render(React.createElement(AppProviders, null, React.createElement(App)));
+root.render(
+  React.createElement(ErrorBoundary, null, React.createElement(AppProviders, null, React.createElement(App)))
+);
