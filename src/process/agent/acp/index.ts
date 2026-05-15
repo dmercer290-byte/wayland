@@ -342,7 +342,7 @@ export class AcpAgent {
         };
         const sessionMode = yoloModeMap[this.extra.backend];
         if (sessionMode) {
-          await this.applySessionMode(sessionMode, true, `${this.extra.backend} YOLO mode`);
+          await this.applySessionMode(sessionMode, false, `${this.extra.backend} YOLO mode`);
         }
       } else if (this.extra.sessionMode && this.extra.sessionMode !== 'default') {
         // Apply non-default, non-YOLO session mode (e.g., acceptEdits, auto, dontAsk, plan)
@@ -445,6 +445,15 @@ export class AcpAgent {
         throw new Error(`[ACP] Failed to enable ${label} (${mode}): ${msg}`, { cause: error });
       }
       console.warn(`[ACP] Failed to set session mode "${mode}": ${msg}`);
+      // Surface a UI-visible warning so the user understands why permission
+      // prompts may still appear despite YOLO being requested. The session
+      // itself continues — a transient backend hiccup on setSessionMode must
+      // not block session start (upstream issue #2503).
+      const isYolo = /YOLO/i.test(label);
+      const userMessage = isYolo
+        ? `${label} could not be enabled (${msg}). You may see permission prompts during this session.`
+        : `Could not apply ${label} "${mode}" (${msg}). The session will continue with default permissions.`;
+      this.emitErrorMessage(userMessage);
     }
   }
 
