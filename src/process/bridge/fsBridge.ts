@@ -60,6 +60,35 @@ async function findBuiltinResourceDirNode(resourceType: ResourceType): Promise<s
 }
 
 /**
+ * Sanitize a skill name parsed from untrusted SKILL.md frontmatter before
+ * using it as a directory name on disk. Rejects path separators, drive
+ * letters, parent-traversal segments, control characters, and reserved
+ * Windows device names. Returns null when the input cannot be safely used
+ * as a single-segment directory name.
+ *
+ * Defense for the path-traversal vector documented in upstream PR #2226:
+ * the YAML `name:` field is attacker-controlled, so any value that escapes
+ * the user's skills directory must be rejected before `path.join`.
+ */
+function sanitizeSkillName(rawName: string): string | null {
+  if (typeof rawName !== 'string') return null;
+  const name = rawName.trim();
+  if (name.length === 0 || name.length > 128) return null;
+  // Disallow path separators, drive letters, NUL, and shell/FS-reserved chars
+  if (/[\\/:*?"<>|\0]/.test(name)) return null;
+  // Disallow control characters (0x00-0x1F, 0x7F)
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(name)) return null;
+  // Disallow parent-traversal or current-dir segments
+  if (name === '.' || name === '..') return null;
+  // Disallow leading dot (hidden files) and trailing dot/space (Windows quirk)
+  if (name.startsWith('.') || /[. ]$/.test(name)) return null;
+  // Disallow reserved Windows device names (case-insensitive, optional ext)
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(name)) return null;
+  return name;
+}
+
+/**
  * Copy directory recursively
  */
 async function copyDirectory(src: string, dest: string) {
@@ -1273,6 +1302,17 @@ export function initFsBridge(): void {
         }
       }
 
+      // Sanitize skill name (parsed from untrusted SKILL.md frontmatter)
+      // before using it as a directory name to prevent path traversal.
+      const safeSkillName = sanitizeSkillName(skillName);
+      if (!safeSkillName) {
+        return {
+          success: false,
+          msg: `Invalid skill name "${skillName}" — must not contain path separators or reserved characters`,
+        };
+      }
+      skillName = safeSkillName;
+
       // Get user skills directory
       const userSkillsDir = getSkillsDir();
       const targetDir = path.join(userSkillsDir, skillName);
@@ -1663,6 +1703,17 @@ export function initFsBridge(): void {
         if (nameMatch) skillName = nameMatch[1].trim();
       }
 
+      // Sanitize skill name (parsed from untrusted SKILL.md frontmatter)
+      // before using it as a directory name to prevent path traversal.
+      const safeSkillName = sanitizeSkillName(skillName);
+      if (!safeSkillName) {
+        return {
+          success: false,
+          msg: `Invalid skill name "${skillName}" — must not contain path separators or reserved characters`,
+        };
+      }
+      skillName = safeSkillName;
+
       const userSkillsDir = getSkillsDir();
       const targetDir = path.join(userSkillsDir, skillName);
 
@@ -1694,8 +1745,19 @@ export function initFsBridge(): void {
   // Delete a user custom skill
   ipcBridge.fs.deleteSkill.provider(async ({ skillName }) => {
     try {
+      // Sanitize incoming skill name (IPC arg from renderer) before using it
+      // as a directory component. Defense in depth alongside the path-prefix
+      // containment check below.
+      const safeSkillName = sanitizeSkillName(skillName);
+      if (!safeSkillName) {
+        return {
+          success: false,
+          msg: `Invalid skill name "${skillName}"`,
+        };
+      }
+
       const userSkillsDir = getSkillsDir();
-      const skillDir = path.join(userSkillsDir, skillName);
+      const skillDir = path.join(userSkillsDir, safeSkillName);
 
       const resolvedSkillDir = path.resolve(skillDir);
       const resolvedSkillsDir = path.resolve(userSkillsDir);

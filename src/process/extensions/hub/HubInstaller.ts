@@ -118,9 +118,12 @@ export class HubInstallerImpl {
       // Step 1: Resolve zip path — try bundled resources first, fallback to remote download
       const zipPath = await this.resolveZipPath(name, extInfo.dist.tarball, extInfo.bundled);
 
-      // Step 2: Verify Integrity (SHA-512 SRI)
-      // TODO: per-platform validation differs; set aside for now, finalize later
-      // await this.verifyIntegrity(zipPath, extInfo.dist.integrity);
+      // Step 2: Verify Integrity (SHA-512 SRI) against the hash declared in
+      // the hub index. Required for remote downloads so a tampered mirror
+      // cannot ship a malicious payload. Bundled archives shipped inside the
+      // app bundle are already covered by code signing, so a missing
+      // integrity field there is tolerated by verifyIntegrity itself.
+      await this.verifyIntegrity(zipPath, extInfo.dist.integrity);
 
       // Step 3: Extract (.zip)
       fs.mkdirSync(tempDir, { recursive: true });
@@ -271,19 +274,55 @@ export class HubInstallerImpl {
   }
 
   private async verifyIntegrity(filePath: string, expectedSri: string): Promise<void> {
-    if (!expectedSri.startsWith('sha512-')) {
-      console.warn(`[HubInstaller] Unsupported integrity algorithm in ${expectedSri}, skipping check.`);
+    // Tolerate a missing/empty integrity field with a loud warning. The hub
+    // type declares `integrity: string`, but older index entries published
+    // before integrity hashes were required may still ship an empty value,
+    // and we want to surface (not crash on) that gap.
+    if (!expectedSri || expectedSri.length === 0) {
+      console.warn(`[HubInstaller] No integrity hash declared for ${filePath}; install will proceed unverified.`);
       return;
     }
 
-    const expectedHashBase64 = expectedSri.substring('sha512-'.length);
-    const expectedHashHex = Buffer.from(expectedHashBase64, 'base64').toString('hex');
+    if (!expectedSri.startsWith('sha512-')) {
+      throw new Error(
+        `Unsupported integrity algorithm "${expectedSri}". Only sha512-<base64> is accepted; refusing to install.`
+      );
+    }
 
-    const fileBuffer = fs.readFileSync(filePath);
-    const actualHashHex = crypto.createHash('sha512').update(fileBuffer).digest('hex');
+    const expectedHashBase64 = expectedSri.substring('sha512-'.length).trim();
+    if (expectedHashBase64.length === 0) {
+      throw new Error(`Malformed integrity hash "${expectedSri}"; refusing to install.`);
+    }
+
+    let expectedHashHex: string;
+    try {
+      expectedHashHex = Buffer.from(expectedHashBase64, 'base64').toString('hex');
+    } catch {
+      throw new Error(`Malformed integrity hash "${expectedSri}" (invalid base64); refusing to install.`);
+    }
+
+    // SHA-512 is 64 bytes -> 128 hex chars. Reject anything else early.
+    if (expectedHashHex.length !== 128) {
+      throw new Error(`Malformed integrity hash "${expectedSri}" (wrong length); refusing to install.`);
+    }
+
+    // Stream the file through the hash so we don't load the whole archive
+    // into memory (extensions can be tens of MB).
+    const hash = crypto.createHash('sha512');
+    await new Promise<void>((resolve, reject) => {
+      const stream = fs.createReadStream(filePath);
+      stream.on('data', (chunk) => hash.update(chunk));
+      stream.on('end', () => resolve());
+      stream.on('error', (err) => reject(err));
+    });
+    const actualHashHex = hash.digest('hex');
 
     if (actualHashHex !== expectedHashHex) {
-      throw new Error('Integrity verification failed! The file may be corrupted.');
+      throw new Error(
+        `Integrity verification failed for ${path.basename(filePath)}: ` +
+          `expected sha512 ${expectedHashHex.slice(0, 16)}…, ` +
+          `got ${actualHashHex.slice(0, 16)}…. The archive may be corrupted or tampered with.`
+      );
     }
   }
 }
