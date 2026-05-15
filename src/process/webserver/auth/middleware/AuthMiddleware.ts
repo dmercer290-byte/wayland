@@ -6,9 +6,20 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import { z } from 'zod';
 import { AuthService } from '../service/AuthService';
 import { createAuthMiddleware } from './TokenMiddleware';
 import { SECURITY_CONFIG } from '../../config/constants';
+
+const loginInputSchema = z.object({
+  username: z.string().min(1).max(32),
+  password: z.string().min(1).max(128),
+});
+
+const registerInputSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
 
 // Express Request type extension is defined in src/types/express.d.ts
 
@@ -104,9 +115,11 @@ export class AuthMiddleware {
    * Input validation middleware for login
    */
   public static validateLoginInput(req: Request, res: Response, next: NextFunction): void {
-    const { username, password } = req.body;
+    const body = (req.body ?? {}) as { username?: unknown; password?: unknown };
 
-    if (!username || !password) {
+    // Preserve original error response shape and message ordering:
+    // missing fields → "required", wrong type → "must be strings", too long → "Invalid input length".
+    if (body.username === undefined || body.username === null || body.username === '' || body.password === undefined || body.password === null || body.password === '') {
       res.status(400).json({
         success: false,
         error: 'Username and password are required.',
@@ -114,7 +127,7 @@ export class AuthMiddleware {
       return;
     }
 
-    if (typeof username !== 'string' || typeof password !== 'string') {
+    if (typeof body.username !== 'string' || typeof body.password !== 'string') {
       res.status(400).json({
         success: false,
         error: 'Username and password must be strings.',
@@ -122,8 +135,8 @@ export class AuthMiddleware {
       return;
     }
 
-    // Basic length checks
-    if (username.length > 32 || password.length > 128) {
+    const result = loginInputSchema.safeParse(body);
+    if (!result.success) {
       res.status(400).json({
         success: false,
         error: 'Invalid input length.',
@@ -138,15 +151,15 @@ export class AuthMiddleware {
    * Input validation middleware for registration
    */
   public static validateRegisterInput(req: Request, res: Response, next: NextFunction): void {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
+    const parsed = registerInputSchema.safeParse(req.body);
+    if (!parsed.success) {
       res.status(400).json({
         success: false,
         error: 'Username and password are required.',
       });
       return;
     }
+    const { username, password } = parsed.data;
 
     // Validate username
     const usernameValidation = AuthService.validateUsername(username);

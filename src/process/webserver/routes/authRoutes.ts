@@ -5,6 +5,7 @@
  */
 
 import type { Express, Request, Response } from 'express';
+import { z } from 'zod';
 import { AuthService, BcryptBusyError } from '@process/webserver/auth/service/AuthService';
 import { AuthMiddleware } from '@process/webserver/auth/middleware/AuthMiddleware';
 import { UserRepository } from '@process/webserver/auth/repository/UserRepository';
@@ -14,6 +15,19 @@ import { createAppError } from '../middleware/errorHandler';
 import { authRateLimiter, authenticatedActionLimiter, apiRateLimiter } from '../middleware/security';
 import { verifyQRTokenDirect } from '@process/bridge/webuiQR';
 import { pickLocale, QR_LOGIN_STRINGS, type QrLoginStrings } from '../i18n/qrLogin';
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(1),
+});
+
+const refreshTokenSchema = z.object({
+  token: z.string().min(1).optional(),
+});
+
+const qrLoginSchema = z.object({
+  qrToken: z.string().min(1),
+});
 
 /**
  * QR login page HTML.
@@ -353,15 +367,15 @@ export function registerAuthRoutes(app: Express): void {
     authenticatedActionLimiter,
     async (req: Request, res: Response) => {
       try {
-        const { currentPassword, newPassword } = req.body;
-
-        if (!currentPassword || !newPassword) {
+        const parsed = changePasswordSchema.safeParse(req.body);
+        if (!parsed.success) {
           res.status(400).json({
             success: false,
             error: 'Current password and new password are required',
           });
           return;
         }
+        const { currentPassword, newPassword } = parsed.data;
 
         // Validate new password strength
         const passwordValidation = AuthService.validatePasswordStrength(newPassword);
@@ -426,7 +440,8 @@ export function registerAuthRoutes(app: Express): void {
   app.post('/api/auth/refresh', apiRateLimiter, authenticatedActionLimiter, (req: Request, res: Response) => {
     void (async () => {
       try {
-        const bodyToken = typeof req.body?.token === 'string' ? req.body.token : null;
+        const parsed = refreshTokenSchema.safeParse(req.body ?? {});
+        const bodyToken = parsed.success && parsed.data.token ? parsed.data.token : null;
         const token = bodyToken ?? TokenUtils.extractFromRequest(req);
 
         if (!token) {
@@ -509,15 +524,15 @@ export function registerAuthRoutes(app: Express): void {
    */
   app.post('/api/auth/qr-login', authRateLimiter, async (req: Request, res: Response) => {
     try {
-      const { qrToken } = req.body;
-
-      if (!qrToken) {
+      const parsed = qrLoginSchema.safeParse(req.body);
+      if (!parsed.success) {
         res.status(400).json({
           success: false,
           error: 'QR token is required',
         });
         return;
       }
+      const { qrToken } = parsed.data;
 
       // Get client IP (for local network restriction verification)
       const clientIP = req.ip || req.socket.remoteAddress || '';
