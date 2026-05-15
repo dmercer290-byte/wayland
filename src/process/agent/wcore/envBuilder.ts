@@ -10,7 +10,7 @@ import { isOpenAIHost } from '@/common/utils/urlValidation';
 type WCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex';
 
 /**
- * Map AionUi platform name to aionrs provider name.
+ * Map provider name to wcore provider name.
  *
  * AionUi PlatformType values: 'custom' | 'new-api' | 'gemini' | 'gemini-vertex-ai' | 'anthropic' | 'bedrock'
  */
@@ -40,10 +40,10 @@ const GEMINI_OPENAI_COMPAT_PATH = '/v1beta/openai';
  * Default `--max-tokens` budget for reasoning-tier models when the caller
  * does not specify one.
  *
- * Why this exists: upstream aionrs has no model-aware default for
+ * Why this exists: wcore has no model-aware default for
  * `max_tokens`. Reasoning models (Gemini Pro/Preview, future
  * `*-thinking`/`*-reasoning` variants) burn ~50-60 hidden "thinking" tokens
- * before emitting any visible output. With aionrs's low built-in default,
+ * before emitting any visible output. With wcore's low built-in default,
  * thinking consumes the entire budget, the API returns
  * `finish_reason: length`, and the user sees an empty response. Flash
  * variants are non-reasoning and work cleanly at low budgets, so we leave
@@ -90,7 +90,7 @@ function resolveOpenAIBaseUrl(model: TProviderWithModel): string {
 
 /**
  * Strip trailing `/v1` (with optional trailing slash) from a base URL.
- * aionrs appends `/v1/chat/completions` internally, so passing a URL
+ * wcore appends `/v1/chat/completions` internally, so passing a URL
  * that already ends with `/v1` would produce a double `/v1/v1/…` path.
  */
 function stripTrailingV1(url: string): string {
@@ -98,7 +98,7 @@ function stripTrailingV1(url: string): string {
 }
 
 /**
- * Build CLI args and env vars for spawning aionrs.
+ * Build CLI args and env vars for spawning wcore.
  */
 export function buildSpawnConfig(
   model: TProviderWithModel,
@@ -116,7 +116,7 @@ export function buildSpawnConfig(
   env: Record<string, string>;
   projectConfig: string;
   /**
-   * The max_tokens value actually passed to aionrs (or undefined if no `--max-tokens`
+   * The max_tokens value actually passed to wcore (or undefined if no `--max-tokens`
    * arg was added). Callers persist this so WCoreManager's truncation heuristic
    * can compare `output_tokens` against the real budget — including the silent
    * reasoning-model default from `defaultMaxTokensForModel`, which would otherwise
@@ -150,9 +150,9 @@ export function buildSpawnConfig(
   }
 
   // Set auth credentials and base URL via CLI args and env vars.
-  // aionrs reads: --api-key / API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
-  //               --base-url / BASE_URL (NOT OPENAI_BASE_URL)
-  // aionrs appends `/v1/chat/completions` to base_url, so URLs that already
+  // wcore reads: --api-key / API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
+  //              --base-url / BASE_URL (NOT OPENAI_BASE_URL)
+  // wcore appends `/v1/chat/completions` to base_url, so URLs that already
   // end with `/v1` (e.g. DashScope) must be stripped to avoid double `/v1`.
   switch (provider) {
     case 'anthropic':
@@ -193,7 +193,7 @@ export function buildSpawnConfig(
 }
 
 /**
- * Build `.aionrs.toml` project config content for provider compat overrides.
+ * Build `.wcore.toml` project config content for provider compat overrides.
  * Returns non-empty string only when overrides are needed.
  *
  * - Gemini's OpenAI-compatible endpoint already includes version in the base URL

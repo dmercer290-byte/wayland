@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// aionrs JSON Stream Protocol types
-// Reference: aionrs/docs/json-stream-protocol.md
+// wcore JSON Stream Protocol types
+// Reference: wayland-core/docs/json-stream-protocol.md
 
 // ============================================
 // Agent -> Client Events (stdout)
@@ -74,7 +74,7 @@ export type WCoreEvent =
       msg_id: string;
       usage?: TokenUsage;
       /**
-       * Why the model stopped. Optional for protocol back-compat: aionrs ≤0.1.21
+       * Why the model stopped. Optional for protocol back-compat: wcore ≤0.1.21
        * omits this field. When `length`, the response was truncated because the
        * token budget was exhausted (commonly caused by Gemini Pro thinking
        * tokens consuming the entire allocation before any visible output).

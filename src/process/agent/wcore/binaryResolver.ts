@@ -13,11 +13,8 @@ import { execFileSync } from 'node:child_process';
  *  1. `wayland-core`  — primary, written by `prepareWaylandCore.js` and
  *     published by the engine's release workflow.
  *  2. `wcore`         — convenience symlink users may have created.
- *  3. `aionrs`        — backward-compat fallback for users with an
- *     existing `cargo install` or pre-existing PATH binary from before
- *     the engine rebrand.
  */
-const BINARY_CANDIDATES: readonly string[] = ['wayland-core', 'wcore', 'aionrs'];
+const BINARY_CANDIDATES: readonly string[] = ['wayland-core', 'wcore'];
 
 function withPlatformExt(name: string): string {
   return process.platform === 'win32' ? `${name}.exe` : name;

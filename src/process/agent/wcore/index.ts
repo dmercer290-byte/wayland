@@ -14,12 +14,12 @@ import { resolveWCoreBinary } from './binaryResolver';
 import { buildSpawnConfig } from './envBuilder';
 import type { WCoreEvent, WCoreCommand, WCoreCapabilities } from './protocol';
 
-const AIONRS_PROJECT_CONFIG = '.aionrs.toml';
+const WCORE_PROJECT_CONFIG = '.wcore.toml';
 
 type StreamEventHandler = (event: { type: string; data: unknown; msg_id: string }) => void;
 
 /**
- * A stdio-transport MCP server to inject into the aionrs session. Each entry
+ * A stdio-transport MCP server to inject into the wcore session. Each entry
  * is forwarded verbatim as an `add_mcp_server` command. `awaitReady` flags
  * that the server performs a ready handshake (e.g. team coordination MCP
  * waits for TEAM_AGENT_SLOT_ID registration); leave it false for fire-and-
@@ -44,7 +44,7 @@ export type WCoreAgentOptions = {
   sessionId?: string;
   resume?: string;
   /**
-   * Stdio MCP servers to register with the aionrs session after start.
+   * Stdio MCP servers to register with the wcore session after start.
    * Caller decides which MCPs belong here (team coordination, team-guide,
    * future project MCPs, etc.) — WCoreAgent just forwards them.
    */
@@ -71,7 +71,7 @@ export class WCoreAgent {
   public sessionId?: string;
   public capabilities?: WCoreCapabilities;
   /**
-   * The `--max-tokens` value actually passed to aionrs, after applying the
+   * The `--max-tokens` value actually passed to wcore, after applying the
    * reasoning-model default fallback in `buildSpawnConfig`. `undefined` when
    * no `--max-tokens` arg was added. Set during `start()`; `WCoreManager`
    * mirrors this into `data.data.maxTokens` so the truncation heuristic
@@ -100,7 +100,7 @@ export class WCoreAgent {
   async start(): Promise<void> {
     const binaryPath = resolveWCoreBinary();
     if (!binaryPath) {
-      throw new Error('aionrs binary not found');
+      throw new Error('wcore binary not found');
     }
 
     const { args, env, projectConfig, resolvedMaxTokens } = buildSpawnConfig(this.options.model, {
@@ -113,7 +113,7 @@ export class WCoreAgent {
     });
     this.resolvedMaxTokens = resolvedMaxTokens;
 
-    // Write temporary .aionrs.toml for provider compat overrides
+    // Write temporary .wcore.toml for provider compat overrides
     if (projectConfig) {
       this.writeProjectConfig(projectConfig);
     }
@@ -137,14 +137,14 @@ export class WCoreAgent {
 
     // Log stderr as diagnostics
     this.childProcess.stderr?.on('data', (chunk: Buffer) => {
-      console.error('[aionrs]', chunk.toString());
+      console.error('[wcore]', chunk.toString());
     });
 
     // Handle process exit
     this.childProcess.on('exit', (code) => {
       this.restoreProjectConfig();
       if (!this.ready) {
-        this.readyReject(new Error(`aionrs exited with code ${code} during init`));
+        this.readyReject(new Error(`wcore exited with code ${code} during init`));
       }
       if (this.activeMsgId && this._onProcessExit) {
         this._onProcessExit(code, this.activeMsgId);
@@ -155,7 +155,7 @@ export class WCoreAgent {
 
     // Wait for ready event with timeout
     const timeout = new Promise<void>((_, reject) => {
-      setTimeout(() => reject(new Error('aionrs ready timeout (30s)')), 30000);
+      setTimeout(() => reject(new Error('wcore ready timeout (30s)')), 30000);
     });
 
     try {
@@ -351,7 +351,7 @@ export class WCoreAgent {
   }
 
   /**
-   * Map aionrs tool_request to AionUi confirmation details format.
+   * Map wcore tool_request to AionUi confirmation details format.
    */
   private mapConfirmationDetails(event: WCoreEvent & { type: 'tool_request' }) {
     const { tool } = event;
@@ -446,11 +446,11 @@ export class WCoreAgent {
   }
 
   /**
-   * Write a temporary .aionrs.toml in the workspace for provider compat overrides.
+   * Write a temporary .wcore.toml in the workspace for provider compat overrides.
    * Backs up existing file content so it can be restored on exit.
    */
   private writeProjectConfig(content: string): void {
-    const configPath = join(this.options.workspace, AIONRS_PROJECT_CONFIG);
+    const configPath = join(this.options.workspace, WCORE_PROJECT_CONFIG);
     const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
     this.configBackup = { path: configPath, content: existing };
 
@@ -467,7 +467,7 @@ export class WCoreAgent {
   }
 
   /**
-   * Restore or remove the .aionrs.toml written by writeProjectConfig.
+   * Restore or remove the .wcore.toml written by writeProjectConfig.
    */
   private restoreProjectConfig(): void {
     if (!this.configBackup) return;

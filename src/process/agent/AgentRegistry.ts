@@ -70,17 +70,11 @@ class AgentRegistry {
 
   private createWCoreAgent(): WCoreDetectedAgent {
     return {
-      // Routing identifiers (`id`, `backend`) stay as 'aionrs' — they're
-      // internal lookup keys read by 25+ sites and are NOT part of the
-      // dual-write rename (see Task E locked decisions in BLACKBOARD).
-      id: 'aionrs',
+      id: 'wcore',
       name: 'Wayland Core',
-      // `kind` is the conversation kind/type persisted to the DB. NEW writes
-      // emit 'wcore'; readers downstream accept both 'wcore' and 'aionrs'
-      // for backward compat with existing user data.
       kind: 'wcore',
       available: true,
-      backend: 'aionrs',
+      backend: 'wcore',
     };
   }
 
