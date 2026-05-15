@@ -159,12 +159,12 @@ class PPTX2Json {
   getMaxSlideIds(json) {
     let mx = { id: -1, rid: -1 };
 
-    if (!PresentationXML in json) {
+    if (!(PresentationXML in json)) {
       return mx;
     }
     const presen = json[PresentationXML];
 
-    if (!'p:presentation' in json[PresentationXML] || !'p:sldIdLst' in presen['p:presentation']) {
+    if (!('p:presentation' in json[PresentationXML]) || !('p:sldIdLst' in presen['p:presentation'])) {
       return mx;
     }
 

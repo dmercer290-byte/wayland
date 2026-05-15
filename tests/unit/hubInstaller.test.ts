@@ -92,7 +92,10 @@ function makeExtInfo(name: string, bundled = false) {
     displayName: name,
     description: 'test',
     author: 'test',
-    dist: { tarball: `extensions/${name}.zip`, integrity: 'sha512-abc', unpackedSize: 100 },
+    // integrity left empty → verifyIntegrity logs "proceed unverified" warning and returns.
+    // Dedicated integrity-path tests live in a separate spec; these fixtures exercise
+    // acpAdapter detection and other post-install verification logic only.
+    dist: { tarball: `extensions/${name}.zip`, integrity: '', unpackedSize: 100 },
     engines: { wayland: '>=1.0.0' },
     hubs: ['acpAdapters'],
     bundled,

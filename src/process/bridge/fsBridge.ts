@@ -75,6 +75,7 @@ function sanitizeSkillName(rawName: string): string | null {
   const name = rawName.trim();
   if (name.length === 0 || name.length > 128) return null;
   // Disallow path separators, drive letters, NUL, and shell/FS-reserved chars
+  // eslint-disable-next-line no-control-regex
   if (/[\\/:*?"<>|\0]/.test(name)) return null;
   // Disallow control characters (0x00-0x1F, 0x7F)
   // eslint-disable-next-line no-control-regex
