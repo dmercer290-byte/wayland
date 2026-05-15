@@ -23,14 +23,8 @@ export type RemoteAgentProtocol = 'openclaw' | 'zeroclaw' | 'acp';
 /** Remote agent authentication method */
 export type RemoteAgentAuthType = 'bearer' | 'password' | 'none';
 
-/** Execution engine kinds — each uses a different protocol or runtime.
- *
- *  `'wcore'` and `'aionrs'` are the same execution engine (wayland-core
- *  / aionrs Rust binary). Both values coexist under the dual-write/read
- *  policy: new conversations persist as `'wcore'`; existing user rows
- *  remain readable as `'aionrs'`. They share the same KindFields shape.
- */
-export type DetectedAgentKind = 'gemini' | 'acp' | 'remote' | 'aionrs' | 'wcore' | 'openclaw-gateway' | 'nanobot';
+/** Execution engine kinds — each uses a different protocol or runtime. */
+export type DetectedAgentKind = 'gemini' | 'acp' | 'remote' | 'wcore' | 'openclaw-gateway' | 'nanobot';
 
 /** Kind-specific fields mapping */
 type KindFields = {
@@ -60,16 +54,11 @@ type KindFields = {
     authType: RemoteAgentAuthType;
   };
 
-  aionrs: {
+  /** Wayland-Core (wcore) — Rust engine binary, native execution. */
+  wcore: {
     /** Resolved CLI binary path */
     cliPath?: string;
     /** Binary version string */
-    version?: string;
-  };
-
-  /** Same shape as `aionrs` — dual-write/read alias for wayland-core engine. */
-  wcore: {
-    cliPath?: string;
     version?: string;
   };
 
@@ -105,7 +94,7 @@ export type DetectedAgent<K extends DetectedAgentKind = DetectedAgentKind> = {
 export type AcpDetectedAgent = DetectedAgent<'acp'>;
 export type GeminiDetectedAgent = DetectedAgent<'gemini'>;
 export type RemoteDetectedAgent = DetectedAgent<'remote'>;
-export type WCoreDetectedAgent = DetectedAgent<'wcore' | 'aionrs'>;
+export type WCoreDetectedAgent = DetectedAgent<'wcore'>;
 export type NanobotDetectedAgent = DetectedAgent<'nanobot'>;
 export type OpenClawDetectedAgent = DetectedAgent<'openclaw-gateway'>;
 

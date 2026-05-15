@@ -6,10 +6,9 @@
 
 // src/process/task/agentTypes.ts
 
-// 'wcore' and 'aionrs' both target the wayland-core engine (dual-write/read
-// policy — see Task E in BLACKBOARD). NEW conversations persist as 'wcore';
-// existing rows remain readable as 'aionrs'.
-export type AgentType = 'gemini' | 'acp' | 'openclaw-gateway' | 'nanobot' | 'remote' | 'aionrs' | 'wcore';
+// 'wcore' targets the Wayland-Core Rust engine. Legacy 'aionrs' alias was
+// ripped out in session 4 — there are no production users to migrate.
+export type AgentType = 'gemini' | 'acp' | 'openclaw-gateway' | 'nanobot' | 'remote' | 'wcore';
 export type AgentStatus = 'pending' | 'running' | 'finished';
 
 export interface BuildConversationOptions {

@@ -36,7 +36,7 @@ export type AcpBackendAll =
   | 'custom'; // User-configured custom ACP agent (extension adapters)
 
 // Superset type covering all execution engine backends (ACP + non-ACP).
-export type AgentBackend = AcpBackendAll | 'gemini' | 'remote' | 'aionrs' | 'nanobot' | 'openclaw-gateway';
+export type AgentBackend = AcpBackendAll | 'gemini' | 'remote' | 'wcore' | 'nanobot' | 'openclaw-gateway';
 
 /**
  * 潜在的 ACP CLI 工具列表
@@ -496,14 +496,9 @@ export type AcpBackend = keyof typeof ACP_BACKENDS_ALL;
  */
 // The wayland-core engine's project-level skill discovery walks for
 // `.wayland-core/skills/` (see engine crates/wcore-skills/src/paths.rs:46).
-// Both 'wcore' (post-rebrand kind) and 'aionrs' (legacy kind, dual-read)
-// resolve to the same engine-side discovery path. The pre-rebrand value
-// `.aionrs/skills` was a known mismatch — engine never read from that
-// directory; symlinks landed in a directory the engine ignored.
 const NON_ACP_SKILLS_DIRS: Record<string, string[]> = {
   gemini: ['.gemini/skills'],
   wcore: ['.wayland-core/skills'],
-  aionrs: ['.wayland-core/skills'],
 };
 
 /**
