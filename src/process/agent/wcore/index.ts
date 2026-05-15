@@ -347,6 +347,270 @@ export class WCoreAgent {
       case 'pong':
         this._onPong?.();
         break;
+
+      // ── W7 F4: streaming tool-result chunk ─────────────────────────
+      // Forward as an `info`-channel update so the renderer can append
+      // partial output to the in-flight tool card. Hosts that don't
+      // surface tool_chunk yet still see the final `tool_result` carrying
+      // the full buffered output.
+      case 'tool_chunk':
+        this.onStreamEvent({
+          type: 'tool_chunk',
+          data: { callId: event.call_id, toolName: event.tool_name, chunk: event.chunk },
+          msg_id: event.msg_id,
+        });
+        break;
+
+      // ── Safety-critical: browser policy denied ─────────────────────
+      // Surface to the user as an error so the policy decision is visible.
+      // Gated by `capabilities.browser_suite`; only the wayland-browser
+      // plugin emits it.
+      case 'browser_policy_denied':
+        console.warn('[WCoreAgent] browser_policy_denied', { url: event.url, reason: event.reason });
+        this.onStreamEvent({
+          type: 'error',
+          data: `Browser policy denied: ${event.reason} (${event.url})`,
+          msg_id: event.msg_id,
+        });
+        break;
+
+      // ── W8c.1 browser op event ────────────────────────────────────
+      // Forward typed so the renderer can render a compact browser-op
+      // trail; safe to drop if the renderer hasn't wired it.
+      case 'browser_event':
+        this.onStreamEvent({
+          type: 'browser_event',
+          data: { callId: event.call_id, op: event.op, url: event.url, summary: event.summary },
+          msg_id: event.msg_id,
+        });
+        break;
+
+      // ── Safety-critical: CUA policy denied ─────────────────────────
+      // Mirrors browser_policy_denied for the computer-use surface.
+      case 'cua_policy_denied':
+        console.warn('[WCoreAgent] cua_policy_denied', {
+          op: event.op,
+          app: event.app,
+          reason: event.reason,
+        });
+        this.onStreamEvent({
+          type: 'error',
+          data: `Computer-use policy denied: ${event.reason} (op=${event.op}${
+            event.app ? `, app=${event.app}` : ''
+          })`,
+          msg_id: event.msg_id,
+        });
+        break;
+
+      // ── W8c.2 CUA op event ────────────────────────────────────────
+      case 'cua_event':
+        this.onStreamEvent({
+          type: 'cua_event',
+          data: {
+            callId: event.call_id,
+            op: event.op,
+            coords: event.coords,
+            summary: event.summary,
+          },
+          msg_id: event.msg_id,
+        });
+        break;
+
+      // ── Wave RB: tool panic recovery ──────────────────────────────
+      // The engine has already converted the panic to a synthetic
+      // ToolResult; this event lets us surface the panic as a distinct
+      // diagnostic (vs. a normal `is_error: true` ToolResult).
+      case 'tool_panicked':
+        console.error('[WCoreAgent] tool_panicked', {
+          tool: event.tool_name,
+          callId: event.call_id,
+          message: event.panic_message,
+        });
+        this.onStreamEvent({
+          type: 'error',
+          data: `Tool ${event.tool_name} panicked: ${event.panic_message}`,
+          msg_id: event.msg_id,
+        });
+        break;
+
+      // ── Wave RB: plugin registration failed ───────────────────────
+      // Plugin still loaded — partial registration is allowed — but the
+      // user should see why an expected tool/hook is missing.
+      case 'plugin_registration_failed':
+        console.error('[WCoreAgent] plugin_registration_failed', {
+          plugin: event.plugin_name,
+          surface: event.surface,
+          kind: event.error_kind,
+          message: event.message,
+        });
+        this.onStreamEvent({
+          type: 'info',
+          data: `Plugin "${event.plugin_name}" failed to register ${event.surface}: ${event.message}`,
+          msg_id: '',
+        });
+        break;
+
+      // ── W7 F8: provider circuit-breaker transition ─────────────────
+      // Always emitted (no capability flag) — surface `open` state as a
+      // user-visible info so users notice failover; log-only for
+      // half_open / closed transitions.
+      case 'provider_circuit_event':
+        console.warn('[WCoreAgent] provider_circuit_event', {
+          primary: event.primary,
+          fallback: event.fallback,
+          state: event.state,
+          error: event.error,
+        });
+        if (event.state === 'open') {
+          this.onStreamEvent({
+            type: 'info',
+            data: `Provider ${event.primary} circuit opened${
+              event.fallback ? ` — falling back to ${event.fallback}` : ''
+            }${event.error ? `: ${event.error}` : ''}`,
+            msg_id: this.activeMsgId ?? '',
+          });
+        }
+        break;
+
+      // ── W8a A.7: ExecutionBudget cap exceeded ─────────────────────
+      // Always emitted (no capability flag); surface as user-visible
+      // info so the user knows why the session stopped.
+      case 'budget_exceeded':
+        console.warn('[WCoreAgent] budget_exceeded', {
+          reason: event.reason,
+          observed: event.observed,
+          limit: event.limit,
+        });
+        this.onStreamEvent({
+          type: 'info',
+          data: `Budget exceeded: ${event.reason} (observed ${event.observed}, limit ${event.limit})`,
+          msg_id: this.activeMsgId ?? '',
+        });
+        break;
+
+      // ── W7 S4: HITL approval flow ─────────────────────────────────
+      // Forward typed so a future renderer can render an approval modal.
+      // For now log + surface as info.
+      case 'approval_required':
+        console.warn('[WCoreAgent] approval_required', {
+          callId: event.call_id,
+          reason: event.reason,
+        });
+        this.onStreamEvent({
+          type: 'approval_required',
+          data: {
+            callId: event.call_id,
+            resumeToken: event.resume_token,
+            correlationId: event.correlation_id,
+            reason: event.reason,
+            context: event.context,
+          },
+          msg_id: this.activeMsgId ?? '',
+        });
+        break;
+
+      case 'suspend':
+        this.onStreamEvent({
+          type: 'suspend',
+          data: { reason: event.reason, resumeToken: event.resume_token },
+          msg_id: this.activeMsgId ?? '',
+        });
+        break;
+
+      case 'approval_resume':
+        this.onStreamEvent({
+          type: 'approval_resume',
+          data: { resumeToken: event.resume_token, approved: event.approved },
+          msg_id: this.activeMsgId ?? '',
+        });
+        break;
+
+      // ── W1 F9: structured turn trace ──────────────────────────────
+      // Opaque payload; forward typed so a future trace UI can opt in.
+      case 'trace_event':
+        this.onStreamEvent({
+          type: 'trace_event',
+          data: event.trace,
+          msg_id: event.msg_id,
+        });
+        break;
+
+      // ── W6 F7: end-of-session cost aggregate ──────────────────────
+      case 'session_cost':
+        this.onStreamEvent({
+          type: 'session_cost',
+          data: {
+            sessionId: event.session_id,
+            totalCostUsd: event.total_cost_usd,
+            perTurn: event.per_turn,
+          },
+          msg_id: '',
+        });
+        break;
+
+      // ── W7 F2: sub-agent event (inner payload is opaque) ──────────
+      case 'sub_agent_event':
+        this.onStreamEvent({
+          type: 'sub_agent_event',
+          data: {
+            parentCallId: event.parent_call_id,
+            agentName: event.agent_name,
+            inner: event.inner,
+          },
+          msg_id: '',
+        });
+        break;
+
+      // ── W8a H.1: plugin-emitted event ─────────────────────────────
+      case 'plugin_event':
+        this.onStreamEvent({
+          type: 'plugin_event',
+          data: {
+            pluginName: event.plugin_name,
+            eventType: event.event_type,
+            payload: event.payload,
+          },
+          msg_id: '',
+        });
+        break;
+
+      // ── W10B F12: GEPA evolution event ────────────────────────────
+      case 'evolution_event':
+        this.onStreamEvent({
+          type: 'evolution_event',
+          data: {
+            runId: event.run_id,
+            generation: event.generation,
+            parentId: event.parent_id,
+            childId: event.child_id,
+            mutationKind: event.mutation_kind,
+            score: event.score,
+            retained: event.retained,
+          },
+          msg_id: '',
+        });
+        break;
+
+      // ── Forward-compat default arm ────────────────────────────────
+      // The W0 Host Decoder Contract (docs/json-stream-protocol.md
+      // §"Host Decoder Contract") says hosts MUST drop unknown event
+      // types silently. We deliberately log at warn level instead: any
+      // line reaching this arm is a variant the engine emits but this
+      // host hasn't enumerated, which is the exact failure mode this
+      // file exists to prevent (safety-critical events like
+      // `browser_policy_denied` were being silently dropped for an
+      // entire engine release). The warn is observability, not
+      // user-facing — ops sees the gap before users do. The cast keeps
+      // TypeScript's exhaustiveness check honest (every variant in
+      // WCoreEvent is handled above; this branch only fires at runtime
+      // when the engine ships a new variant before this host learns it).
+      default: {
+        const unknownEvent = event as { type?: unknown };
+        const typeStr =
+          typeof unknownEvent.type === 'string' ? unknownEvent.type : '<non-string>';
+        console.warn(`[WCoreAgent] unknown event type "${typeStr}" — dropping`, event);
+        break;
+      }
     }
   }
 
