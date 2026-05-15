@@ -53,7 +53,13 @@ export interface IPlatformPaths {
 export interface IWorkerProcess {
   postMessage(message: unknown): void;
   on(event: string, handler: (...args: unknown[]) => void): this;
-  kill(): void;
+  /**
+   * Terminate the child process. Resolves when the child has actually exited,
+   * or after a 2s timeout falls back to SIGKILL and resolves anyway.
+   * AUDIT-05 F20 / M18: callers (ForkTask.kill → WorkerTaskManager.clear) await
+   * this so Cmd+Q before-quit cleanup doesn't return before children die.
+   */
+  kill(): Promise<void>;
 }
 
 /**

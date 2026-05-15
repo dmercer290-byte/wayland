@@ -1582,7 +1582,7 @@ ${collectedResponses.join('\n')}`;
    * An idempotent doKill() guard prevents double super.kill() when the hard
    * timeout and graceful path race against each other.
    */
-  kill(_reason?: AgentKillReason) {
+  kill(_reason?: AgentKillReason): Promise<void> {
     this.flushBufferedStreamTextMessages();
     this.flushThinkingToDb(undefined, 'done');
 
@@ -1597,23 +1597,29 @@ ${collectedResponses.join('\n')}`;
     }
     this.acpAvailableSlashCommands = [];
 
-    const doKill = () => {
-      if (killed) return;
-      killed = true;
-      clearTimeout(hardTimer);
-      super.kill();
-    };
+    // Resolved when super.kill() (the underlying worker teardown) has actually
+    // completed, regardless of whether we got there via grace path or hard
+    // timeout. AUDIT-05 F20 / M18: callers (WorkerTaskManager.clear) await this.
+    return new Promise<void>((resolveOuter) => {
+      const doKill = () => {
+        if (killed) return;
+        killed = true;
+        clearTimeout(hardTimer);
+        // super.kill() is now async (ForkTask M18); await it before resolving.
+        void Promise.resolve(super.kill()).finally(resolveOuter);
+      };
 
-    // Hard fallback: force kill after timeout regardless
-    const hardTimer = setTimeout(doKill, HARD_TIMEOUT_MS);
+      // Hard fallback: force kill after timeout regardless
+      const hardTimer = setTimeout(doKill, HARD_TIMEOUT_MS);
 
-    // Graceful path: agent.kill → grace period → super.kill
-    void (this.agent?.kill?.() || Promise.resolve())
-      .catch((err) => {
-        mainWarn('[AcpAgentManager]', 'agent.kill() failed during kill', err);
-      })
-      .then(() => new Promise<void>((r) => setTimeout(r, GRACE_PERIOD_MS)))
-      .finally(doKill);
+      // Graceful path: agent.kill → grace period → super.kill
+      void (this.agent?.kill?.() || Promise.resolve())
+        .catch((err) => {
+          mainWarn('[AcpAgentManager]', 'agent.kill() failed during kill', err);
+        })
+        .then(() => new Promise<void>((r) => setTimeout(r, GRACE_PERIOD_MS)))
+        .finally(doKill);
+    });
   }
 
   /**

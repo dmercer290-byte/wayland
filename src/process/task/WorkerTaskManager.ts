@@ -33,9 +33,12 @@ export class WorkerTaskManager implements IWorkerTaskManager {
   ) {
     this.idleCheckTimer = setInterval(() => this.killIdleCliAgents(), AGENT_IDLE_CHECK_INTERVAL_MS);
     this.shutdownHandler = () => {
+      // `process.on('exit', ...)` is synchronous — Node will not wait on
+      // returned promises here. Fire-and-forget; the actual graceful await
+      // happens earlier via before-quit → clear() (AUDIT-05 F20 / M18).
       for (const item of this.taskList) {
         try {
-          item.task.kill();
+          void item.task.kill();
         } catch {
           // best-effort during process exit
         }
@@ -97,7 +100,9 @@ export class WorkerTaskManager implements IWorkerTaskManager {
     if (existing) {
       // Kill the old process before replacing to prevent orphaned child processes.
       // Without this, getOrBuildTask(skipCache: true) leaves the old agent running.
-      existing.task.kill();
+      // kill() is async (AUDIT-05 F20 / M18) but addTask itself is sync — the
+      // old agent's exit doesn't block creating the replacement.
+      void existing.task.kill();
       existing.task = task;
     } else {
       this.taskList.push({ id, task });
@@ -107,7 +112,9 @@ export class WorkerTaskManager implements IWorkerTaskManager {
   kill(id: string, reason?: AgentKillReason): void {
     const index = this.taskList.findIndex((item) => item.id === id);
     if (index === -1) return;
-    this.taskList[index]?.task.kill(reason);
+    // kill() is async (AUDIT-05 F20 / M18); fire-and-forget here. Callers that
+    // need to wait for the child to die (e.g. before-quit) go through clear().
+    void this.taskList[index]?.task.kill(reason);
     this.taskList.splice(index, 1);
   }
 
@@ -119,19 +126,20 @@ export class WorkerTaskManager implements IWorkerTaskManager {
     process.off('exit', this.shutdownHandler);
     const tasks = [...this.taskList];
     this.taskList = [];
-    // Trigger kill on all tasks — kill() returns void but may start async
-    // cleanup internally (e.g. AcpAgentManager has a 1.5s hard timeout,
-    // and killChild() on Windows uses taskkill with up to 5s timeout).
-    for (const item of tasks) {
-      try {
-        item.task.kill();
-      } catch {
-        // Ignore errors from individual kills
-      }
-    }
-    // Wait long enough for internal async cleanup to complete
+    // AUDIT-05 F20 / M18: kill() now returns a Promise that resolves when the
+    // child has actually exited (or after each agent's internal hard timeout).
+    // Use allSettled (not all) so one stuck child doesn't block the others, and
+    // await all of them so before-quit doesn't return before children die.
     if (tasks.length > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 5000));
+      await Promise.allSettled(
+        tasks.map((item) => {
+          try {
+            return item.task.kill();
+          } catch (err) {
+            return Promise.reject(err);
+          }
+        })
+      );
     }
   }
 

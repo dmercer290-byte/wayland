@@ -36,11 +36,16 @@ export class ForkTask<Data> extends Pipe {
     this.enableFork = enableFork;
     if (this.enableFork) this.init();
   }
-  kill() {
-    if (this.fcp) {
-      this.childExitExpected = true;
-      this.fcp.kill();
-    }
+  /**
+   * Terminate the forked child and wait for it to actually exit.
+   * AUDIT-05 F20 / M18: `await workerTaskManager.clear()` in before-quit relies
+   * on this promise resolving only after the child dies, so Cmd+Q during an
+   * active Claude/Gemini stream doesn't leave `bun` children running.
+   */
+  kill(): Promise<void> {
+    if (!this.fcp) return Promise.resolve();
+    this.childExitExpected = true;
+    return this.fcp.kill();
   }
   protected init() {
     const platform = getPlatformServices();
@@ -62,11 +67,13 @@ export class ForkTask<Data> extends Pipe {
       const e = args[0] as IForkData;
       if (e.type === 'complete') {
         this.childExitExpected = true;
-        fcp.kill();
+        // Fire-and-forget: emit 'complete' immediately; the child's exit is awaited
+        // only via the public kill() path used by WorkerTaskManager.clear().
+        void fcp.kill();
         this.emit('complete', e.data);
       } else if (e.type === 'error') {
         this.childExitExpected = true;
-        fcp.kill();
+        void fcp.kill();
         this.emit('error', e.data);
       } else {
         // clientId acts as the IPC key between main and child processes

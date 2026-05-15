@@ -16,8 +16,38 @@ class NodeWorkerProcess implements IWorkerProcess {
     return this;
   }
 
-  kill(): void {
-    this.cp.kill();
+  /**
+   * Send SIGTERM and wait for the child to actually exit (or 2s, then SIGKILL).
+   * AUDIT-05 F20 / M18: prevents `bun` children from leaking past Cmd+Q.
+   */
+  kill(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      // Already dead — nothing to wait on.
+      if (this.cp.exitCode !== null || this.cp.signalCode !== null) {
+        resolve();
+        return;
+      }
+      const onExit = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        this.cp.off('exit', onExit);
+        try {
+          this.cp.kill('SIGKILL');
+        } catch {
+          // best-effort
+        }
+        resolve();
+      }, 2000);
+      this.cp.once('exit', onExit);
+      try {
+        this.cp.kill();
+      } catch {
+        // already dead between exitCode check and kill() — exit may or may not fire,
+        // so resolve via timer fallback rather than hang.
+      }
+    });
   }
 }
 

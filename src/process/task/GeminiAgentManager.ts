@@ -524,8 +524,10 @@ export class GeminiAgentManager extends BaseAgentManager<
           '[GeminiAgentManager]',
           `MCP config changed (${this.mcpFingerprint} -> ${currentFingerprint}), re-bootstrapping worker...`
         );
-        // Kill old worker process and its child processes (MCP server connections)
-        this.kill();
+        // Kill old worker process and its child processes (MCP server connections).
+        // kill() is async (AUDIT-05 F20 / M18) but we don't need to wait here —
+        // re-bootstrap below spawns a fresh worker independent of the old one's exit.
+        void this.kill();
         // Re-bootstrap with fresh config (getMcpServers will update the fingerprint)
         this.bootstrap = this.createBootstrap();
         await this.bootstrap;

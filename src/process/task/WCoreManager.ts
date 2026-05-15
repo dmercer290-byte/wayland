@@ -904,10 +904,16 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     }
   }
 
-  override kill() {
+  override kill(): Promise<void> {
     if (this.agent) {
-      this.agent.kill();
+      try {
+        this.agent.kill();
+      } catch {
+        // best-effort
+      }
     }
-    super.kill();
+    // super.kill() is async (ForkTask M18); return its promise so callers
+    // (WorkerTaskManager.clear) can await child exit.
+    return Promise.resolve(super.kill());
   }
 }

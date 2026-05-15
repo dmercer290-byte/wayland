@@ -167,12 +167,15 @@ class NanoBotAgentManager extends BaseAgentManager<NanoBotAgentManagerData> {
     return this.agent?.stop?.() ?? Promise.resolve();
   }
 
-  kill() {
+  kill(): Promise<void> {
     try {
       this.agent?.kill?.();
-    } finally {
-      super.kill();
+    } catch {
+      // best-effort
     }
+    // super.kill() is async (ForkTask M18); return its promise so callers
+    // (WorkerTaskManager.clear) can await child exit.
+    return Promise.resolve(super.kill());
   }
 }
 

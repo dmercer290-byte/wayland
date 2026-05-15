@@ -26,5 +26,10 @@ export interface IAgentManager {
   stop(): Promise<void>;
   confirm(msgId: string, callId: string, data: unknown): void;
   getConfirmations(): IConfirmation[];
-  kill(reason?: AgentKillReason): void;
+  /**
+   * Terminate the agent and wait for its child process to actually exit.
+   * AUDIT-05 F20 / M18: WorkerTaskManager.clear() awaits Promise.allSettled
+   * over every kill() so before-quit doesn't return before children die.
+   */
+  kill(reason?: AgentKillReason): Promise<void>;
 }

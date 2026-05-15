@@ -15,8 +15,30 @@ class ElectronWorkerProcess implements IWorkerProcess {
     return this;
   }
 
-  kill(): void {
-    this.up.kill();
+  /**
+   * Send SIGTERM and wait for the UtilityProcess to actually exit.
+   * AUDIT-05 F20 / M18: before-quit cleanup must not return before the child dies.
+   * UtilityProcess has no SIGKILL escalation API — the 2s timer resolves anyway
+   * so quitting Wayland never hangs on a stuck worker.
+   */
+  kill(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(finish, 2000);
+      // UtilityProcess extends EventEmitter; 'exit' fires with the exit code.
+      this.up.once('exit' as Parameters<UtilityProcess['on']>[0], finish as never);
+      try {
+        this.up.kill();
+      } catch {
+        // best-effort; rely on timer fallback to resolve
+      }
+    });
   }
 }
 
