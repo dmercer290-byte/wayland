@@ -132,7 +132,7 @@ function buildQrLoginPageHtml(strings: QrLoginStrings, cspNonce?: string): strin
 <body>
   <div class="container" id="content">
     <div class="logo">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M20.341 6.484A10 10 0 0 1 10.266 21.85"/>
         <path d="M3.659 17.516A10 10 0 0 1 13.74 2.152"/>
         <circle cx="12" cy="12" r="3"/>
@@ -156,7 +156,7 @@ function buildQrLoginPageHtml(strings: QrLoginStrings, cspNonce?: string): strin
       function buildLogoBlock() {
         var frag = document.createDocumentFragment();
         var box = el('div'); box.className = 'logo';
-        var svg = el('svg', { width: '32', height: '32', viewBox: '0 0 24 24', fill: 'none', stroke: '#ff6b35', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, SVG_NS);
+        var svg = el('svg', { width: '32', height: '32', viewBox: '0 0 24 24', fill: 'none', stroke: 'var(--brand)', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, SVG_NS);
         var paths = [
           ['path', { d: 'M20.341 6.484A10 10 0 0 1 10.266 21.85' }],
           ['path', { d: 'M3.659 17.516A10 10 0 0 1 13.74 2.152' }],

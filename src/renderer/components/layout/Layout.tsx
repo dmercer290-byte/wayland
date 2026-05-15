@@ -468,7 +468,7 @@ const Layout: React.FC<{
                     })}
                     viewBox='0 0 24 24'
                     fill='none'
-                    stroke='#ff6b35'
+                    style={{ stroke: 'var(--brand)' }}
                     strokeWidth='2'
                     strokeLinecap='round'
                     strokeLinejoin='round'
