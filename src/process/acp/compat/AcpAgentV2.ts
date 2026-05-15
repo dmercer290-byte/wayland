@@ -3,7 +3,8 @@ import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import type { IMessageAcpToolCall, TMessage } from '@/common/chat/chatLib';
 import { NavigationInterceptor } from '@/common/chat/navigation';
 import type { AcpModelInfo, AcpResult, AcpSessionConfigOption } from '@/common/types/acpTypes';
-import { AcpErrorType, parseInitializeResult } from '@/common/types/acpTypes';
+import { AcpErrorType, getCurrentWrapperVersion, parseInitializeResult } from '@/common/types/acpTypes';
+import { buildHistoryReplayContext } from '@process/acp/historyReplay';
 import { getFullAutoMode } from '@/common/types/agentModes';
 import { LegacyConnectorFactory } from '@process/acp/compat/LegacyConnectorFactory';
 import {
@@ -127,6 +128,10 @@ export class AcpAgentV2 {
   // Used to re-assert model before every prompt in case CLI loses state
   // (e.g. Claude internal compaction resets model to default).
   private userModelOverride: string | null = null;
+  // Self-healing replay: set when ensureSession detects a wrapper-version
+  // mismatch and forces a fresh session. Drained on the next sendMessage
+  // so the agent recovers prior conversation context transparently.
+  private pendingReplayContext: string | null = null;
 
   constructor(config: OldAcpAgentConfig) {
     this.conversationId = config.id;
@@ -188,6 +193,35 @@ export class AcpAgentV2 {
           ...userServers,
         ];
       }
+    }
+
+    // Self-healing replay: if a stored resumeSessionId was created by a different
+    // wrapper version than the one we'd run now, the wrapper's loadSession may
+    // accept the id but the restored session state is corrupt (verified against
+    // @agentclientprotocol/claude-agent-acp 0.29.x → 0.33.x). Bypass the resume
+    // path and prepend a textual conversation summary to the next user message
+    // so the agent recovers context without any user intervention.
+    const currentWrapperVersion = getCurrentWrapperVersion(this.agentConfig.agentBackend);
+    const storedWrapperVersion = this.agentConfig.acpWrapperVersion;
+    if (
+      this.agentConfig.resumeSessionId &&
+      currentWrapperVersion &&
+      storedWrapperVersion &&
+      currentWrapperVersion !== storedWrapperVersion
+    ) {
+      console.log(
+        `[AcpAgentV2] Wrapper version mismatch for conversation ${this.conversationId} ` +
+          `(stored=${storedWrapperVersion}, current=${currentWrapperVersion}); ` +
+          'creating fresh session with history replay.'
+      );
+      try {
+        this.pendingReplayContext = await buildHistoryReplayContext(this.conversationId);
+      } catch (err) {
+        console.warn('[AcpAgentV2] Failed to build replay context, proceeding without it:', err);
+        this.pendingReplayContext = null;
+      }
+      // Drop the stale session id so SessionLifecycle takes the createSession path.
+      (this.agentConfig as { resumeSessionId?: string }).resumeSessionId = undefined;
     }
 
     const callbacks: SessionCallbacks = this.buildCallbacks();
@@ -622,6 +656,15 @@ export class AcpAgentV2 {
       // Claude: inject model switch notice so the AI knows its identity changed.
       // In terminal "/model X" outputs into conversation; ACP set_model is silent.
       let content = data.content;
+
+      // Self-healing replay: if ensureSession dropped a stale-wrapper resume id,
+      // prepend the locally-rebuilt conversation history so the agent recovers
+      // context on its first turn against the fresh session.
+      if (this.pendingReplayContext) {
+        content = this.pendingReplayContext + '\n[CURRENT MESSAGE]\n' + content;
+        this.pendingReplayContext = null;
+      }
+
       if (this.pendingModelSwitchNotice) {
         content =
           `<system-reminder>\n` +
