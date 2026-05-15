@@ -13,6 +13,7 @@ import { cronService } from '@process/services/cron/cronServiceSingleton';
 import { workerTaskManager } from '@process/task/workerTaskManagerSingleton';
 import { TeamSessionService, SqliteTeamRepository } from '@process/team';
 import { initTeamGuideService } from '@process/team/mcp/guide/teamGuideSingleton';
+import { prewarmProviderSdks } from '@process/utils/prewarmProviders';
 
 logger.config({ print: true });
 
@@ -31,10 +32,30 @@ initAllBridges({
   teamSessionService,
 });
 
-// Initialize cron service (load jobs from database and start timers)
-void cronService.init().catch((error) => {
-  console.error('[initBridge] Failed to initialize CronService:', error);
-});
+// Initialize cron service (load jobs from database and start timers).
+// Once jobs are loaded, pre-warm the AI SDKs referenced by enabled jobs
+// so scheduled tasks don't pay the lazy-load latency on first fire.
+// Backends with no in-process SDK (ACP CLIs, wcore, remote, etc.) are
+// no-ops in the pre-warmer — see prewarmProviders.ts.
+void cronService
+  .init()
+  .then(async () => {
+    try {
+      const jobs = await cronService.listJobs();
+      const backends = jobs
+        .filter((job) => job.enabled)
+        .map((job) => job.metadata.agentType as string)
+        .filter((b): b is string => !!b);
+      if (backends.length > 0) {
+        await prewarmProviderSdks(backends);
+      }
+    } catch (error) {
+      console.warn('[initBridge] Provider SDK pre-warm skipped:', error);
+    }
+  })
+  .catch((error) => {
+    console.error('[initBridge] Failed to initialize CronService:', error);
+  });
 
 // Start in-process Wayland Core MCP server for team-guide tools (aion_create_team)
 void initTeamGuideService(teamSessionService).catch((error) => {
