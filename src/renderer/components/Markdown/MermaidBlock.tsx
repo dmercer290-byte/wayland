@@ -6,7 +6,7 @@
 
 import { Copy, Eye } from 'lucide-react';
 import mermaid from 'mermaid';
-import SyntaxHighlighter from 'react-syntax-highlighter';
+import { LightAsync as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vs, vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 import { copyText } from '@/renderer/utils/ui/clipboard';

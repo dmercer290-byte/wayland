@@ -5,7 +5,7 @@
  */
 
 import { ChevronDown, ChevronUp, Copy } from 'lucide-react';
-import SyntaxHighlighter from 'react-syntax-highlighter';
+import { LightAsync as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vs, vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 
 import katex from 'katex';
