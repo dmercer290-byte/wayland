@@ -1,3 +1,7 @@
+# Patch: 7zip-bin@5.2.0
+# Purpose: On macOS, replaces the bundled 7za 16.02 binary path with a generated shell wrapper in os.tmpdir() that delegates `7za a` (archive) calls to the system `zip -r -y` command, because bundled 7za 16.02 fails with E_INVALIDARG when archiving .app bundles containing symlinks; non-archive subcommands still exec the bundled 7za. Falls back to the bundled binary if wrapper creation fails. Windows and Linux paths are unchanged.
+# Inherited from: AionUi upstream
+# Audit: M25 (AUDIT-03 F17)
 diff --git a/node_modules/7zip-bin/.bun-tag-4d314d69e08871fe b/.bun-tag-4d314d69e08871fe
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391

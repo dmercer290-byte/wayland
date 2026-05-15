@@ -28,7 +28,8 @@ function runPostInstall() {
         stdio: 'inherit',
         env: {
           ...process.env,
-          npm_config_build_from_source: 'true',
+          // Prefer prebuilt native modules over source builds (M25/F16). Set true only when prebuilts are unavailable for a target Electron version.
+          npm_config_build_from_source: 'false',
         },
       });
     }
