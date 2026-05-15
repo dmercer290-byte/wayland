@@ -70,18 +70,16 @@ agentFactory.register('remote', (conv, opts) => {
   }) as unknown as ReturnType<typeof agentFactory.create>;
 });
 
-// Both 'wcore' (post-rebrand kind, new writes) and 'aionrs' (legacy kind on
-// existing rows) route to the same WCoreManager factory. Dual-read policy.
-const wcoreManagerCreator: Parameters<typeof agentFactory.register>[1] = (conv, opts) => {
+// 'wcore' is the canonical kind for wayland-core agents. Legacy 'aionrs' alias
+// was ripped out in session 4 — there were no production users to migrate.
+agentFactory.register('wcore', (conv, opts) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c = conv as any;
   return new WCoreManager(
     { ...c.extra, conversation_id: c.id, yoloMode: opts?.yoloMode },
     c.model
   ) as unknown as ReturnType<typeof agentFactory.create>;
-};
-agentFactory.register('wcore', wcoreManagerCreator);
-agentFactory.register('aionrs', wcoreManagerCreator);
+});
 
 const conversationRepo = new SqliteConversationRepository();
 export const workerTaskManager = new WorkerTaskManager(agentFactory, conversationRepo);

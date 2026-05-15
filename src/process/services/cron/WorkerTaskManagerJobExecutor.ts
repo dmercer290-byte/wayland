@@ -135,9 +135,9 @@ export class WorkerTaskManagerJobExecutor implements ICronJobExecutor {
     const hasSkill = await hasCronSkillFile(job.id);
     const needsSkillSuggest = job.target.executionMode === 'new_conversation' && !!workspace && !hasSkill;
     const isGeminiLike =
-      job.metadata.agentConfig?.backend === 'gemini' || job.metadata.agentConfig?.backend === 'aionrs';
+      job.metadata.agentConfig?.backend === 'gemini' || job.metadata.agentConfig?.backend === 'wcore';
 
-    // Gemini/Aionrs: inline SKILL_SUGGEST instructions in the task prompt (single-turn).
+    // Gemini/WCore: inline SKILL_SUGGEST instructions in the task prompt (single-turn).
     // Other agents: separate follow-up message via onFirstFinish (multi-turn).
     const messageText = this.buildMessageText(job, hasSkill, needsSkillSuggest && isGeminiLike);
 
@@ -171,7 +171,7 @@ export class WorkerTaskManagerJobExecutor implements ICronJobExecutor {
       skillSuggestWatcher.unregister(conversationId);
 
       if (isGeminiLike) {
-        // Gemini/Aionrs: SKILL_SUGGEST instructions are already in the prompt.
+        // Gemini/WCore: SKILL_SUGGEST instructions are already in the prompt.
         // Just register the watcher (no onFirstFinish) and start polling.
         skillSuggestWatcher.register(conversationId, job.id, workspace!);
         void this.detectSkillSuggestWithRetry(job.id, workspace!, conversationId, 0);
@@ -288,12 +288,8 @@ export class WorkerTaskManagerJobExecutor implements ICronJobExecutor {
     switch (backend) {
       case 'gemini':
         return 'gemini';
-      case 'aionrs':
-        // `backend` is the internal AgentRegistry id, locked to 'aionrs' per
-        // BLACKBOARD (it never holds 'wcore'). No dual-case needed here —
-        // the conversation `type` written downstream gets dual-written separately
-        // by the factory in initAgent.ts.
-        return 'aionrs';
+      case 'wcore':
+        return 'wcore';
       case 'openclaw-gateway':
       case 'openclaw' as AgentBackend:
         return 'openclaw-gateway';
@@ -384,8 +380,8 @@ export class WorkerTaskManagerJobExecutor implements ICronJobExecutor {
       } else if (typeof savedModel === 'string') {
         preferredModelId = savedModel;
       }
-    } else if (backend === 'aionrs') {
-      const savedModel = await ProcessConfig.get('aionrs.defaultModel');
+    } else if (backend === 'wcore') {
+      const savedModel = await ProcessConfig.get('wcore.defaultModel');
       preferredModelId = savedModel?.useModel;
     } else {
       const acpConfig = await ProcessConfig.get('acp.config');

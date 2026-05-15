@@ -17,7 +17,7 @@ import { getEnhancedEnv, normalizeNpxArgsForBundledBun, resolveNpxPath } from '@
 /**
  * MCP source type - includes all ACP backends and Wayland built-ins
  */
-export type McpSource = AcpBackendAll | 'gemini' | 'wayland' | 'aionrs';
+export type McpSource = AcpBackendAll | 'gemini' | 'wayland' | 'wcore';
 
 /**
  * MCP operation result interface

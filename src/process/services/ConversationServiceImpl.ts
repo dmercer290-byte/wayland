@@ -15,7 +15,7 @@ import {
   createOpenClawAgent,
   createNanobotAgent,
   createRemoteAgent,
-  createAionrsAgent,
+  createWCoreAgent,
 } from '@process/utils/initAgent';
 
 /**
@@ -159,11 +159,8 @@ export class ConversationServiceImpl implements IConversationService {
         conversation = await createRemoteAgent(params as any);
         break;
       }
-      case 'wcore':
-      case 'aionrs': {
-        // Dual-read: 'wcore' is the new conversation type (post-rebrand);
-        // 'aionrs' remains for backward compat with existing rows.
-        conversation = await createAionrsAgent(params as any);
+      case 'wcore': {
+        conversation = await createWCoreAgent(params as any);
         break;
       }
       default: {

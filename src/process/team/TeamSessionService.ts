@@ -167,7 +167,7 @@ export class TeamSessionService {
       }
     }
 
-    if (type === 'aionrs') {
+    if (type === 'wcore') {
       return this.resolveDefaultAionrsModel();
     }
 
@@ -309,7 +309,7 @@ export class TeamSessionService {
     // Override useModel for Gemini/Aionrs when agent has an explicit model
     if (agent.model) {
       const type = getConversationTypeForBackend(backend);
-      if (type === 'gemini' || type === 'aionrs') {
+      if (type === 'gemini' || type === 'wcore') {
         model = { ...model, useModel: agent.model };
       }
     }
@@ -350,9 +350,7 @@ export class TeamSessionService {
       case 'gemini':
         return 'gemini';
       case 'wcore':
-      case 'aionrs':
-        // Dual-read: 'wcore' (new) and 'aionrs' (legacy) both map to the same backend.
-        return 'aionrs';
+        return 'wcore';
       case 'remote':
         return 'remote';
       case 'nanobot':
@@ -687,7 +685,7 @@ export class TeamSessionService {
 
   private resolveConversationType(agentType: string): AgentType {
     if (agentType === 'gemini') return 'gemini';
-    if (agentType === 'aionrs') return 'aionrs';
+    if (agentType === 'wcore') return 'wcore';
     if (agentType === 'codex') return 'acp';
     if (agentType === 'openclaw-gateway') return 'openclaw-gateway';
     if (agentType === 'nanobot') return 'nanobot';

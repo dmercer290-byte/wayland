@@ -48,7 +48,7 @@ const VALID_CONVERSATION_TYPES = new Set<TChatConversation['type']>([
   'openclaw-gateway',
   'nanobot',
   'remote',
-  'aionrs',
+  'wcore',
 ]);
 
 export function initConversationBridge(
@@ -649,7 +649,7 @@ export function initConversationBridge(
       return task.approvalStore.allApproved(keys);
     }
 
-    if (task.type === 'wcore' || task.type === 'aionrs') {
+    if (task.type === 'wcore') {
       const keys = WCoreApprovalStore.createKeysFromConfirmation(action, commandType);
       if (keys.length === 0) return false;
       return task.approvalStore.allApproved(keys);

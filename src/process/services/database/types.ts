@@ -190,16 +190,11 @@ export function rowToConversation(row: IConversationRow): TChatConversation {
     } as TChatConversation;
   }
 
-  // Wcore / Aionrs type has model field.
-  // Post-E rebrand: 'wcore' is the new conversation type; 'aionrs' remains
-  // for backward read-compat with existing rows (dual-read policy).
-  if ((row.type === 'wcore' || row.type === 'aionrs') && row.model) {
+  // Wcore type has model field.
+  if (row.type === 'wcore' && row.model) {
     return {
       ...base,
-      // Preserve the literal stored type so downstream code that branches
-      // on `conversation.type` sees what's actually in the DB. Both values
-      // are accepted by the renderer's dispatcher.
-      type: row.type as 'wcore' | 'aionrs',
+      type: 'wcore' as const,
       extra: JSON.parse(row.extra),
       model: JSON.parse(row.model),
     } as TChatConversation;

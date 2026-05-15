@@ -1220,18 +1220,11 @@ const migration_v26: IMigration = {
  * `CHECK(type IN ...)` constraint from `conversations.type`, so the column
  * accepts any string and no schema-level work is required to allow 'wcore'.
  *
- * What changed alongside this version bump (in app code, not the schema):
- *   - `AgentRegistry.createWCoreAgent()` now emits `kind: 'wcore'`.
- *   - Other conversation writers (`SystemActions`, `ActionExecutor`,
- *     `channels/types.ts`) emit `type: 'wcore'` for new conversations.
- *   - Readers (`ChatSider`, `conversationBridge`, `ConversationServiceImpl`,
- *     etc.) accept BOTH `'wcore'` (new) and `'aionrs'` (legacy) per the
- *     dual-write/dual-read policy. Existing user data with `'aionrs'`
- *     stays readable indefinitely.
- *
- * This entry exists so a future maintainer searching the migration history
- * for "when did 'wcore' become accepted?" lands on a clear record instead
- * of having to grep code and infer the policy.
+ * Historical note: this migration originally documented a dual-write/dual-read
+ * policy where readers accepted both 'wcore' (new) and 'aionrs' (legacy). The
+ * 'aionrs' alias was subsequently ripped out in session 4 — there were no
+ * production users to migrate. New writes only use 'wcore'; readers no longer
+ * accept 'aionrs'. The migration name string is preserved as historical record.
  */
 const migration_v27: IMigration = {
   version: 27,

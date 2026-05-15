@@ -330,7 +330,7 @@ export const createRemoteAgent = async (options: ICreateConversationParams): Pro
   };
 };
 
-export const createAionrsAgent = async (options: ICreateConversationParams): Promise<TChatConversation> => {
+export const createWCoreAgent = async (options: ICreateConversationParams): Promise<TChatConversation> => {
   const { extra } = options;
   const { workspace, customWorkspace } = await buildWorkspaceWidthFiles(
     `wcore-temp-${Date.now()}`,
@@ -341,8 +341,8 @@ export const createAionrsAgent = async (options: ICreateConversationParams): Pro
 
   // Set up skill symlinks for native discovery by wayland-core.
   // The engine looks in `.wayland-core/skills/` (engine paths.rs:46);
-  // both 'wcore' and 'aionrs' agentType keys are mapped to that directory
-  // in NON_ACP_SKILLS_DIRS so the symlinks land where the engine reads.
+  // the 'wcore' agentType key is mapped to that directory in NON_ACP_SKILLS_DIRS
+  // so the symlinks land where the engine reads.
   if (!customWorkspace) {
     await setupAssistantWorkspace(workspace, {
       agentType: 'wcore',
@@ -353,9 +353,8 @@ export const createAionrsAgent = async (options: ICreateConversationParams): Pro
   }
 
   return {
-    // 'wcore' is the new conversation type post-E rebrand. Readers
-    // (ConversationServiceImpl, ChatConversation, etc.) accept both
-    // 'wcore' (new) and 'aionrs' (legacy rows) per the dual-write/read policy.
+    // 'wcore' is the canonical conversation type. Legacy 'aionrs' alias was
+    // ripped out in session 4 — there were no production users to migrate.
     type: 'wcore',
     model: options.model,
     extra: {

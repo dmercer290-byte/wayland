@@ -87,7 +87,7 @@ export class McpService {
       ['wayland', new WaylandMcpAgent()], // Wayland local @office-ai/aioncli-core
       ['codex', new CodexMcpAgent()],
       ['opencode', new OpencodeMcpAgent()],
-      ['aionrs', new WCoreMcpAgent()], // Wayland Core (Rust binary, TOML config)
+      ['wcore', new WCoreMcpAgent()], // Wayland Core (Rust binary, TOML config)
     ]);
   }
 

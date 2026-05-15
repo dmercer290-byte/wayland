@@ -15,7 +15,7 @@ import { AbstractMcpAgent } from '../McpProtocol';
 import type { IMcpServer, IMcpServerTransport } from '@/common/config/storage';
 
 /**
- * aionrs config.toml transport type (kebab-case)
+ * wayland-core config.toml transport type (kebab-case)
  * Maps to AionUi transport types (snake_case)
  */
 type WCoreTransportType = 'stdio' | 'sse' | 'streamable-http';
@@ -40,16 +40,16 @@ type WCoreConfigFile = {
 let cachedConfigPath: string | null = null;
 
 /**
- * Get the aionrs global config path via the bundled binary's `--config-path` flag.
+ * Get the wayland-core global config path via the bundled binary's `--config-path` flag.
  * Uses resolveWCoreBinary() to locate the correct binary across platforms.
  * The result is cached because the path does not change at runtime.
  */
-function getAionrsConfigPath(cliPath?: string): string {
+function getWCoreConfigPath(cliPath?: string): string {
   if (cachedConfigPath) return cachedConfigPath;
 
   const cmd = cliPath || resolveWCoreBinary();
   if (!cmd) {
-    throw new Error('aionrs binary not found');
+    throw new Error('wayland-core binary not found');
   }
 
   const result = execSync(`"${cmd}" --config-path`, {
@@ -64,24 +64,24 @@ function getAionrsConfigPath(cliPath?: string): string {
 }
 
 /**
- * Map aionrs transport type (kebab-case) to AionUi transport type
+ * Map wayland-core transport type (kebab-case) to AionUi transport type
  */
-function toAionUiTransportType(aionrsType: WCoreTransportType): IMcpServerTransport['type'] {
-  if (aionrsType === 'streamable-http') return 'streamable_http';
-  return aionrsType;
+function toAionUiTransportType(wcoreType: WCoreTransportType): IMcpServerTransport['type'] {
+  if (wcoreType === 'streamable-http') return 'streamable_http';
+  return wcoreType;
 }
 
 /**
- * Map AionUi transport type to aionrs transport type (kebab-case)
+ * Map AionUi transport type to wayland-core transport type (kebab-case)
  */
-function toAionrsTransportType(type: IMcpServerTransport['type']): WCoreTransportType {
+function toWCoreTransportType(type: IMcpServerTransport['type']): WCoreTransportType {
   if (type === 'streamable_http') return 'streamable-http';
   if (type === 'http') return 'streamable-http';
   return type as WCoreTransportType;
 }
 
 /**
- * Convert an aionrs server config entry to an AionUi IMcpServer
+ * Convert a wayland-core server config entry to an AionUi IMcpServer
  */
 function toMcpServer(name: string, config: WCoreServerConfig): IMcpServer {
   const transportType = toAionUiTransportType(config.transport);
@@ -102,7 +102,7 @@ function toMcpServer(name: string, config: WCoreServerConfig): IMcpServer {
         };
 
   return {
-    id: `aionrs_${name}`,
+    id: `wcore_${name}`,
     name,
     transport,
     tools: [],
@@ -116,14 +116,14 @@ function toMcpServer(name: string, config: WCoreServerConfig): IMcpServer {
 }
 
 /**
- * Convert an AionUi IMcpServer to an aionrs server config entry
+ * Convert an AionUi IMcpServer to a wayland-core server config entry
  */
-function toAionrsConfig(server: IMcpServer): WCoreServerConfig {
-  const aionrsType = toAionrsTransportType(server.transport.type);
+function toWCoreConfig(server: IMcpServer): WCoreServerConfig {
+  const wcoreType = toWCoreTransportType(server.transport.type);
 
   if (server.transport.type === 'stdio') {
     const config: WCoreServerConfig = {
-      transport: aionrsType,
+      transport: wcoreType,
       command: server.transport.command,
       args: server.transport.args?.length ? server.transport.args : undefined,
     };
@@ -134,7 +134,7 @@ function toAionrsConfig(server: IMcpServer): WCoreServerConfig {
   }
 
   const config: WCoreServerConfig = {
-    transport: aionrsType,
+    transport: wcoreType,
     url: server.transport.url,
   };
   if (server.transport.headers && Object.keys(server.transport.headers).length > 0) {
@@ -144,30 +144,30 @@ function toAionrsConfig(server: IMcpServer): WCoreServerConfig {
 }
 
 /**
- * Wayland Core (aionrs) MCP agent implementation
+ * Wayland Core MCP agent implementation
  *
- * Manages MCP server configuration in the platform config directory (see getAionrsConfigPath())
- * aionrs uses TOML format with [mcp.servers.*] sections
+ * Manages MCP server configuration in the platform config directory (see getWCoreConfigPath())
+ * wayland-core uses TOML format with [mcp.servers.*] sections
  */
 export class WCoreMcpAgent extends AbstractMcpAgent {
   /** Remembered cliPath from the most recent detectMcpServers call */
   private resolvedCliPath?: string;
 
   constructor() {
-    super('aionrs');
+    super('wcore');
   }
 
   getSupportedTransports(): string[] {
-    // aionrs supports stdio, sse, streamable-http (mapped to streamable_http in AionUi)
+    // wayland-core supports stdio, sse, streamable-http (mapped to streamable_http in AionUi)
     return ['stdio', 'sse', 'streamable_http'];
   }
 
   /**
-   * Read and parse the aionrs config file
+   * Read and parse the wayland-core config file
    */
   private async readConfig(cliPath?: string): Promise<WCoreConfigFile> {
     try {
-      const content = await fs.readFile(getAionrsConfigPath(cliPath), 'utf-8');
+      const content = await fs.readFile(getWCoreConfigPath(cliPath), 'utf-8');
       return parse(content) as WCoreConfigFile;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -178,17 +178,17 @@ export class WCoreMcpAgent extends AbstractMcpAgent {
   }
 
   /**
-   * Write the aionrs config file (preserving non-MCP sections)
+   * Write the wayland-core config file (preserving non-MCP sections)
    */
   private async writeConfig(config: WCoreConfigFile): Promise<void> {
     // Ensure directory exists
-    const configPath = getAionrsConfigPath(this.resolvedCliPath);
+    const configPath = getWCoreConfigPath(this.resolvedCliPath);
     await fs.mkdir(dirname(configPath), { recursive: true });
     await fs.writeFile(configPath, stringify(config), 'utf-8');
   }
 
   /**
-   * Detect MCP servers configured in aionrs config.toml
+   * Detect MCP servers configured in wayland-core config.toml
    */
   detectMcpServers(cliPath?: string): Promise<IMcpServer[]> {
     const detectOperation = async () => {
@@ -218,7 +218,7 @@ export class WCoreMcpAgent extends AbstractMcpAgent {
   }
 
   /**
-   * Install MCP servers into aionrs config.toml
+   * Install MCP servers into wayland-core config.toml
    */
   installMcpServers(mcpServers: IMcpServer[]): Promise<McpOperationResult> {
     const installOperation = async () => {
@@ -239,7 +239,7 @@ export class WCoreMcpAgent extends AbstractMcpAgent {
             console.warn(`[WCoreMcpAgent] Skipping ${server.name}: unsupported transport ${server.transport.type}`);
             continue;
           }
-          config.mcp.servers[server.name] = toAionrsConfig(server);
+          config.mcp.servers[server.name] = toWCoreConfig(server);
           console.log(`[WCoreMcpAgent] Added MCP server: ${server.name}`);
         }
 
@@ -255,7 +255,7 @@ export class WCoreMcpAgent extends AbstractMcpAgent {
   }
 
   /**
-   * Remove an MCP server from aionrs config.toml
+   * Remove an MCP server from wayland-core config.toml
    */
   removeMcpServer(mcpServerName: string): Promise<McpOperationResult> {
     const removeOperation = async () => {

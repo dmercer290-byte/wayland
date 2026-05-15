@@ -54,7 +54,7 @@ const NEAR_BUDGET_RATIO = 0.95;
  */
 const EMPTY_CONTENT_THRESHOLD_CHARS = 20;
 
-// Aionrs-specific approval key — reuses same pattern as GeminiApprovalStore
+// WCore-specific approval key — reuses same pattern as GeminiApprovalStore
 type WCoreApprovalKey = IApprovalKey & {
   action: 'exec' | 'edit' | 'info' | 'mcp';
   identifier?: string;
@@ -135,7 +135,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   >();
 
   constructor(data: WCoreManagerData, model: TProviderWithModel) {
-    super('aionrs', { ...data, model }, new IpcAgentEventEmitter(), false);
+    super('wcore', { ...data, model }, new IpcAgentEventEmitter(), false);
     this.workspace = data.workspace;
     this.conversation_id = data.conversation_id;
     this.model = model;
@@ -190,7 +190,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       sessionId: mergedData.sessionId,
       resume: mergedData.resume,
       stdioMcpServers,
-      onStreamEvent: (event) => this.emit('aionrs.message', event),
+      onStreamEvent: (event) => this.emit('wcore.message', event),
       onProcessExit: (code, activeMsgId) => this.handleProcessExit(code, activeMsgId),
       onPong: () => this.handlePong(),
     });
@@ -217,7 +217,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   }
 
   /**
-   * Build the team-guide MCP stdio config for a solo aionrs session, or return
+   * Build the team-guide MCP stdio config for a solo wcore session, or return
    * undefined when the agent is in a team (team_* MCP takes precedence) or when
    * the team-guide service hasn't started.
    */
@@ -229,7 +229,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       import('@process/team/prompts/teamGuideCapability'),
       import('@process/team/mcp/guide/teamGuideSingleton'),
     ]);
-    if (!(await shouldInjectTeamGuideMcp('aionrs'))) return undefined;
+    if (!(await shouldInjectTeamGuideMcp('wcore'))) return undefined;
     const base = getTeamGuideStdioConfig();
     if (!base) return undefined;
     return {
@@ -238,7 +238,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       args: base.args,
       env: [
         ...base.env,
-        { name: 'AION_MCP_BACKEND', value: 'aionrs' },
+        { name: 'AION_MCP_BACKEND', value: 'wcore' },
         { name: 'AION_MCP_CONVERSATION_ID', value: this.conversation_id },
       ],
     };
@@ -404,7 +404,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       },
       createdAt: this.thinkingStartTime || Date.now(),
     };
-    addOrUpdateMessage(this.conversation_id, tMessage, 'aionrs');
+    addOrUpdateMessage(this.conversation_id, tMessage, 'wcore');
   }
 
   private clearThinkingState(): void {
@@ -445,7 +445,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     if (!buffered) return;
     clearTimeout(buffered.timer);
     this.bufferedStreamTexts.delete(key);
-    addOrUpdateMessage(this.conversation_id, buffered.message, 'aionrs');
+    addOrUpdateMessage(this.conversation_id, buffered.message, 'wcore');
   }
 
   private flushAllBufferedStreamTexts(): void {
@@ -460,7 +460,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     void ConversationTurnCompletionService.getInstance().notifyPotentialCompletion(this.conversation_id, {
       status: this.status ?? 'finished',
       workspace: this.workspace,
-      backend: 'aionrs',
+      backend: 'wcore',
       pendingConfirmations: this.getConfirmations().length,
       modelId: this.model.useModel,
     });
@@ -470,9 +470,9 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
    * Return true when the just-finished turn was cut short by the model's token
    * budget. Two detection paths:
    *
-   *   1. Explicit: aionrs ≥0.2 (Task F engine-side fix) emits
+   *   1. Explicit: wayland-core ≥0.2 (Task F engine-side fix) emits
    *      `finish_reason: 'length'` in stream_end. Definitive.
-   *   2. Heuristic: aionrs ≤0.1.21 doesn't emit finish_reason, so we infer
+   *   2. Heuristic: wayland-core ≤0.1.21 doesn't emit finish_reason, so we infer
    *      truncation when `output_tokens` is at or above 95% of the configured
    *      `maxTokens` AND the visible content is empty/very short. This catches
    *      the Gemini Pro reasoning-token bug today (the wrapper fix in Worker B
@@ -510,7 +510,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       status: 'finish',
       createdAt: Date.now(),
     };
-    addOrUpdateMessage(this.conversation_id, tMessage, 'aionrs');
+    addOrUpdateMessage(this.conversation_id, tMessage, 'wcore');
 
     const ipcMsg: IResponseMessage = {
       type: 'content',
@@ -532,7 +532,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       try {
         const db = await getDatabase();
         const result = db.getConversation(this.conversation_id);
-        if (result.success && result.data && result.data.type === 'aionrs') {
+        if (result.success && result.data && result.data.type === 'wcore') {
           const conversation = result.data;
           db.updateConversation(this.conversation_id, {
             extra: { ...conversation.extra, lastTokenUsage: { totalTokens } },
@@ -545,7 +545,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   }
 
   private handleProcessExit(code: number | null, activeMsgId: string): void {
-    mainError('[WCoreManager]', `aionrs process exited unexpectedly (code=${code}) during active turn ${activeMsgId}`);
+    mainError('[WCoreManager]', `wcore process exited unexpectedly (code=${code}) during active turn ${activeMsgId}`);
 
     this.status = 'finished';
     void this.handleTurnEnd();
@@ -597,7 +597,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     if (this.heartbeatMissedCount >= this.heartbeatMaxMissed) {
       mainError(
         '[WCoreManager]',
-        `aionrs process unresponsive after ${this.heartbeatMaxMissed} missed pongs, killing`
+        `wcore process unresponsive after ${this.heartbeatMaxMissed} missed pongs, killing`
       );
       this.agent?.kill();
       return;
@@ -607,7 +607,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   }
 
   init() {
-    this.on('aionrs.message', (data) => {
+    this.on('wcore.message', (data) => {
       // Store capabilities from config_changed events
       if (data.type === 'config_changed') {
         const elapsed = this._configSentAt ? `${Date.now() - this._configSentAt}ms` : 'n/a';
@@ -623,7 +623,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
         return;
       }
 
-      // Log info events from aionrs (includes set_config/set_mode acknowledgments)
+      // Log info events from wcore (includes set_config/set_mode acknowledgments)
       if (data.type === 'info') {
         const elapsed = this._configSentAt ? ` (${Date.now() - this._configSentAt}ms since command)` : '';
         mainLog('[WCoreManager]', `info: ${data.data}${elapsed}`);
@@ -634,7 +634,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       if (!data.msg_id) return;
 
       // Any stream event with msg_id counts as activity — reset heartbeat missed count.
-      // This provides backward compat with aionrs binaries that don't yet support pong.
+      // This provides backward compat with wcore binaries that don't yet support pong.
       this.heartbeatMissedCount = 0;
 
       const contentTypes = ['content', 'tool_group'];
@@ -662,7 +662,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
           conversation_id: this.conversation_id,
           msg_id: uuid(),
           data: {
-            agentType: 'aionrs' as const,
+            agentType: 'wcore' as const,
             provider: this.model.name,
             modelId: this.model.useModel,
             baseUrl: this.model.baseUrl,
@@ -748,7 +748,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
             this.queueBufferedStreamText(tMessage as Extract<TMessage, { type: 'text' }>);
           } else {
             this.flushAllBufferedStreamTexts();
-            addOrUpdateMessage(this.conversation_id, tMessage, 'aionrs');
+            addOrUpdateMessage(this.conversation_id, tMessage, 'wcore');
           }
           const dbDuration = Date.now() - dbStart;
 
@@ -820,7 +820,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       };
 
       const collectedResponses: string[] = [];
-      await processCronInMessage(this.conversation_id, 'aionrs', cronMessage, (sysMsg) => {
+      await processCronInMessage(this.conversation_id, 'wcore', cronMessage, (sysMsg) => {
         collectedResponses.push(sysMsg);
         ipcBridge.conversation.responseStream.emit({
           type: 'system',
@@ -871,7 +871,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     try {
       const db = await getDatabase();
       const result = db.getConversation(this.conversation_id);
-      if (result.success && result.data && result.data.type === 'aionrs') {
+      if (result.success && result.data && result.data.type === 'wcore') {
         const conversation = result.data;
         db.updateConversation(this.conversation_id, {
           extra: { ...conversation.extra, sessionMode: mode },
