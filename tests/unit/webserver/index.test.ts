@@ -112,6 +112,7 @@ vi.mock('@process/webserver/auth/service/AuthService', () => ({
   AuthService: {
     generateRandomPassword: generateRandomPasswordMock,
     hashPassword: hashPasswordMock,
+    hydrateBlacklist: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

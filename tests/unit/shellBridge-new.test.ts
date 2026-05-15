@@ -30,6 +30,10 @@ vi.mock('child_process', () => ({
 // Mock fs
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
+  // L5 hardening: shellBridge.openFolderWith now stats folderPath before spawning
+  // a Windows terminal. Default the stat to a valid directory so tests that don't
+  // care about the validation path don't hit the early-return guard.
+  statSync: vi.fn(() => ({ isDirectory: () => true })),
 }));
 
 // Mock @/common ipcBridge - capture the registered functions
@@ -225,9 +229,10 @@ describe('shellBridge with actual providers', () => {
 
       await registeredProviders['openFolderWith']({ folderPath: 'C:\\Projects', tool: 'terminal' });
 
+      // L5: direct powershell.exe spawn with arg-array (no cmd.exe shell interpolation).
       expect(spawn).toHaveBeenCalledWith(
-        'cmd.exe',
-        ['/c', 'start', 'powershell.exe', '-NoExit', '-Command', expect.stringContaining('Set-Location')],
+        'powershell.exe',
+        ['-NoProfile', '-Command', 'Start-Process', '-FilePath', 'powershell.exe', '-WorkingDirectory', 'C:\\Projects'],
         {
           detached: true,
           windowsHide: false,
