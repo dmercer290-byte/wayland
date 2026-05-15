@@ -127,14 +127,31 @@ export function isAllowedInboundName(name: string): boolean {
     return providerKeys.has(key);
   }
 
-  // Provider response from renderer-side provider: subscribe.callback-<key><id>
-  // The platform appends an 8-hex random id (see `i = (e) => e + Math.random()...`
-  // in @office-ai/platform: `Math.random().toString(16).slice(2,10)`), so the
-  // residual after stripping the key must be exactly 8 lowercase hex chars.
-  // Anchor the suffix to prevent a permitted key being a prefix of an arbitrary name.
+  // Provider response from renderer-side provider: subscribe.callback-<key><key><id>
+  //
+  // The platform's actual wire format (verified against @office-ai/platform's
+  // emitter source) is `subscribe.callback-${key}${i(key)}` where
+  // `i(e) = e + Math.random().toString(16).slice(2,10)`. That expands to
+  // `subscribe.callback-${key}${key}${random8hex}` — the key appears TWICE,
+  // because the invoker side computes the id as `<key><8hex>` and the
+  // emitter then prepends the key again when forming the callback name.
+  //
+  // An earlier draft of this allowlist expected `subscribe.callback-<key><id>`
+  // (single key) and rejected legitimate callbacks, breaking the entire
+  // provider response path — search-workspace responses to Claude/ACP
+  // sessions stalled until the prompt timed out. Fix: accept the doubled
+  // key prefix, then require exactly 8 lowercase hex chars as the suffix.
   if (name.startsWith('subscribe.callback-')) {
     const rest = name.slice('subscribe.callback-'.length);
     for (const key of RENDERER_PROVIDED_KEYS) {
+      // Doubled-key form: `<key><key><8hex>` (the actual platform format).
+      const doubledPrefix = key + key;
+      if (rest.startsWith(doubledPrefix)) {
+        const suffix = rest.slice(doubledPrefix.length);
+        if (/^[0-9a-f]{8}$/.test(suffix)) return true;
+      }
+      // Single-key form: `<key><8hex>`. Kept for back-compat in case some
+      // platform version (or test fixture) emits without the doubling.
       if (rest.startsWith(key)) {
         const suffix = rest.slice(key.length);
         if (/^[0-9a-f]{8}$/.test(suffix)) return true;
