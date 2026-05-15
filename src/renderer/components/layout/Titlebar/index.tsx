@@ -40,15 +40,16 @@ const WaylandLogoMark: React.FC = () => (
 
 // Claude-desktop-style sidebar toggle icon: a rounded rectangle with a vertical divider
 // near the left edge, indicating a collapsible side panel. Rendered as inline SVG since
-// @icon-park doesn't ship this exact shape.
+// lucide-react doesn't ship this exact shape.
 //
-// Uses a 48-unit viewBox to match @icon-park's stroke scale, so passing the same
-// `strokeWidth` value here and to @icon-park icons produces visually identical lines.
+// Note: lucide-react icons use a 24-unit viewBox with a default 2px stroke.
+// This icon intentionally uses a 48-unit viewBox (double scale) so its
+// geometry has room to breathe at the small titlebar size; callers therefore
+// pass roughly double the `strokeWidth` value they'd pass to a Lucide icon
+// to produce visually equivalent stroke weight on screen.
 //
-// The rect spans y=10..38 (height 28), slightly taller than @icon-park's
-// ArrowLeft/ArrowRight (which span y=12..36) so the sidebar icon reads a
-// touch larger. The rect remains centered at y=24, matching the arrows'
-// centerline so all three icons stay on the same visual baseline.
+// The rect spans y=10..38 (height 28), centered at y=24 to keep the sidebar
+// icon on the same visual baseline as adjacent Lucide chevrons/panels.
 const SidebarIcon: React.FC<{ size?: number; strokeWidth?: number }> = ({ size = 18, strokeWidth = 4 }) => (
   <svg
     width={size}
