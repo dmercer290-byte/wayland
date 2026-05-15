@@ -1304,6 +1304,61 @@ const migration_v29: IMigration = {
 };
 
 /**
+ * Migration v29 -> v30: Self-heal legacy 'aionrs' rows to 'wcore'.
+ *
+ * The 2026-05-15 brand ripout (commits 5eada223a..446d8605e) collapsed
+ * all functional 'aionrs' identifiers in the source to 'wcore'. Production
+ * had no users to migrate so the source-level change shipped without a
+ * data migration. But dev databases predating the ripout still hold rows
+ * with type='aionrs' (conversations) or agent_type='aionrs' (cron_jobs),
+ * which the post-ripout code can no longer route — manifests as
+ * conversations that display as shells but whose response streams stall
+ * with no observable error.
+ *
+ * This migration auto-heals those rows on next launch:
+ *   - conversations.type:                  'aionrs' -> 'wcore'
+ *   - conversations.extra.backend (JSON):  'aionrs' -> 'wcore'
+ *   - cron_jobs.agent_type:                'aionrs' -> 'wcore'
+ *   - cron_jobs.agent_config.backend:      'aionrs' -> 'wcore'
+ *
+ * Idempotent: each WHERE clause filters on the legacy value, so re-runs
+ * on already-migrated DBs change zero rows.
+ *
+ * No down(): rolling back would produce rows the runtime can't read.
+ * To truly revert, downgrade past the ripout commit chain instead.
+ */
+const migration_v30: IMigration = {
+  version: 30,
+  name: "Self-heal legacy 'aionrs' rows to 'wcore' (auto-heal pre-ripout dev DBs)",
+  up: (db) => {
+    const r1 = db.prepare("UPDATE conversations SET type='wcore' WHERE type='aionrs'").run();
+    const r2 = db
+      .prepare(
+        "UPDATE conversations SET extra = json_set(extra, '$.backend', 'wcore') " +
+          "WHERE extra IS NOT NULL AND json_extract(extra, '$.backend') = 'aionrs'"
+      )
+      .run();
+    const r3 = db.prepare("UPDATE cron_jobs SET agent_type='wcore' WHERE agent_type='aionrs'").run();
+    const r4 = db
+      .prepare(
+        "UPDATE cron_jobs SET agent_config = json_set(agent_config, '$.backend', 'wcore') " +
+          "WHERE agent_config IS NOT NULL AND json_extract(agent_config, '$.backend') = 'aionrs'"
+      )
+      .run();
+    console.log(
+      `[Migration v30] Self-heal: conversations.type=${r1.changes}, conversations.extra.backend=${r2.changes}, ` +
+        `cron_jobs.agent_type=${r3.changes}, cron_jobs.agent_config.backend=${r4.changes}`
+    );
+  },
+  down: (_db) => {
+    // Intentionally no rollback — the legacy 'aionrs' identifier was removed
+    // from the runtime in the 2026-05-15 ripout. Re-introducing 'aionrs'
+    // rows would produce data the post-ripout code can no longer read.
+    console.log("[Migration v30] No rollback — legacy 'aionrs' identifier removed from runtime");
+  },
+};
+
+/**
  * All migrations in order
  */
 // prettier-ignore
@@ -1312,7 +1367,7 @@ export const ALL_MIGRATIONS: IMigration[] = [
   migration_v7, migration_v8, migration_v9, migration_v10, migration_v11, migration_v12,
   migration_v13, migration_v14, migration_v15, migration_v16, migration_v17, migration_v18,
   migration_v19, migration_v20, migration_v21, migration_v22, migration_v23, migration_v24,
-  migration_v25, migration_v26, migration_v27, migration_v28, migration_v29,
+  migration_v25, migration_v26, migration_v27, migration_v28, migration_v29, migration_v30,
 ];
 
 /**
