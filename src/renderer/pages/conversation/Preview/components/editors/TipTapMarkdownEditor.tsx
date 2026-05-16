@@ -37,6 +37,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 // tiptap-markdown registers parsing on setContent and exposes
 // editor.storage.markdown.getMarkdown() for the onChange path.
 import { Markdown } from 'tiptap-markdown';
+import { joinFrontmatter, splitFrontmatter } from './frontmatter';
 import { createSlashCommand, type SlashKeyHandle, SlashMenuPopup, type SlashState } from './slashMenu';
 import styles from './TipTapMarkdownEditor.module.css';
 
@@ -242,6 +243,23 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
   const [slashState, setSlashState] = useState<SlashState | null>(null);
   const slashKeyRef = useRef<SlashKeyHandle | null>(null);
 
+  // Frontmatter passthrough. tiptap-markdown drops YAML/TOML frontmatter
+  // on parse, so we strip the raw block at mount, feed only the body to
+  // ProseMirror, and prepend it back when serializing on every save.
+  // The ref survives editor updates; it's overwritten during streaming
+  // syncs because the agent-authored value can rewrite the whole document.
+  const frontmatterRef = useRef<string | null>(null);
+  const initialBody = useMemo(() => {
+    const split = splitFrontmatter(value);
+    frontmatterRef.current = split.raw;
+    return split.body;
+    // The editor mounts with whatever value was first passed in; later
+    // non-streaming `value` changes are intentionally ignored (see the
+    // existing useEffect below). Re-running this on every value change
+    // would defeat that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const extensions = useMemo(
     () => [
       // StarterKit already bundles Link, Bold/Italic/Strike/Code, headings,
@@ -280,12 +298,12 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
   const editor = useEditor({
     extensions,
     editable,
-    content: value,
+    content: initialBody,
     onUpdate: ({ editor: ed }) => {
       if (!onChange) return;
       const mdStorage = (ed.storage as { markdown?: { getMarkdown?: () => string } }).markdown;
       const md = mdStorage?.getMarkdown?.() ?? ed.getText();
-      onChange(md);
+      onChange(joinFrontmatter(frontmatterRef.current, md));
     },
   });
 
@@ -330,7 +348,9 @@ const TipTapMarkdownEditor: React.FC<TipTapMarkdownEditorProps> = ({
     if (!isStreaming) return;
     if (value === lastSyncedValueRef.current) return;
     lastSyncedValueRef.current = value;
-    editor.commands.setContent(value, { emitUpdate: false });
+    const split = splitFrontmatter(value);
+    frontmatterRef.current = split.raw;
+    editor.commands.setContent(split.body, { emitUpdate: false });
   }, [editor, isStreaming, value]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
