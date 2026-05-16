@@ -37,6 +37,7 @@ export interface PreviewTab {
   title: string; // Tab title
   isDirty?: boolean; // Whether there are unsaved changes
   originalContent?: string; // Original content for comparison
+  isStreaming?: boolean; // True while an agent is actively writing to this tab's filePath
 }
 
 export interface PreviewContextValue {
@@ -510,6 +511,16 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
         clearTimeout(existingTimer);
       }
 
+      // Mark any tab pointing at this file as streaming on the first write event.
+      // Cleared in the debounce-fire branch below once writes go quiet for 500ms.
+      if (!existingTimer) {
+        setTabs((prevTabs) =>
+          prevTabs.map((tab) =>
+            tab.metadata?.filePath === filePath && !tab.isStreaming ? { ...tab, isStreaming: true } : tab
+          )
+        );
+      }
+
       const timer = setTimeout(() => {
         // Use functional update to access latest tabs state
         setTabs((prevTabs) => {
@@ -523,9 +534,9 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
           return prevTabs.map((tab) => {
             if (tab.metadata?.filePath !== filePath) return tab;
 
-            // Don't update if saving or user has edited
+            // Don't update if saving or user has edited; still clear streaming flag.
             if (savingFilesRef.current.has(filePath) || tab.isDirty) {
-              return tab;
+              return tab.isStreaming ? { ...tab, isStreaming: false } : tab;
             }
 
             return {
@@ -533,6 +544,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
               content,
               originalContent: content,
               isDirty: false,
+              isStreaming: false,
             };
           });
         });

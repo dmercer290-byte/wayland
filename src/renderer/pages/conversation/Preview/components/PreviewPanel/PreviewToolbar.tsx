@@ -43,7 +43,12 @@ interface PreviewToolbarProps {
   /**
    * Current view mode
    */
-  viewMode: 'source' | 'preview';
+  viewMode: 'source' | 'preview' | 'editor';
+
+  /**
+   * Whether the active tab is a Markdown file (controls Editor tab visibility)
+   */
+  isMdFile?: boolean;
 
   /**
    * Whether split-screen mode is enabled
@@ -73,7 +78,7 @@ interface PreviewToolbarProps {
   /**
    * Set view mode
    */
-  onViewModeChange: (mode: 'source' | 'preview') => void;
+  onViewModeChange: (mode: 'source' | 'preview' | 'editor') => void;
 
   /**
    * Set split-screen mode
@@ -154,6 +159,7 @@ const PreviewToolbar: React.FC<PreviewToolbarProps> = ({
   isEditable,
   isEditMode,
   viewMode,
+  isMdFile,
   isSplitScreenEnabled,
   fileName,
   showOpenInSystemButton,
@@ -191,6 +197,20 @@ const PreviewToolbar: React.FC<PreviewToolbarProps> = ({
           {(isMarkdown || isHTML || isDiff) && (
             <>
               <div className='flex items-center h-full gap-0'>
+                {isMdFile && (
+                  <div
+                    className={`flex items-center h-full px-10px cursor-pointer transition-all duration-150 text-12px font-medium ${viewMode === 'editor' ? 'text-brand bg-aou-2 border-b-4 border-brand' : 'text-t-secondary hover:text-t-primary hover:bg-bg-3'}`}
+                    onClick={() => {
+                      try {
+                        onViewModeChange('editor');
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                  >
+                    {t('preview.editor')}
+                  </div>
+                )}
                 <div
                   className={`flex items-center h-full px-10px cursor-pointer transition-all duration-150 text-12px font-medium ${viewMode === 'source' ? 'text-brand bg-aou-2 border-b-4 border-brand' : 'text-t-secondary hover:text-t-primary hover:bg-bg-3'}`}
                   onClick={() => {

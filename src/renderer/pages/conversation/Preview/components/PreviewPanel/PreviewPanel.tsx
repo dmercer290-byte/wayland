@@ -10,7 +10,7 @@ import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { PreviewToolbarExtrasProvider, type PreviewToolbarExtras } from '../../context/PreviewToolbarExtrasContext';
 import { usePreviewContext } from '../../context/PreviewContext';
 import { useResizableSplit } from '@/renderer/hooks/ui/useResizableSplit';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodePreview from '../viewers/CodeViewer';
 import DiffPreview from '../viewers/DiffViewer';
 import ExcelPreview from '../viewers/ExcelViewer';
@@ -18,6 +18,7 @@ import HTMLEditor from '../editors/HTMLEditor';
 import HTMLRenderer from '../renderers/HTMLRenderer';
 import ImagePreview from '../viewers/ImageViewer';
 import MarkdownEditor from '../editors/MarkdownEditor';
+import TipTapMarkdownEditor from '../editors/TipTapMarkdownEditor';
 import MarkdownPreview from '../viewers/MarkdownViewer';
 import PDFPreview from '../viewers/PDFViewer';
 import OfficeDocPreview from '../viewers/OfficeDocViewer';
@@ -46,6 +47,12 @@ import { useTranslation } from 'react-i18next';
 import './preview.css';
 
 /**
+ * True when filePath ends in a Markdown extension (.md, .markdown, .mdx).
+ * Used to gate the WYSIWYG Editor tab (Markdown-only).
+ */
+const isMdFile = (filePath?: string): boolean => !!filePath && /\.(md|markdown|mdx)$/i.test(filePath);
+
+/**
  * Main preview panel component
  *
  * Supports multiple tabs, each tab can display different types of content
@@ -67,7 +74,10 @@ const PreviewPanel: React.FC = () => {
   const layout = useLayoutContext();
 
   // View states
-  const [viewMode, setViewMode] = useState<'source' | 'preview'>('preview');
+  const [viewMode, setViewMode] = useState<'source' | 'preview' | 'editor'>('preview');
+  // Track which tab IDs we have already picked a default landing mode for, so
+  // re-renders (e.g. streaming content updates) don't fight the user's manual toggle.
+  const landedTabsRef = useRef<Set<string>>(new Set());
   const [isSplitScreenEnabled, setIsSplitScreenEnabled] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [inspectMode, setInspectMode] = useState(false);
@@ -114,6 +124,51 @@ const PreviewPanel: React.FC = () => {
     isDirty: activeTab?.isDirty,
     onSave: () => void saveContent(),
   });
+
+  // Auto-save on idle: after the last edit, wait AUTO_SAVE_DELAY_MS and
+  // flush to disk if the tab is still dirty. Each new edit resets the
+  // timer; explicit Cmd+S still works (saveContent itself clears isDirty,
+  // so the timer will see isDirty=false and bail). 1.5s feels natural and
+  // matches Notion / Linear. Only fires for editable preview tabs, not
+  // while an agent is actively streaming content into the same file.
+  const AUTO_SAVE_DELAY_MS = 1500;
+  const dirty = activeTab?.isDirty ?? false;
+  const streaming = activeTab?.isStreaming ?? false;
+  const tabIdForSave = activeTab?.id;
+  const contentForSave = activeTab?.content;
+  useEffect(() => {
+    if (!tabIdForSave) return;
+    if (!dirty) return;
+    if (streaming) return;
+    const handle = setTimeout(() => {
+      void saveContent(tabIdForSave);
+    }, AUTO_SAVE_DELAY_MS);
+    return () => clearTimeout(handle);
+  }, [tabIdForSave, contentForSave, dirty, streaming, saveContent]);
+
+  // Default-landing mode for newly opened tabs.
+  // - MD file + not streaming → land in 'editor' (WYSIWYG)
+  // - MD file + streaming → land in 'preview' (Streamdown handles partial MD)
+  // - Non-MD: preserve historical default ('preview'); only runs once per tab id.
+  useEffect(() => {
+    if (!activeTabId || !activeTab) return;
+    if (landedTabsRef.current.has(activeTabId)) return;
+    landedTabsRef.current.add(activeTabId);
+
+    if (isMdFile(activeTab.metadata?.filePath)) {
+      setViewMode(activeTab.isStreaming ? 'preview' : 'editor');
+    } else {
+      setViewMode('preview');
+    }
+  }, [activeTabId, activeTab]);
+
+  // Drop landing-tracking for tabs that no longer exist (avoids stale ids accumulating).
+  useEffect(() => {
+    const liveIds = new Set(tabs.map((t) => t.id));
+    landedTabsRef.current.forEach((id) => {
+      if (!liveIds.has(id)) landedTabsRef.current.delete(id);
+    });
+  }, [tabs]);
 
   const setToolbarExtrasCallback = useCallback((extras: PreviewToolbarExtras | null) => {
     setToolbarExtras(extras);
@@ -411,6 +466,19 @@ const PreviewPanel: React.FC = () => {
   const renderContent = () => {
     // Markdown mode
     if (isMarkdown) {
+      // WYSIWYG TipTap editor (MD files only, single pane)
+      if (viewMode === 'editor' && isMdFile(metadata?.filePath)) {
+        return (
+          <TipTapMarkdownEditor
+            value={content}
+            onChange={updateContent}
+            isStreaming={activeTab.isStreaming}
+            containerRef={editorContainerRef}
+            onScroll={handleEditorScroll}
+          />
+        );
+      }
+
       // Split-screen mode: Editor + Preview
       if (isSplitScreenEnabled) {
         // Mobile: Full-screen preview, hide editor
@@ -463,11 +531,13 @@ const PreviewPanel: React.FC = () => {
       }
 
       // Non-split mode: Single panel (source or preview)
+      // 'editor' is handled earlier; narrow for the viewer's prop type.
+      const legacyMode: 'source' | 'preview' = viewMode === 'source' ? 'source' : 'preview';
       return (
         <MarkdownPreview
           content={content}
           hideToolbar
-          viewMode={viewMode}
+          viewMode={legacyMode}
           onViewModeChange={setViewMode}
           onContentChange={updateContent}
           filePath={metadata?.filePath}
@@ -569,12 +639,14 @@ const PreviewPanel: React.FC = () => {
 
     // Other types: Full-screen preview
     if (contentType === 'diff') {
+      // Non-MD viewer — Editor mode never reaches here; narrow defensively.
+      const legacyMode: 'source' | 'preview' = viewMode === 'source' ? 'source' : 'preview';
       return (
         <DiffPreview
           content={content}
           metadata={metadata}
           hideToolbar
-          viewMode={viewMode}
+          viewMode={legacyMode}
           onViewModeChange={setViewMode}
         />
       );
@@ -617,12 +689,14 @@ const PreviewPanel: React.FC = () => {
         );
       }
       // Otherwise show code preview
+      // Non-MD viewer — Editor mode never reaches here; narrow defensively.
+      const legacyMode: 'source' | 'preview' = viewMode === 'source' ? 'source' : 'preview';
       return (
         <CodePreview
           content={content}
           language={metadata?.language}
           hideToolbar
-          viewMode={viewMode}
+          viewMode={legacyMode}
           onViewModeChange={setViewMode}
         />
       );
@@ -696,6 +770,7 @@ const PreviewPanel: React.FC = () => {
             isEditable={isEditable}
             isEditMode={isEditMode}
             viewMode={viewMode}
+            isMdFile={isMdFile(metadata?.filePath)}
             isSplitScreenEnabled={isSplitScreenEnabled}
             fileName={metadata?.fileName || activeTab.title}
             showOpenInSystemButton={showOpenInSystemButton}
