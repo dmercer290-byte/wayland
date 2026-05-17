@@ -33,6 +33,35 @@ Selected at launch with `--backend <name>` (default: `baileys`):
 
 Upstream notifications: `inbound.message`, `connection.status`, `qr.update`, `error`.
 
+## Bundling in the packaged app
+
+The bridge ships as a self-contained Node program — it is **not** part of the
+Electron main bundle. Three pieces work together so `child_process.fork` finds
+it on disk in production builds:
+
+1. **`extraResources` rule (`electron-builder.yml`).** Copies the entire bridge
+   directory verbatim to `<process.resourcesPath>/whatsapp-bridge/` in the
+   packaged app. We use `extraResources` instead of `files:` because the bridge
+   must live outside `app.asar` — `fork()` requires a real path on disk.
+
+2. **`postinstall` script (`scripts/postinstall.js → installBridgeDeps()`).**
+   After the root `bun install`, runs `bun install` (or `npm install` as a
+   fallback) inside `src/process/channels/whatsapp-bridge/` so the bridge's own
+   `node_modules/` exists. That directory is copied along with the bridge by
+   the `extraResources` rule above, so the packaged app ships everything the
+   bridge needs at runtime.
+
+3. **`resolveBridgeEntryPath()` (`WhatsAppPlugin.ts`).** Branches on
+   `app.isPackaged`:
+   - Packaged: `path.join(process.resourcesPath, 'whatsapp-bridge', 'bridge.js')`
+   - Dev: relative to the source tree (`../../../whatsapp-bridge/bridge.js`
+     from the compiled main-process location).
+
+If you add a new file to the bridge dir, the `extraResources` filter is
+`**/*` minus `*.test.*` / `*.spec.*`, so it picks it up automatically. If you
+add a new dependency to `package.json` here, no electron-builder change is
+needed — the next `bun install` (root) will fan out via postinstall.
+
 ## Attribution
 
 - `bridge.js`, `allowlist.js` — architectural pattern adapted from [Hermes Agent](https://github.com/hermes-agent/hermes-agent) (`scripts/whatsapp-bridge/`), Peter Steinberger / Hermes contributors, MIT.

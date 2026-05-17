@@ -83,6 +83,12 @@ vi.mock('child_process', () => ({
   ChildProcess: class {},
 }));
 
+// WhatsAppPlugin imports `electron` to detect packaged vs dev for bridge path
+// resolution. Vitest unit tests don't run inside Electron, so stub it.
+vi.mock('electron', () => ({
+  app: { isPackaged: false, getAppPath: () => '/test/app' },
+}));
+
 import { WhatsAppPlugin } from '@process/channels/plugins/tier1/whatsapp/WhatsAppPlugin';
 
 function configFor(backend: string, extra: Record<string, string> = {}): IChannelPluginConfig {

@@ -114,6 +114,15 @@ extraResources:
     to: bundled-wayland-core
   - from: resources/hub
     to: hub
+  # WhatsApp bridge: ESM Node subprocess forked via child_process.fork.
+  # Must live outside app.asar so the path on disk is real and `fork()` works.
+  # postinstall installs the bridge's own node_modules/ so this copy is self-contained.
+  - from: src/process/channels/whatsapp-bridge
+    to: whatsapp-bridge
+    filter:
+      - '**/*'
+      - '!**/*.test.*'
+      - '!**/*.spec.*'
 win:
   target:
     - nsis

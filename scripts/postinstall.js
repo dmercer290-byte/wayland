@@ -114,9 +114,49 @@ function patchOverriddenDepRanges() {
   }
 }
 
+/**
+ * Install the WhatsApp bridge subprocess's own node_modules/.
+ *
+ * The bridge is a standalone ESM Node program (`type: "module"`) at
+ * `src/process/channels/whatsapp-bridge/`. It is NOT bundled into the
+ * Electron main process — it's forked at runtime via `child_process.fork`
+ * and copied verbatim into the packaged app via electron-builder's
+ * `extraResources` rule. For its `import` statements to resolve in the
+ * packaged build, its own `node_modules/` must be present alongside it.
+ *
+ * We run `bun install` (or `npm install` if bun is unavailable) inside the
+ * bridge dir. Idempotent: skipped silently if the bridge dir is missing.
+ * Failures are logged but non-fatal — the rest of the app still installs.
+ */
+function installBridgeDeps() {
+  const bridgeDir = path.join(__dirname, '..', 'src', 'process', 'channels', 'whatsapp-bridge');
+  const bridgePkg = path.join(bridgeDir, 'package.json');
+  if (!fs.existsSync(bridgePkg)) {
+    console.log('[postinstall] whatsapp-bridge package.json not found, skipping bridge deps');
+    return;
+  }
+  // Detect bun; fall back to npm.
+  let installer = 'bun install';
+  try {
+    execSync('bun --version', { stdio: 'ignore' });
+  } catch {
+    installer = 'npm install --no-audit --no-fund';
+  }
+  console.log(`[postinstall] Installing whatsapp-bridge deps via \`${installer}\``);
+  try {
+    execSync(installer, { cwd: bridgeDir, stdio: 'inherit' });
+  } catch (e) {
+    console.error('[postinstall] whatsapp-bridge dep install failed (non-fatal):', e.message);
+  }
+}
+
 function runPostInstall() {
   // Apply nested-dep range widenings before electron-builder install-app-deps.
   patchOverriddenDepRanges();
+  // Install the WhatsApp bridge subprocess's own node_modules/. The bridge ships
+  // as-is into the packaged app via electron-builder extraResources and forks at
+  // runtime — without its own node_modules/ the `import` statements throw.
+  installBridgeDeps();
   try {
     // Check if we're in a CI environment
     const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';

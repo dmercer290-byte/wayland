@@ -33,6 +33,7 @@
 import { ChildProcess, fork } from 'child_process';
 import path from 'path';
 import axios from 'axios';
+import { app } from 'electron';
 
 import type {
   BotInfo,
@@ -83,8 +84,35 @@ interface BridgeInboundMessage {
   timestamp?: number;
 }
 
-/** Bridge entry resolved relative to this file. Compiled output preserves layout. */
-function resolveBridgeEntryPath(): string {
+/**
+ * Resolve the bridge entry path for both dev and packaged Electron builds.
+ *
+ * Packaged: electron-builder's `extraResources` rule copies the bridge dir to
+ *   `<process.resourcesPath>/whatsapp-bridge/`. The bundled JS bundle would
+ *   never resolve to a real on-disk path because it lives inside `app.asar`,
+ *   so `child_process.fork` would throw ENOENT. We point at the resources
+ *   copy instead, which is real on disk and ships with its own node_modules/.
+ *
+ * Dev: the source tree is real on disk; resolve relative to this file's
+ *   compiled location. electron-vite bundles the main process into
+ *   `out/main/`, but the source layout maps deterministically so the relative
+ *   path `../../../whatsapp-bridge/bridge.js` from this file's compiled
+ *   location still lands on `src/process/channels/whatsapp-bridge/bridge.js`
+ *   in dev runs.
+ */
+export function resolveBridgeEntryPath(): string {
+  // `app` is undefined in non-Electron unit-test contexts; guard so we don't
+  // throw before tests can mock it.
+  const isPackaged = (() => {
+    try {
+      return Boolean(app?.isPackaged);
+    } catch {
+      return false;
+    }
+  })();
+  if (isPackaged) {
+    return path.join(process.resourcesPath, 'whatsapp-bridge', 'bridge.js');
+  }
   // src/process/channels/plugins/tier1/whatsapp/ → src/process/channels/whatsapp-bridge/bridge.js
   return path.resolve(__dirname, '../../../whatsapp-bridge/bridge.js');
 }
