@@ -88,8 +88,12 @@ function pickHeader(value: string | string[] | undefined): string | null {
 }
 
 function safeEqual(a: string, b: string): boolean {
-  const aBuf = Buffer.from(a);
-  const bBuf = Buffer.from(b);
-  if (aBuf.length !== bBuf.length) return false;
-  return timingSafeEqual(aBuf, bBuf);
+  // Always compare a FIXED-LENGTH window even if inputs differ, so the
+  // duration of `timingSafeEqual` doesn't leak the expected signature length
+  // through timing. SHA256 hex = 64 chars; pad both sides to that target,
+  // then assert equal length AFTER the constant-time work has already run.
+  const TARGET_LEN = 64;
+  const pad = (s: string): string => s.padEnd(TARGET_LEN, '0').slice(0, TARGET_LEN);
+  const result = timingSafeEqual(Buffer.from(pad(a)), Buffer.from(pad(b)));
+  return result && a.length === b.length;
 }

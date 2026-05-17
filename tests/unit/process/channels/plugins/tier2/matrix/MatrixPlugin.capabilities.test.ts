@@ -16,7 +16,7 @@ import { hasPluginCredentials } from '@process/channels/types';
 
 // Hoist a tiny event-emitter stub so the SDK mock factory does not pull in any
 // `events` module at hoist time (matches the WhatsApp bridge test pattern).
-const { createClientSpy, fakeClient } = vi.hoisted(() => {
+const { createClientSpy, fakeClient, emitSync } = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void;
   const listeners: Record<string, Listener[]> = {};
   const client = {
@@ -34,10 +34,16 @@ const { createClientSpy, fakeClient } = vi.hoisted(() => {
     sendTyping: vi.fn(async () => undefined),
     whoami: vi.fn(async () => ({ user_id: '@bot:matrix.org' })),
     getUser: vi.fn(() => ({ displayName: 'Bot' })),
+    fetchRoomEvent: vi.fn(async () => ({ content: { msgtype: 'm.text' } })),
   };
   return {
     createClientSpy: vi.fn(() => client),
     fakeClient: client,
+    emitSync(state: string) {
+      const arr = listeners['sync'];
+      if (!arr) return;
+      for (const cb of [...arr]) cb(state);
+    },
   };
 });
 
@@ -70,6 +76,11 @@ beforeEach(() => {
   fakeClient.startClient.mockClear();
   fakeClient.stopClient.mockClear();
   fakeClient.whoami.mockClear();
+  fakeClient.sendEvent.mockClear();
+  fakeClient.fetchRoomEvent.mockClear();
+  fakeClient.whoami.mockImplementation(async () => ({ user_id: '@bot:matrix.org' }));
+  fakeClient.fetchRoomEvent.mockImplementation(async () => ({ content: { msgtype: 'm.text' } }));
+  fakeClient.startClient.mockImplementation(async () => undefined);
 });
 
 describe('MatrixPlugin capabilities and lifecycle', () => {
@@ -150,6 +161,112 @@ describe('MatrixPlugin capabilities and lifecycle', () => {
   it('testConnection rejects non-JSON input cleanly', async () => {
     const result = await MatrixPlugin.testConnection('not-json');
     expect(result).toEqual({ success: false, error: expect.stringContaining('JSON') });
+  });
+
+  it('start() resolves selfUserId via whoami before startClient and warns on mismatch', async () => {
+    fakeClient.whoami.mockImplementationOnce(async () => ({ user_id: '@server-mxid:matrix.org' }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const plugin = new MatrixPlugin();
+    await plugin.initialize(configFor());
+    await plugin.start();
+    // whoami must be called as part of onStart (audit Miss 3)
+    expect(fakeClient.whoami).toHaveBeenCalled();
+    // and BEFORE startClient — order matters so handlers filter the right mxid
+    const whoamiOrder = fakeClient.whoami.mock.invocationCallOrder[0];
+    const startOrder = fakeClient.startClient.mock.invocationCallOrder[0];
+    expect(whoamiOrder).toBeLessThan(startOrder);
+    expect(plugin.getBotInfo()?.id).toBe('@server-mxid:matrix.org');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('whoami() returned @server-mxid:matrix.org'),
+    );
+    warnSpy.mockRestore();
+    await plugin.stop();
+  });
+
+  it('editMessage throws when the original event is not an m.text message', async () => {
+    fakeClient.fetchRoomEvent.mockImplementationOnce(async () => ({
+      content: { msgtype: 'm.image' },
+    }));
+    const plugin = new MatrixPlugin();
+    await plugin.initialize(configFor());
+    await plugin.start();
+    await expect(
+      plugin.editMessage('!room:matrix.org', '$orig:matrix.org', { text: 'hi' }),
+    ).rejects.toThrow(/media messages is not supported/i);
+    expect(fakeClient.sendEvent).not.toHaveBeenCalled();
+    await plugin.stop();
+  });
+
+  it('editMessage proceeds when the original event is an m.text message', async () => {
+    const plugin = new MatrixPlugin();
+    await plugin.initialize(configFor());
+    await plugin.start();
+    await plugin.editMessage('!room:matrix.org', '$orig:matrix.org', { text: 'updated' });
+    expect(fakeClient.sendEvent).toHaveBeenCalledWith(
+      '!room:matrix.org',
+      'm.room.message',
+      expect.objectContaining({
+        msgtype: 'm.text',
+        'm.relates_to': { rel_type: 'm.replace', event_id: '$orig:matrix.org' },
+      }),
+    );
+    await plugin.stop();
+  });
+
+  it('on sync ERROR, stops the client and schedules a restart (backoff)', async () => {
+    vi.useFakeTimers();
+    try {
+      const plugin = new MatrixPlugin();
+      await plugin.initialize(configFor());
+      await plugin.start();
+      const startCallsBefore = fakeClient.startClient.mock.calls.length;
+      const stopCallsBefore = fakeClient.stopClient.mock.calls.length;
+
+      // First failure → stopClient called, restart scheduled at 5s
+      emitSync('ERROR');
+      expect(fakeClient.stopClient.mock.calls.length).toBe(stopCallsBefore + 1);
+      expect(fakeClient.startClient.mock.calls.length).toBe(startCallsBefore);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fakeClient.startClient.mock.calls.length).toBe(startCallsBefore + 1);
+
+      // Successful recovery resets the counter — subsequent ERROR uses the
+      // initial 5s backoff again, not the doubled 10s value.
+      emitSync('PREPARED');
+      emitSync('ERROR');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fakeClient.startClient.mock.calls.length).toBe(startCallsBefore + 2);
+
+      await plugin.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('transitions to error status after exceeding the max sync ERROR retries', async () => {
+    vi.useFakeTimers();
+    try {
+      const plugin = new MatrixPlugin();
+      await plugin.initialize(configFor());
+      await plugin.start();
+      expect(plugin.status).toBe('running');
+
+      // Fire 5 ERRORs within the backoff budget — status stays 'running' but
+      // setError records the failure each time.
+      for (let i = 0; i < 5; i += 1) {
+        emitSync('ERROR');
+        // Drain the scheduled restart so the next ERROR can schedule again.
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+      expect(plugin.status).toBe('running');
+
+      // 6th ERROR exceeds SYNC_BACKOFF_MAX_ATTEMPTS=5 → hard error transition.
+      emitSync('ERROR');
+      expect(plugin.status).toBe('error');
+      expect(fakeClient.stopClient).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -18,8 +18,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // `electron` is mocked per-test via vi.doMock so we can flip `isPackaged`
 // without re-importing or re-running the whole module graph.
-const { isPackagedRef } = vi.hoisted(() => ({
+// `existsSimulator` lets each test decide which candidate paths "exist" so
+// resolveBridgeEntryPath's first-existing-wins loop can be exercised.
+const { isPackagedRef, existsSimulator } = vi.hoisted(() => ({
   isPackagedRef: { value: false },
+  existsSimulator: { fn: (_p: string): boolean => true },
 }));
 
 vi.mock('electron', () => ({
@@ -38,12 +41,22 @@ vi.mock('child_process', () => ({
   ChildProcess: class {},
 }));
 
+// fs.existsSync gates the candidate path loop in dev mode. Default to true so
+// the first candidate (source-tree path) wins unless a test overrides.
+vi.mock('fs', () => ({
+  default: {
+    existsSync: (p: string) => existsSimulator.fn(p),
+  },
+  existsSync: (p: string) => existsSimulator.fn(p),
+}));
+
 describe('WhatsAppPlugin.resolveBridgeEntryPath', () => {
   const originalResourcesPath = process.resourcesPath;
 
   beforeEach(() => {
     vi.resetModules();
     isPackagedRef.value = false;
+    existsSimulator.fn = () => true;
     Object.defineProperty(process, 'resourcesPath', {
       value: '/test/resources',
       configurable: true,
@@ -75,5 +88,16 @@ describe('WhatsAppPlugin.resolveBridgeEntryPath', () => {
     // Walks up from the WhatsAppPlugin source location; must contain the
     // channels segment somewhere upstream.
     expect(resolved).toContain('whatsapp-bridge');
+  });
+
+  it('falls back to app.getAppPath() candidate when source-tree path missing (electron-vite layout)', async () => {
+    isPackagedRef.value = false;
+    // Simulate electron-vite output: only the app.getAppPath()-based candidate
+    // exists on disk; the source-tree __dirname walk lands on a non-existent
+    // path because runtime __dirname is out/main/.
+    existsSimulator.fn = (p: string) => p === '/test/app/src/process/channels/whatsapp-bridge/bridge.js';
+    const mod = await import('@process/channels/plugins/tier1/whatsapp/WhatsAppPlugin');
+    const resolved = mod.resolveBridgeEntryPath();
+    expect(resolved).toBe('/test/app/src/process/channels/whatsapp-bridge/bridge.js');
   });
 });

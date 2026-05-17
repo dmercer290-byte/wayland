@@ -36,9 +36,19 @@ import {
 // longer than this window. 30 seconds matches Element's default.
 const MATRIX_TYPING_TIMEOUT_MS = 30_000;
 
-// Minimal sync config — pull a small recent backlog so the room timeline
-// hydrates without flooding the IPC bus on first connect.
-const INITIAL_SYNC_LIMIT = 20;
+// Minimal sync config — a reactive bot only needs the most recent event per
+// room as a sync anchor. Higher values caused sync storms for bots joined to
+// many large rooms (audit finding: factual correction 2). Keep at 1.
+const INITIAL_SYNC_LIMIT = 1;
+
+// Sync-error backoff (audit Miss 4). On a Matrix sync ERROR state we stop the
+// client, wait BACKOFF_INITIAL_MS, then restart. Each consecutive failure
+// doubles the delay up to BACKOFF_CAP_MS. After BACKOFF_MAX_ATTEMPTS, we give
+// up and transition the plugin to status='error'. The counter resets on the
+// next successful PREPARED/SYNCING state.
+const SYNC_BACKOFF_INITIAL_MS = 5_000;
+const SYNC_BACKOFF_CAP_MS = 60_000;
+const SYNC_BACKOFF_MAX_ATTEMPTS = 5;
 
 /**
  * Subset of matrix-js-sdk MatrixClient we touch. Declared here so unit tests
@@ -58,8 +68,13 @@ type MatrixClientLike = {
   sendEmoteMessage?: (roomId: string, body: string) => Promise<{ event_id: string }>;
   whoami: () => Promise<{ user_id: string }>;
   getUser: (userId: string) => { displayName?: string } | null;
+  fetchRoomEvent?: (roomId: string, eventId: string) => Promise<MatrixRoomEvent>;
   on: (event: string, cb: (...args: unknown[]) => void) => unknown;
   removeAllListeners: () => void;
+};
+
+type MatrixRoomEvent = {
+  content?: { msgtype?: string };
 };
 
 export class MatrixPlugin extends BasePlugin {
@@ -75,6 +90,8 @@ export class MatrixPlugin extends BasePlugin {
   private client: MatrixClientLike | null = null;
   private selfUserId: string | null = null;
   private readonly activeUsers: Set<string> = new Set();
+  private syncFailureCount = 0;
+  private syncRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected async onInitialize(config: IChannelPluginConfig): Promise<void> {
     const creds = config.credentials ?? {};
@@ -105,11 +122,32 @@ export class MatrixPlugin extends BasePlugin {
 
   protected async onStart(): Promise<void> {
     if (!this.client) throw new Error('Matrix client not initialized');
+    // Resolve the bot's true mxid from the homeserver BEFORE handlers attach,
+    // so toUnifiedIncomingFromMatrix filters echoes against the actual identity
+    // (audit Miss 3). If whoami() disagrees with the configured credentials,
+    // warn loudly but trust the server — the access token is bound to the
+    // server-side mxid, not the one the operator pasted in.
+    try {
+      const me = await this.client.whoami();
+      if (me.user_id && me.user_id !== this.selfUserId) {
+        console.warn(
+          `[MatrixPlugin] whoami() returned ${me.user_id} but credentials said ${this.selfUserId}; using server value`,
+        );
+        this.selfUserId = me.user_id;
+      }
+    } catch (error) {
+      console.warn('[MatrixPlugin] whoami() failed; using credentials.userId as-is:', error);
+    }
     this.setupHandlers();
     await this.client.startClient({ initialSyncLimit: INITIAL_SYNC_LIMIT });
   }
 
   protected async onStop(): Promise<void> {
+    if (this.syncRetryTimer) {
+      clearTimeout(this.syncRetryTimer);
+      this.syncRetryTimer = null;
+    }
+    this.syncFailureCount = 0;
     if (!this.client) return;
     try {
       this.client.stopClient();
@@ -166,6 +204,22 @@ export class MatrixPlugin extends BasePlugin {
     if (!this.client) throw new Error('Matrix client not initialized');
     const body = message.text ?? '';
     if (!body.trim()) return;
+
+    // Guard against silently converting media messages to text on edit. The
+    // MSC2676 m.replace contract requires the new_content msgtype to match the
+    // original — sending m.text over an m.image would lose the media. Probe
+    // the original event when the SDK exposes fetchRoomEvent; if it doesn't,
+    // we keep the legacy text-only path but throw on any non-text original.
+    // Audit: "claimed but broken" 2.
+    if (typeof this.client.fetchRoomEvent === 'function') {
+      const original = await this.client.fetchRoomEvent(chatId, messageId);
+      const originalType = original?.content?.msgtype;
+      if (originalType && originalType !== 'm.text') {
+        throw new Error(
+          'Matrix editing media messages is not supported; only text edits work',
+        );
+      }
+    }
 
     await this.client.sendEvent(chatId, 'm.room.message', {
       msgtype: 'm.text',
@@ -229,10 +283,71 @@ export class MatrixPlugin extends BasePlugin {
 
     this.client.on('sync', (...args: unknown[]) => {
       const state = args[0] as string;
+      if (state === 'PREPARED' || state === 'SYNCING') {
+        // Healthy sync — clear any pending retry and reset the backoff counter.
+        if (this.syncRetryTimer) {
+          clearTimeout(this.syncRetryTimer);
+          this.syncRetryTimer = null;
+        }
+        this.syncFailureCount = 0;
+        return;
+      }
       if (state === 'ERROR') {
-        this.setError('Matrix sync entered ERROR state');
+        this.handleSyncError();
       }
     });
+  }
+
+  /**
+   * Stop the spinning client and schedule a restart with exponential backoff.
+   * After SYNC_BACKOFF_MAX_ATTEMPTS consecutive failures we give up and
+   * surface a hard error to the plugin status so the supervisor can decide
+   * what to do. Audit Miss 4.
+   */
+  private handleSyncError(): void {
+    if (!this.client) return;
+    if (this.syncRetryTimer) return; // restart already scheduled
+
+    this.syncFailureCount += 1;
+    if (this.syncFailureCount > SYNC_BACKOFF_MAX_ATTEMPTS) {
+      const reason = `Matrix sync ERROR after ${SYNC_BACKOFF_MAX_ATTEMPTS} retries`;
+      console.error(`[MatrixPlugin] ${reason}; giving up`);
+      try {
+        this.client.stopClient();
+      } catch (error) {
+        console.warn('[MatrixPlugin] stopClient during give-up failed:', error);
+      }
+      this.setStatus('error', reason);
+      return;
+    }
+
+    const delay = Math.min(
+      SYNC_BACKOFF_INITIAL_MS * 2 ** (this.syncFailureCount - 1),
+      SYNC_BACKOFF_CAP_MS,
+    );
+    console.warn(
+      `[MatrixPlugin] sync ERROR (attempt ${this.syncFailureCount}/${SYNC_BACKOFF_MAX_ATTEMPTS}); restarting in ${delay}ms`,
+    );
+    try {
+      this.client.stopClient();
+    } catch (error) {
+      console.warn('[MatrixPlugin] stopClient during backoff failed:', error);
+    }
+    this.setError(`Matrix sync ERROR; retrying in ${delay}ms`);
+
+    this.syncRetryTimer = setTimeout(() => {
+      this.syncRetryTimer = null;
+      if (!this.client) return;
+      this.client
+        .startClient({ initialSyncLimit: INITIAL_SYNC_LIMIT })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[MatrixPlugin] startClient during backoff failed:', message);
+          // Treat a failed restart like another sync ERROR so the next attempt
+          // schedules with the doubled delay.
+          this.handleSyncError();
+        });
+    }, delay);
   }
 
   // ==================== Static ====================

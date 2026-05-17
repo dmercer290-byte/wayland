@@ -31,6 +31,7 @@
  */
 
 import { ChildProcess, fork } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 import { app } from 'electron';
@@ -113,8 +114,36 @@ export function resolveBridgeEntryPath(): string {
   if (isPackaged) {
     return path.join(process.resourcesPath, 'whatsapp-bridge', 'bridge.js');
   }
-  // src/process/channels/plugins/tier1/whatsapp/ → src/process/channels/whatsapp-bridge/bridge.js
-  return path.resolve(__dirname, '../../../whatsapp-bridge/bridge.js');
+  // Dev: __dirname semantics differ between tsc-noEmit/vitest (source tree)
+  // and electron-vite (out/main/index.js bundle). Try each candidate path
+  // and return the first one that actually exists on disk.
+  const candidates = [
+    // 1. From source tree (vitest / tsc-noEmit):
+    //    src/process/channels/plugins/tier1/whatsapp/ → src/process/channels/whatsapp-bridge/bridge.js
+    path.resolve(__dirname, '../../../whatsapp-bridge/bridge.js'),
+    // 2. From electron-vite compiled main (out/main/index.js) — app.getAppPath()
+    //    returns the unpacked app root, which contains src/ in dev runs.
+    (() => {
+      try {
+        return path.resolve(
+          app.getAppPath(),
+          'src/process/channels/whatsapp-bridge/bridge.js'
+        );
+      } catch {
+        return '';
+      }
+    })(),
+  ].filter((p): p is string => p.length > 0);
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      // Continue to next candidate
+    }
+  }
+  // Fallback to the first candidate so callers still get a (possibly
+  // ENOENT-ing) path rather than empty string. Tests assert this path shape.
+  return candidates[0] ?? path.resolve(__dirname, '../../../whatsapp-bridge/bridge.js');
 }
 
 export class WhatsAppPlugin extends BasePlugin {

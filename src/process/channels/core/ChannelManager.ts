@@ -245,7 +245,25 @@ export class ChannelManager {
     }
 
     const enabledPlugins = result.data.filter((p) => p.enabled);
-    const builtinStartableTypes = new Set<PluginType>(['telegram', 'lark', 'dingtalk', 'weixin', 'wecom']);
+    // Must include EVERY built-in plugin registered in the constructor. Stale
+    // lists here silently auto-disable user-configured plugins on restart.
+    // Source of truth: registerPlugin() calls in the constructor (~lines 56-69).
+    const builtinStartableTypes = new Set<PluginType>([
+      'telegram',
+      'lark',
+      'dingtalk',
+      'weixin',
+      'wecom',
+      // Phase 1 (W1.1) — tier-1 plugins
+      'discord',
+      'slack',
+      'sms-twilio',
+      'whatsapp',
+      // Phase 2 (W1.2) — tier-2 plugins
+      'email-agentmail',
+      'email-imap',
+      'matrix',
+    ]);
     const extensionRegistry = ExtensionRegistry.getInstance();
 
     for (const plugin of enabledPlugins) {
@@ -513,6 +531,56 @@ export class ChannelManager {
       };
     }
 
+    // Phase 1 (W1.1) — tier-1 plugins. Each static testConnection takes a
+    // single string `token`; the renderer JSON-encodes structured credentials
+    // (homeserverUrl/accessToken for Matrix, the {backend, accessToken,
+    // phoneNumberId} blob for WhatsApp, etc.) per BasePlugin.testConnection
+    // contract. See WhatsAppPlugin.ts line 505 for the pattern.
+
+    if (pluginType === 'discord') {
+      const result = await DiscordPlugin.testConnection(token);
+      return { success: result.success, botUsername: result.botUsername, error: result.error };
+    }
+
+    if (pluginType === 'slack') {
+      const result = await SlackPlugin.testConnection(token);
+      return { success: result.success, botUsername: result.botUsername, error: result.error };
+    }
+
+    if (pluginType === 'sms-twilio') {
+      const result = await SmsTwilioPlugin.testConnection(token);
+      return { success: result.success, botUsername: result.botUsername, error: result.error };
+    }
+
+    if (pluginType === 'whatsapp') {
+      const result = await WhatsAppPlugin.testConnection(token);
+      return { success: result.success, botUsername: result.botUsername, error: result.error };
+    }
+
+    // Phase 2 (W1.2) — tier-2 plugins.
+
+    if (pluginType === 'email-agentmail') {
+      const result = await EmailAgentMailPlugin.testConnection(token);
+      return {
+        success: result.success,
+        // AgentMail returns inboxAddress on success — surface it as botUsername
+        // so the renderer can both display "connected as <inbox>" AND auto-fill
+        // the inboxAddress field if the user left it blank.
+        botUsername: result.inboxAddress,
+        error: result.error,
+      };
+    }
+
+    if (pluginType === 'email-imap') {
+      const result = await EmailImapPlugin.testConnection(token);
+      return { success: result.success, botUsername: result.botUsername, error: result.error };
+    }
+
+    if (pluginType === 'matrix') {
+      const result = await MatrixPlugin.testConnection(token);
+      return { success: result.success, botUsername: result.botUsername, error: result.error };
+    }
+
     // Extension plugins: test connection not supported yet (will be handled by the plugin itself on start)
     return { success: true, botUsername: undefined, error: undefined };
   }
@@ -522,9 +590,17 @@ export class ChannelManager {
    * For built-in plugins, derives from ID prefix. For others, returns the ID as type.
    */
   private getPluginTypeFromId(pluginId: string): PluginType {
+    // Order matters where prefixes overlap (e.g. 'email-imap' must be checked
+    // before any 'email-' shorter prefix). Currently no overlaps, but kept
+    // sorted longest-first to be safe.
+    if (pluginId.startsWith('email-agentmail')) return 'email-agentmail';
+    if (pluginId.startsWith('email-imap')) return 'email-imap';
+    if (pluginId.startsWith('sms-twilio')) return 'sms-twilio';
     if (pluginId.startsWith('telegram')) return 'telegram';
-    if (pluginId.startsWith('slack')) return 'slack';
+    if (pluginId.startsWith('whatsapp')) return 'whatsapp';
     if (pluginId.startsWith('discord')) return 'discord';
+    if (pluginId.startsWith('matrix')) return 'matrix';
+    if (pluginId.startsWith('slack')) return 'slack';
     if (pluginId.startsWith('lark')) return 'lark';
     if (pluginId.startsWith('dingtalk')) return 'dingtalk';
     if (pluginId.startsWith('weixin')) return 'weixin';

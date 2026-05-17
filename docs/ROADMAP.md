@@ -13,19 +13,20 @@ at the bottom for the boundary.
 
 ## Status
 
-- **Date:** 2026-05-17
-- **Current package.json version:** `1.9.25` (inherited; the `wayland-` tag chain
-  is what we treat as authoritative)
-- **Latest tag on this repo:** `v0.2.0-wayland-channels-tier1` (annotated, points
-  to `e7f2303f4` on `feat/channels-expansion`)
-- **`main` HEAD:** `f7df052d2` ("feat: channels expansion + settings redesign +
-  sync foundation"), squash-landed 2026-05-17
+- **Date:** 2026-05-17 (updated post-audit)
+- **Current package.json version:** `0.3.0` (wayland-native; abandoned upstream
+  AionUi 1.9.x chain in v0.2.0)
+- **Latest mainline tag:** `v0.3.0-wayland-base` (points to `main`)
+- **Latest feature-branch tag:** `v0.3.0-wayland-channels-tier2` (granular
+  Phase 2 history on `feat/channels-phase2`)
+- **`main` HEAD:** `v0.3.0-wayland-base` — Phase 2 channels squash-merge,
+  followed by v0.3.1 audit-fix commit (post-cross-audit hardening)
 - **Repo:** TradeCanyon/wayland
 
-The `-channels-tier1` tag is a feature-scoped tag for the granular branch
-history. The next mainline tag is `v0.2.0-wayland-base` once the M1 closeout
-items land (see M1 below). Prior `-wayland-base` chain: v0.1.0, v0.1.1, v0.1.2
-(yanked as `-safety`), v0.1.3.
+Tag chain to date: `v0.1.0-wayland-base`, `v0.1.1-wayland-base`, `v0.1.2-wayland-safety`
+(yanked), `v0.1.3-wayland-base`, `v0.2.0-wayland-channels-tier1` (branch),
+`v0.2.0-wayland-base` (main), `v0.3.0-wayland-channels-tier2` (branch),
+`v0.3.0-wayland-base` (main). Branches preserved for bisection.
 
 ---
 
@@ -93,8 +94,8 @@ In-flight Wave A dispatch artifacts (M1 closeout):
 
 | ID | Tag | Theme | Status |
 |----|-----|-------|--------|
-| M1 | `v0.2.0-wayland-base` | Phase 1 channels closeout — packaged builds work | IN FLIGHT (Wave A) |
-| M2 | `v0.3.0-wayland-base` | Phase 2 channels — Email + Matrix (+ Signal if scope) | PLANNED |
+| M1 | `v0.2.0-wayland-base` | Phase 1 channels closeout — packaged builds work | SHIPPED 2026-05-17 |
+| M2 | `v0.3.0-wayland-base` | Phase 2 channels — Email + Matrix (+ Signal if scope) | SHIPPED 2026-05-17 (Signal deferred to M2.5) |
 | M3 | `v0.4.0-wayland-base` | Gemini A2A migration + Teams Library Phase 1b/1c | PLANNED |
 | M4 | `v0.5.0-wayland-base` | Phase 3 channels (tier-3) + packaging hardening | PLANNED |
 | M5 | `v0.6.0-wayland-base` | Productization — sync, multi-device, plugin marketplace MVP | VISION |

@@ -355,6 +355,7 @@ export function initChannelBridge(channelRepo: IChannelRepository): void {
         return { success: false, msg: 'platform, pluginInstanceId and agentId are required' };
       }
       const { getTokenStore } = await import('@process/channels/webhook');
+      const { ProcessConfig } = await import('@process/utils/initStorage');
       const store = getTokenStore();
       // Revoke any prior token(s) for this exact tuple so the old URL can no
       // longer be used to deliver messages.
@@ -369,6 +370,17 @@ export function initChannelBridge(channelRepo: IChannelRepository): void {
         }
       }
       const minted = store.register(platform, pluginInstanceId, agentId);
+      // CRITICAL: persist the mutated store back to ProcessConfig so the new
+      // URL survives restart. Without this, ChannelManager.wireWebhookDispatcher
+      // hydrates from a stale snapshot and the rotated URL becomes a 404
+      // (codex audit miss 4, 2026-05-17).
+      try {
+        await ProcessConfig.set('webhook.connectionTokens', store.serialize());
+      } catch (persistErr) {
+        console.error('[ChannelBridge] Failed to persist rotated webhook token:', persistErr);
+        // Don't fail the rotation — the in-memory token works for this session;
+        // the user can re-rotate post-restart if persistence stays broken.
+      }
       return {
         success: true,
         data: { token: minted.token, platform: minted.platform, createdAt: minted.createdAt },

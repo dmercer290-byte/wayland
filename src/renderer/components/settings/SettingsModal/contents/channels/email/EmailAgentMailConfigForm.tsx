@@ -120,12 +120,33 @@ const EmailAgentMailConfigForm: React.FC<EmailAgentMailConfigFormProps> = ({
         return;
       }
 
+      // testConnection returns the inbox address as `botUsername` (per
+      // ChannelManager normalization). If the user didn't type one in,
+      // auto-populate the state field AND use the freshly-resolved value in
+      // the enablePlugin payload — React state setters are async, so we can't
+      // rely on `inboxAddress` updating in time for the call below.
+      const discoveredInbox =
+        typeof testResult.data?.botUsername === 'string' ? testResult.data.botUsername : '';
+      const resolvedInbox = inboxAddress.trim() || discoveredInbox;
+      if (!resolvedInbox) {
+        Message.warning(
+          t(
+            'settings.channels.emailAgentMail.credentials.inboxAddress.required',
+            'AgentMail inbox address required'
+          )
+        );
+        return;
+      }
+      if (!inboxAddress.trim() && discoveredInbox) {
+        setInboxAddress(discoveredInbox);
+      }
+
       // Persist credentials + enable the plugin so the runtime picks them up.
       const enableResult = await channel.enablePlugin.invoke({
         pluginId: 'email-agentmail',
         config: {
           apiKey: apiKey.trim(),
-          inboxAddress: inboxAddress.trim(),
+          inboxAddress: resolvedInbox,
           ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}),
         },
       });

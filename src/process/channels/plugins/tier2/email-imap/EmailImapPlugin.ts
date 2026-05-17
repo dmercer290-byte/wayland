@@ -43,6 +43,14 @@ import { buildSmtpEnvelope, parseImapMessage, type ImapMessageEnvelope } from '.
  */
 const POLL_INTERVAL_MS = 30_000;
 
+/**
+ * Reconnect backoff bounds. Start at 5s so a brief flap doesn't hammer the
+ * server, cap at 60s so a long outage still recovers within a minute of
+ * service being restored.
+ */
+const RECONNECT_BACKOFF_START_MS = 5_000;
+const RECONNECT_BACKOFF_MAX_MS = 60_000;
+
 type ResolvedCredentials = {
   readonly imap: {
     readonly host: string;
@@ -91,6 +99,19 @@ export class EmailImapPlugin extends BasePlugin {
   private idleActive = false;
   private lastSeenUid = 0;
   private readonly activeUsers: Set<string> = new Set();
+  /**
+   * Tracks an in-flight reconnect setTimeout so onStop() can cancel it. Without
+   * this a reconnect scheduled mid-flap would create a fresh ImapFlow long
+   * after the plugin was told to stop.
+   */
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectBackoffMs = RECONNECT_BACKOFF_START_MS;
+  /**
+   * True once onStop() begins. Reconnect handlers check this before scheduling
+   * a new connect — `this.client` and `this.status` are not enough on their own
+   * because a transport-level `close` event can race with logout().
+   */
+  private stopped = false;
 
   protected async onInitialize(config: IChannelPluginConfig): Promise<void> {
     this.creds = resolveCredentials(config.credentials ?? {});
@@ -98,6 +119,7 @@ export class EmailImapPlugin extends BasePlugin {
 
   protected async onStart(): Promise<void> {
     if (!this.creds) throw new Error('Email-IMAP plugin not initialized');
+    this.stopped = false;
 
     // Build outbound SMTP transport eagerly so send-failures surface here
     // rather than on the first agent reply.
@@ -112,8 +134,19 @@ export class EmailImapPlugin extends BasePlugin {
       },
     });
 
-    // Connect IMAP. logger:false silences imapflow's pino-style chatter.
-    this.client = new ImapFlow({
+    await this.connectAndArm();
+  }
+
+  /**
+   * Build a fresh ImapFlow, connect, drain UNSEEN, then arm IDLE or polling.
+   * Used both by onStart and by the reconnect state machine — keeping the
+   * sequence in one place ensures recovery looks identical to a cold start.
+   */
+  private async connectAndArm(): Promise<void> {
+    if (!this.creds) throw new Error('Email-IMAP plugin not initialized');
+
+    // logger:false silences imapflow's pino-style chatter.
+    const client = new ImapFlow({
       host: this.creds.imap.host,
       port: this.creds.imap.port,
       secure: this.creds.imap.tls,
@@ -124,21 +157,57 @@ export class EmailImapPlugin extends BasePlugin {
       logger: false,
     });
 
-    await this.client.connect();
-    await this.client.mailboxOpen('INBOX');
+    // Wire transport-level failure listeners BEFORE connect so a connect-time
+    // socket error still routes through the reconnect machine instead of
+    // being silently swallowed.
+    this.attachTransportListeners(client);
+
+    this.client = client;
+
+    await client.connect();
+    await client.mailboxOpen('INBOX');
+
+    // Successful connect resets backoff so the next outage starts at the
+    // floor again rather than escalating across unrelated incidents.
+    this.reconnectBackoffMs = RECONNECT_BACKOFF_START_MS;
 
     // Drain unread on startup, then start IDLE or fall back to polling.
     await this.fetchUnseen();
 
-    if (this.client.serverInfo?.capability?.includes('IDLE')) {
+    if (client.serverInfo?.capability?.includes('IDLE')) {
       this.startIdleLoop();
     } else {
       this.startPollingLoop();
     }
   }
 
+  /**
+   * Subscribe to imapflow's transport-level events. A hard TCP/TLS drop fires
+   * `close` (and sometimes `error`) but does NOT necessarily reject the
+   * in-flight `idle()` promise on every server, so listening here is what
+   * makes the reconnect machine actually trigger.
+   */
+  private attachTransportListeners(client: ImapFlow): void {
+    const handle = (reason: string, err?: unknown): void => {
+      if (this.stopped) return;
+      // Only react if this is the currently-active client. A late event from
+      // an already-replaced client would otherwise schedule a duplicate
+      // reconnect.
+      if (this.client !== client) return;
+      console.warn(`[email-imapPlugin] transport ${reason}, scheduling reconnect:`, err ?? '');
+      this.scheduleReconnect();
+    };
+    client.on('close', () => handle('close'));
+    client.on('error', (err: unknown) => handle('error', err));
+  }
+
   protected async onStop(): Promise<void> {
+    this.stopped = true;
     this.idleActive = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
@@ -158,6 +227,7 @@ export class EmailImapPlugin extends BasePlugin {
     this.creds = null;
     this.activeUsers.clear();
     this.lastSeenUid = 0;
+    this.reconnectBackoffMs = RECONNECT_BACKOFF_START_MS;
   }
 
   getActiveUserCount(): number {
@@ -223,19 +293,63 @@ export class EmailImapPlugin extends BasePlugin {
     });
 
     // Kick off the long-lived IDLE call. imapflow returns when IDLE ends
-    // (server timeout or our stop()); we just re-arm until idleActive=false.
+    // (server timeout or our stop()); we just re-arm. On error we hand off
+    // to the reconnect machine — re-arming idle() on a dead client spins
+    // forever, which is the bug this loop used to have.
     void (async () => {
-      while (this.idleActive && this.client) {
+      while (this.idleActive && this.client === client && !this.stopped) {
         try {
-          await this.client.idle();
+          await client.idle();
         } catch (err) {
-          if (this.idleActive) {
-            console.warn('[email-imapPlugin] IDLE error, sleeping 5s before re-arm:', err);
-            await sleep(5000);
-          }
+          if (this.stopped || !this.idleActive) return;
+          console.warn('[email-imapPlugin] IDLE error, triggering reconnect:', err);
+          this.scheduleReconnect();
+          return;
         }
       }
     })();
+  }
+
+  /**
+   * Tear down the current client and schedule a fresh connect after backoff.
+   * Idempotent — if a reconnect is already scheduled, return without doubling
+   * up.
+   */
+  private scheduleReconnect(): void {
+    if (this.stopped) return;
+    if (this.reconnectTimer) return;
+
+    // Stop the IDLE loop / poll so the existing client doesn't keep racing
+    // against the new one.
+    this.idleActive = false;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+
+    // Best-effort close of the dead client. We don't await — the socket may
+    // already be gone and logout() can hang.
+    const dead = this.client;
+    this.client = null;
+    if (dead) {
+      try {
+        void dead.logout().catch((): void => undefined);
+      } catch {
+        // ignore — the client is being discarded
+      }
+    }
+
+    const delay = this.reconnectBackoffMs;
+    this.reconnectBackoffMs = Math.min(this.reconnectBackoffMs * 2, RECONNECT_BACKOFF_MAX_MS);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.stopped) return;
+      void this.connectAndArm().catch((err) => {
+        console.warn('[email-imapPlugin] reconnect attempt failed:', err);
+        if (!this.stopped) this.scheduleReconnect();
+      });
+    }, delay);
   }
 
   private startPollingLoop(): void {
@@ -419,6 +533,3 @@ function toEnvelopeForAdapter(raw: ImapFetchMessage): ImapMessageEnvelope {
   };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

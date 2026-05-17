@@ -1207,8 +1207,6 @@ export type I18nKey =
   | 'settings.channels.emailAgentMail.webhookUrl.rotateFailed'
   | 'settings.channels.emailAgentMail.webhookUrl.rotateSuccess'
   | 'settings.channels.emailAgentMail.webhookUrl.tunnelPlaceholder'
-  | 'settings.channels.emailAgentmail.comingSoonBody'
-  | 'settings.channels.emailAgentmail.comingSoonTitle'
   | 'settings.channels.emailImap.comingSoonBody'
   | 'settings.channels.emailImap.comingSoonTitle'
   | 'settings.channels.emailImap.connectionFailed'

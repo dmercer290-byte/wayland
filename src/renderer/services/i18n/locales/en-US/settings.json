@@ -580,10 +580,6 @@
       "comingSoonTitle": "X / Twitter DMs",
       "premiumGate": "Premium API tier required ($200/month). Subscribe to X Developer Platform Basic or higher to enable DMs. The X Basic tier is closed to new signups as of 2026."
     },
-    "emailAgentmail": {
-      "comingSoonTitle": "Email (AgentMail) coming in {{phase}}",
-      "comingSoonBody": "Per-agent dedicated inbox at <agent-slug>@<workspace>.agentmail.to. AgentMail handles deliverability, threading, attachments."
-    },
     "emailAgentMail": {
       "help": "Webhook-driven SaaS email via AgentMail. Each agent gets a dedicated inbox; AgentMail handles deliverability, threading, and signed inbound webhooks.",
       "replaceWarning": "Replacing the AgentMail account invalidates the existing webhook URL.",
