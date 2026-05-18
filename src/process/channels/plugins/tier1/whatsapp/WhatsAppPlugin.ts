@@ -33,6 +33,8 @@
 import type { ChildProcess} from 'child_process';
 import { fork } from 'child_process';
 import { randomUUID } from 'crypto';
+import dns from 'node:dns/promises';
+import net from 'node:net';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -160,6 +162,42 @@ export function resolveBridgeEntryPath(): string {
   return candidates[0] ?? path.resolve(__dirname, '../../../whatsapp-bridge/bridge.js');
 }
 
+/**
+ * R6 (v0.4.3): IPv4 private/reserved-range guard for SSRF defense. Covers
+ * 10/8 + 172.16/12 + 192.168/16 (RFC1918), 127/8 (loopback), 169.254/16
+ * (link-local), 0.0.0.0/8 (this-network), 100.64/10 (CGNAT). Accepts
+ * decimal-dotted v4 only.
+ */
+export function isPrivateIPv4(addr: string): boolean {
+  const parts = addr.split('.');
+  if (parts.length !== 4) return false;
+  const oct = parts.map((p) => Number(p));
+  if (oct.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b] = oct as [number, number, number, number];
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  return false;
+}
+
+/**
+ * R6 (v0.4.3): IPv6 private/reserved-range guard. Covers ::1 (loopback),
+ * fc00::/7 (ULA), fe80::/10 (link-local), and IPv4-mapped (::ffff:a.b.c.d).
+ */
+export function isPrivateIPv6(addr: string): boolean {
+  const normalized = addr.toLowerCase();
+  if (normalized === '::1' || normalized === '::') return true;
+  const mappedMatch = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(normalized);
+  if (mappedMatch) return isPrivateIPv4(mappedMatch[1]!);
+  if (/^f[cd][0-9a-f]{0,2}:/.test(normalized)) return true;
+  if (/^fe[89ab][0-9a-f]?:/.test(normalized)) return true;
+  return false;
+}
+
 export class WhatsAppPlugin extends BasePlugin {
   readonly type: PluginType = 'whatsapp';
 
@@ -190,6 +228,21 @@ export class WhatsAppPlugin extends BasePlugin {
   private readonly activeUsers = new Set<string>();
   private accessToken: string | null = null;
   private phoneNumberId: string | null = null;
+  /**
+   * W-10 (v0.4.3): reconnect ladder for the bridge subprocess. Mirrors
+   * OpenClaw's `reconnect.ts` shape — exponential backoff capped at maxMs,
+   * hard cap on total attempts so a permanently broken backend doesn't
+   * busy-loop. Without this, an unclean bridge exit (e.g. transient Baileys
+   * websocket drop) parks the channel in `error` forever and the user has to
+   * disable + re-enable to recover.
+   */
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopRequested = false;
+  private static readonly RECONNECT_INITIAL_MS = 2_000;
+  private static readonly RECONNECT_MAX_MS = 30_000;
+  private static readonly RECONNECT_FACTOR = 1.8;
+  private static readonly RECONNECT_MAX_ATTEMPTS = 12;
 
   // ==================== BasePlugin lifecycle ====================
 
@@ -217,6 +270,15 @@ export class WhatsAppPlugin extends BasePlugin {
     if (!this.child) {
       throw new Error('WhatsApp bridge subprocess not started');
     }
+    // W-10 v0.4.3 Wave D: only reset state on an EXTERNAL start (after a real
+    // onStop). scheduleReconnect also calls back into onStart during the
+    // reconnect cycle, and if we reset the attempt counter there the ladder
+    // would never exhaust. stopRequested distinguishes the two: true after
+    // onStop, false during a reconnect cycle. (codex re-audit MED.)
+    if (this.stopRequested) {
+      this.stopRequested = false;
+      this.reconnectAttempts = 0;
+    }
     const params: Record<string, JsonValue> = {};
     if (this.backend === 'meta-business') {
       // Meta backend needs creds on every (re)connect — Cloud API is stateless.
@@ -236,6 +298,15 @@ export class WhatsAppPlugin extends BasePlugin {
   }
 
   protected async onStop(): Promise<void> {
+    // W-10 (v0.4.3): tell the exit handler not to relaunch the bridge, and
+    // cancel any in-flight respawn before we start tearing down. Must come
+    // BEFORE killChild so the SIGTERM-triggered exit event doesn't see
+    // stopRequested=false and schedule a reconnect against a torn-down plugin.
+    this.stopRequested = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (!this.child) return;
     try {
       // Best-effort graceful disconnect. If the bridge is wedged, the SIGTERM
@@ -333,29 +404,66 @@ export class WhatsAppPlugin extends BasePlugin {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       throw new Error(`WhatsApp media send: unsupported scheme ${parsed.protocol} (http/https only)`);
     }
-    const host = parsed.hostname.toLowerCase();
-    const isPrivateHost =
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host === '0.0.0.0' ||
-      host === '::1' ||
-      /^10\./.test(host) ||
-      /^192\.168\./.test(host) ||
-      /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host) ||
-      /^169\.254\./.test(host) || // link-local
-      /^f[cd][0-9a-f]{2}:/i.test(host) || // IPv6 ULA
-      /^fe80:/i.test(host); // IPv6 link-local
-    if (isPrivateHost) {
+    // URL parser keeps IPv6 literal hostnames wrapped in [brackets]; strip
+    // them before passing to net.isIP / dns.lookup.
+    const rawHost = parsed.hostname.toLowerCase();
+    const host = rawHost.startsWith('[') && rawHost.endsWith(']')
+      ? rawHost.slice(1, -1)
+      : rawHost;
+    // R6 (v0.4.3): Resolve hostname via DNS and reject if ANY returned address
+    // is in a private range. Closes DNS-rebinding bypass where an attacker
+    // points "internal.example.com" at 127.0.0.1. For IP literals, isIP()
+    // short-circuits the DNS lookup. IPv6 link-local (fe80::/10) and ULA
+    // (fc00::/7) covered. 0.0.0.0/8 + CGNAT (100.64/10) also blocked.
+    if (host === 'localhost') {
       throw new Error(
-        `WhatsApp media send: refusing to fetch private-network host (${host}). Use a public CDN URL.`,
+        `SSRF: ${parsed.hostname} resolves to private address`,
       );
     }
+    const ipVer = net.isIP(host);
+    let addresses: { address: string; family: number }[];
+    if (ipVer !== 0) {
+      addresses = [{ address: host, family: ipVer }];
+    } else {
+      try {
+        addresses = await dns.lookup(host, { all: true });
+      } catch (err) {
+        throw new Error(`WhatsApp media send: DNS lookup failed for ${host}: ${(err as Error).message}`);
+      }
+    }
+    for (const { address, family } of addresses) {
+      const isPrivate = family === 6 ? isPrivateIPv6(address) : isPrivateIPv4(address);
+      if (isPrivate) {
+        throw new Error(`SSRF: ${parsed.hostname} resolves to private address`);
+      }
+    }
     const tempPath = path.join(os.tmpdir(), `wayland-wa-${randomUUID()}${ext}`);
+    // R6 v0.4.3 Wave D: codex re-audit caught two SSRF escape hatches.
+    //   1. Redirects: even a single 30x to http://127.0.0.1/... bypasses the
+    //      private-range guard above, because the redirect target is fetched
+    //      without re-validation. Disable redirect-following; callers that
+    //      need a 30x must pre-resolve their CDN URL.
+    //   2. DNS rebinding (TOCTOU): between dns.lookup and axios connect, the
+    //      resolver can answer differently. Pin the resolution by handing the
+    //      agent a custom `lookup` that returns the already-validated address,
+    //      so the connect attempt cannot land on a private IP.
+    const pinned = addresses[0]!;
+    const pinnedLookup = (
+      _hostname: string,
+      _options: unknown,
+      callback: (err: Error | null, address: string, family: number) => void,
+    ): void => {
+      callback(null, pinned.address, pinned.family);
+    };
+    const HttpsAgent = (await import('node:https')).Agent;
+    const HttpAgent = (await import('node:http')).Agent;
     const res = await axios.get<ArrayBuffer>(mediaUrl, {
       responseType: 'arraybuffer',
       timeout: 60_000,
       maxContentLength: 100 * 1024 * 1024, // Meta caps inbound/outbound media at 100MB.
-      maxRedirects: 3, // limit redirect-chain to prevent open-redirect bypass of SSRF guard
+      maxRedirects: 0,
+      httpsAgent: new HttpsAgent({ lookup: pinnedLookup as never }),
+      httpAgent: new HttpAgent({ lookup: pinnedLookup as never }),
     });
     await fs.promises.writeFile(tempPath, Buffer.from(res.data));
     return tempPath;
@@ -470,8 +578,15 @@ export class WhatsAppPlugin extends BasePlugin {
         reject(new Error(`whatsapp bridge exited (${why})`));
       }
       this.pending.clear();
-      if (this._status === 'running' || this._status === 'starting') {
-        this.setStatus('error', `bridge exited unexpectedly (${why})`);
+      // W-10 (v0.4.3): if the exit was unexpected (operator did not call
+      // onStop), schedule a respawn with exponential backoff. Until the
+      // ladder gives up, stay in 'starting' rather than 'error' so the UI
+      // doesn't lie about being permanently broken.
+      if (!this.stopRequested && (this._status === 'running' || this._status === 'starting')) {
+        this.scheduleReconnect(why);
+      } else if (this._status === 'running' || this._status === 'starting') {
+        // stopRequested === true means onStop is tearing us down; suppress the
+        // 'error' transition so the channel ends up 'stopped' cleanly.
       }
     });
 
@@ -479,6 +594,49 @@ export class WhatsAppPlugin extends BasePlugin {
       console.error('[whatsappPlugin] bridge spawn error:', err);
       this.setError(err.message);
     });
+  }
+
+  /**
+   * W-10 (v0.4.3): schedule a bridge respawn with exponential backoff.
+   * Clamp delay between INITIAL_MS and MAX_MS; give up after MAX_ATTEMPTS so
+   * a permanently-broken backend doesn't busy-loop. Resets to attempt 1 once
+   * a successful reconnect lands a `connection.state=connected` notification
+   * — see handleNotification's 'connection.state' branch.
+   */
+  private scheduleReconnect(reason: string): void {
+    if (this.stopRequested) return;
+    if (this.reconnectAttempts >= WhatsAppPlugin.RECONNECT_MAX_ATTEMPTS) {
+      this.setStatus(
+        'error',
+        `bridge exited and reconnect ladder exhausted after ${this.reconnectAttempts} attempts (${reason})`,
+      );
+      return;
+    }
+    this.reconnectAttempts += 1;
+    const raw =
+      WhatsAppPlugin.RECONNECT_INITIAL_MS *
+      WhatsAppPlugin.RECONNECT_FACTOR ** (this.reconnectAttempts - 1);
+    const delayMs = Math.min(WhatsAppPlugin.RECONNECT_MAX_MS, Math.round(raw));
+    console.warn(
+      `[whatsappPlugin] respawning bridge in ${delayMs}ms (attempt ${this.reconnectAttempts}/${WhatsAppPlugin.RECONNECT_MAX_ATTEMPTS}, reason=${reason})`,
+    );
+    this.setStatus('starting', `reconnecting (attempt ${this.reconnectAttempts})`);
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.stopRequested) return;
+      try {
+        this.forkBridge();
+        void this.onStart().catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('[whatsappPlugin] reconnect onStart failed:', message);
+          this.scheduleReconnect(`reconnect-start-failed: ${message}`);
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.scheduleReconnect(`respawn-failed: ${message}`);
+      }
+    }, delayMs);
   }
 
   private consumeStdout(chunk: string): void {
@@ -530,6 +688,10 @@ export class WhatsAppPlugin extends BasePlugin {
         this.connectionState = state;
         if (state === 'connected') {
           this.lastQr = null; // pairing complete
+          // W-10 (v0.4.3): a successful connect closes a reconnect cycle;
+          // reset the attempt counter so the next failure starts from 0
+          // delay instead of resuming the previous backoff curve.
+          this.reconnectAttempts = 0;
           if (this._status === 'starting') this.setStatus('running');
         } else if (state === 'logged_out') {
           this.setStatus('error', 'WhatsApp session logged out (re-pair required)');
@@ -596,6 +758,20 @@ export class WhatsAppPlugin extends BasePlugin {
           : tsRaw * 1000
         : Date.now();
 
+    // W-3 (v0.4.3): surface mediaPath via unified attachments so agents can
+    // read the bytes without grovelling through `raw`. Only the QR backends
+    // download media locally; Meta Business cloud still exposes mediaId only.
+    const attachments =
+      contentType !== 'text' && (msg.mediaPath || msg.mediaId)
+        ? [
+            {
+              type: contentType as 'photo' | 'document' | 'voice' | 'audio' | 'video' | 'sticker',
+              fileId: msg.mediaId ?? msg.messageId,
+              ...(msg.mediaPath ? { localPath: msg.mediaPath } : {}),
+            },
+          ]
+        : undefined;
+
     const unified: IUnifiedIncomingMessage = {
       id: msg.messageId,
       platform: 'whatsapp',
@@ -607,7 +783,11 @@ export class WhatsAppPlugin extends BasePlugin {
       content: {
         type: contentType,
         text: msg.body ?? '',
+        ...(attachments ? { attachments } : {}),
       },
+      // W-4 (v0.4.3): forward isGroup so downstream permission/scoping logic
+      // can branch on it. The unified contract already declares this field.
+      ...(typeof msg.isGroup === 'boolean' ? { isGroup: msg.isGroup } : {}),
       // W-5 / W-6: forward reply context. Meta reactions re-use the same
       // field — reactionMessageId is the id of the message the emoji reacts to.
       ...(msg.replyToMessageId
@@ -694,7 +874,7 @@ export class WhatsAppPlugin extends BasePlugin {
    */
   static override async testConnection(
     token: string,
-  ): Promise<{ success: boolean; botUsername?: string; error?: string }> {
+  ): Promise<{ success: boolean; botUsername?: string; error?: string; warning?: string }> {
     let parsed: { backend?: string; accessToken?: string; phoneNumberId?: string };
     try {
       parsed = JSON.parse(token) as typeof parsed;
@@ -703,9 +883,14 @@ export class WhatsAppPlugin extends BasePlugin {
     }
     const resolved = (parsed.backend as WhatsAppBackend | undefined) ?? 'baileys';
     if (resolved !== 'meta-business') {
+      // R8 (v0.4.3): QR backends cannot be verified ahead of pairing. Return
+      // success:true so the UI doesn't block enable, but attach a `warning`
+      // field making the limitation explicit. Without this the form claims
+      // the channel is verified before the operator has scanned the QR.
       return {
         success: true,
         botUsername: `whatsapp-${resolved}`,
+        warning: 'pending-pairing — actual verification happens at QR scan',
       };
     }
     const accessToken = parsed.accessToken?.trim() ?? '';

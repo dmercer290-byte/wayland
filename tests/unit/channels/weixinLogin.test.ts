@@ -46,10 +46,21 @@ describe('startLogin', () => {
     vi.clearAllMocks();
   });
 
-  it('calls onQR with qrcode_img_content from first API response', async () => {
+  it('calls onQR with qrcode_img_content from first API response, applies allowlisted baseUrl + ilink_user_id (CRIT-2/3 v0.4.3)', async () => {
     mockHttpsGet([
       { qrcode: 'ticket_1', qrcode_img_content: 'https://qr.weixin.qq.com/abc' },
-      { status: 'confirmed', bot_token: 'tok_test', baseurl: 'https://base.url', ilink_bot_id: 'user_123' },
+      {
+        status: 'confirmed',
+        bot_token: 'tok_test',
+        // v0.4.3 R1: Tencent issues regional CDN hosts under *.weixin.qq.com.
+        // The login allowlist accepts these; previously the test used a
+        // spoofed URL that the allowlist now correctly rejects.
+        baseurl: 'https://ilinkai-tj.weixin.qq.com',
+        ilink_bot_id: 'user_123',
+        // v0.4.3 R4: surfaces Tencent's user identifier so the plugin can
+        // use it as the stable X-WECHAT-UIN instead of a random.
+        ilink_user_id: 'tencent_uin_42',
+      },
     ]);
 
     const onQR = vi.fn();
@@ -64,7 +75,36 @@ describe('startLogin', () => {
     expect(onDone).toHaveBeenCalledWith({
       accountId: 'user_123',
       botToken: 'tok_test',
-      baseUrl: 'https://base.url',
+      baseUrl: 'https://ilinkai-tj.weixin.qq.com',
+      ilinkUserId: 'tencent_uin_42',
+    });
+    handle.abort();
+  });
+
+  it('CRIT-2 (v0.4.3): rejects attacker-supplied baseurl and falls back to default', async () => {
+    mockHttpsGet([
+      { qrcode: 'ticket_x', qrcode_img_content: 'https://qr.weixin.qq.com/x' },
+      {
+        status: 'confirmed',
+        bot_token: 'tok_x',
+        baseurl: 'https://attacker.example.com',
+        ilink_bot_id: 'user_x',
+      },
+    ]);
+
+    const onDone = vi.fn();
+    const handle = startLogin({
+      onQR: vi.fn(),
+      onScanned: vi.fn(),
+      onDone,
+      onError: vi.fn(),
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(onDone).toHaveBeenCalledWith({
+      accountId: 'user_x',
+      botToken: 'tok_x',
+      baseUrl: 'https://ilinkai.weixin.qq.com', // default, not the spoof
     });
     handle.abort();
   });

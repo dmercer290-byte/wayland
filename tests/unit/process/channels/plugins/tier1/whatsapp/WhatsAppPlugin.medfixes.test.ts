@@ -210,6 +210,95 @@ describe('WhatsAppPlugin — MED/LOW finding fixes', () => {
     expect(msg.timestamp).toBe(tsSec * 1000);
   });
 
+  it('W-3 (v0.4.3): mediaPath surfaces on content.attachments[0].localPath', async () => {
+    const plugin = new WhatsAppPlugin();
+    await plugin.initialize(configFor('baileys'));
+    const msg = await captureInbound(plugin, {
+      messageId: 'WA_in_media',
+      chatId: 'chat@x',
+      senderId: 'sender@x',
+      body: '',
+      mediaType: 'image',
+      mediaId: 'meta-media-id',
+      mediaPath: '/tmp/wayland-whatsapp-cache/abc.jpg',
+    });
+    expect(msg.content.attachments).toEqual([
+      {
+        type: 'photo',
+        fileId: 'meta-media-id',
+        localPath: '/tmp/wayland-whatsapp-cache/abc.jpg',
+      },
+    ]);
+  });
+
+  it('W-3 (v0.4.3): falls back to messageId as fileId when only mediaPath is present', async () => {
+    const plugin = new WhatsAppPlugin();
+    await plugin.initialize(configFor('baileys'));
+    const msg = await captureInbound(plugin, {
+      messageId: 'WA_in_only_path',
+      chatId: 'chat@x',
+      senderId: 'sender@x',
+      body: '',
+      mediaType: 'audio',
+      mediaPath: '/tmp/voice.ogg',
+    });
+    expect(msg.content.attachments?.[0]).toEqual({
+      type: 'audio',
+      fileId: 'WA_in_only_path',
+      localPath: '/tmp/voice.ogg',
+    });
+  });
+
+  it('W-3 (v0.4.3): plain text message has no attachments', async () => {
+    const plugin = new WhatsAppPlugin();
+    await plugin.initialize(configFor('baileys'));
+    const msg = await captureInbound(plugin, {
+      messageId: 'WA_in_text',
+      chatId: 'chat@x',
+      senderId: 'sender@x',
+      body: 'just text',
+    });
+    expect(msg.content.attachments).toBeUndefined();
+  });
+
+  it('W-4 (v0.4.3): isGroup=true propagates to unified.isGroup', async () => {
+    const plugin = new WhatsAppPlugin();
+    await plugin.initialize(configFor('baileys'));
+    const msg = await captureInbound(plugin, {
+      messageId: 'WA_in_group',
+      chatId: 'group@g.us',
+      senderId: 'sender@s.whatsapp.net',
+      body: 'hi group',
+      isGroup: true,
+    });
+    expect(msg.isGroup).toBe(true);
+  });
+
+  it('W-4 (v0.4.3): isGroup=false propagates to unified.isGroup', async () => {
+    const plugin = new WhatsAppPlugin();
+    await plugin.initialize(configFor('baileys'));
+    const msg = await captureInbound(plugin, {
+      messageId: 'WA_in_dm',
+      chatId: '15551234567',
+      senderId: '15551234567',
+      body: 'hi dm',
+      isGroup: false,
+    });
+    expect(msg.isGroup).toBe(false);
+  });
+
+  it('W-4 (v0.4.3): omitted isGroup stays undefined (do not invent a default)', async () => {
+    const plugin = new WhatsAppPlugin();
+    await plugin.initialize(configFor('baileys'));
+    const msg = await captureInbound(plugin, {
+      messageId: 'WA_in_unknown_group',
+      chatId: 'chat@x',
+      senderId: 'sender@x',
+      body: 'hi',
+    });
+    expect(msg.isGroup).toBeUndefined();
+  });
+
   it('handleWebhookPayload rejects when bridge does not respond within 5s', async () => {
     vi.useFakeTimers();
     try {

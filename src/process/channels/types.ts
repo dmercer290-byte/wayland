@@ -411,6 +411,13 @@ export interface IUnifiedAttachment {
   mimeType?: string;
   size?: number;
   duration?: number;
+  /**
+   * On-disk path where the channel has already cached the media bytes for
+   * direct read. Set by channels that download media to a temp file before
+   * surfacing the unified message (e.g. WhatsApp QR backends). Absent when
+   * the channel exposes only an opaque platform-side fileId.
+   */
+  localPath?: string;
 }
 
 /**

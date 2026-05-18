@@ -25,6 +25,15 @@ import {
 import { extractAction, extractCategory } from './TelegramKeyboards';
 
 /**
+ * Whether to discard pending getUpdates on startup.
+ *
+ * Set to `true` because we don't persist the update offset across restarts;
+ * replaying old updates would surface stale messages to the user as if they
+ * arrived now. Flip to `false` only if/when offset persistence is added.
+ */
+const STARTUP_DROP_PENDING_UPDATES = true;
+
+/**
  * TelegramPlugin - Telegram Bot integration for Personal Assistant
  *
  * Uses grammY library for Telegram Bot API
@@ -625,9 +634,11 @@ export class TelegramPlugin extends BasePlugin {
           resolve();
         },
         allowed_updates: ['message', 'edited_message', 'callback_query'],
-        // Drop pending updates on startup to avoid processing stale messages
-        // 启动时丢弃待处理的更新，避免处理过时的消息
-        drop_pending_updates: true,
+        // Drop pending updates on startup to avoid replaying stale messages
+        // after a restart. This is the sensible default — overriding it would
+        // require restoring offset persistence (not currently implemented).
+        // Grep for STARTUP_DROP_PENDING_UPDATES to find this behavior.
+        drop_pending_updates: STARTUP_DROP_PENDING_UPDATES,
       })
         .then(() => {
           // This resolves when bot.stop() is called

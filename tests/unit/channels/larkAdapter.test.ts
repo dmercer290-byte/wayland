@@ -176,3 +176,58 @@ describe('LarkAdapter — exported constants', () => {
     expect(LARK_SUPPORTED_MESSAGE_TYPES).toEqual(['text', 'image', 'file', 'audio']);
   });
 });
+
+describe('LarkAdapter — displayName plumbing (R9 HIGH #2)', () => {
+  const messageEvent = (overrides: Record<string, unknown> = {}) => ({
+    event: {
+      message: {
+        message_id: 'om_test_1',
+        chat_id: 'oc_chat_1',
+        chat_type: 'p2p',
+        message_type: 'text',
+        content: JSON.stringify({ text: 'hi' }),
+        create_time: '1700000000000',
+        ...overrides,
+      },
+      sender: {
+        sender_id: { user_id: 'u_alice_abcdef', open_id: 'ou_alice_xyz123' },
+      },
+    },
+  });
+
+  const cardActionEvent = () => ({
+    event: {
+      token: 'tk_card_1',
+      open_chat_id: 'oc_chat_card',
+      operator: { user_id: 'u_bob_qrstuv', open_id: 'ou_bob_wxyz45' },
+      action: { value: { action: 'session.new' } },
+    },
+  });
+
+  it('uses the plugin-resolved displayName instead of the User XXXXX fallback', () => {
+    const out = toUnifiedIncomingMessage(messageEvent(), undefined, { displayName: 'Alice Wong' });
+    expect(out?.user.displayName).toBe('Alice Wong');
+    expect(out?.user.displayName).not.toMatch(/^User /);
+  });
+
+  it('falls back to "User <slice>" when no displayName is supplied but userId is present (regression)', () => {
+    const out = toUnifiedIncomingMessage(messageEvent());
+    expect(out?.user.displayName).toBe('User abcdef');
+  });
+
+  it('uses displayName on card-action events too', () => {
+    const out = toUnifiedIncomingMessage(cardActionEvent(), { type: 'system', name: 'session.new' }, {
+      displayName: 'Bob Lin',
+    });
+    expect(out?.user.displayName).toBe('Bob Lin');
+  });
+
+  it('renders "Unknown User" when neither displayName nor userId is present on a card action', () => {
+    const out = toUnifiedIncomingMessage(
+      { event: { token: 'tk_x', open_chat_id: 'oc_x', operator: {} } },
+      { type: 'system', name: 'session.new' }
+    );
+    expect(out?.user.displayName).toBe('Unknown User');
+    expect(out?.user.id).toBe('');
+  });
+});

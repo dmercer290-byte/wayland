@@ -76,7 +76,7 @@ vi.mock('qrcode.react', () => ({
   QRCodeSVG: ({ value }: { value: string }) => <div data-testid='webui-qr'>{value}</div>,
 }));
 
-import WeixinConfigForm from '@/renderer/components/settings/SettingsModal/contents/channels/WeixinConfigForm';
+import WeixinConfigForm from '@/renderer/components/settings/SettingsModal/contents/channels/chat/WeixinConfigForm';
 import { ConfigStorage } from '@/common/config/storage';
 
 const noopModelSelection = {

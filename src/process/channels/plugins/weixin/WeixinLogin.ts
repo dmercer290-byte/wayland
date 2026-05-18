@@ -12,12 +12,40 @@ const POLL_TIMEOUT_MS = 35_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_QR_RETRIES = 3;
 
+/**
+ * Tencent's iLink response includes a `baseurl` that the client is expected to
+ * adopt for subsequent calls (regional CDN routing). We honor it only if it
+ * parses as `https://*.weixin.qq.com` (no userinfo, no port indirection) so a
+ * compromised/MITM'd login response cannot redirect every later API call to an
+ * attacker-controlled host. Unknown hosts fall back to DEFAULT_BASE_URL.
+ */
+export function isAllowedBaseUrl(candidate: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  if (parsed.username !== '' || parsed.password !== '') return false;
+  // Tencent's iLink lives under *.weixin.qq.com (and the apex). Anything else
+  // is treated as untrusted and discarded.
+  const hostname = parsed.hostname.toLowerCase();
+  return hostname === 'weixin.qq.com' || hostname.endsWith('.weixin.qq.com');
+}
+
 export interface LoginCallbacks {
   /** @param qrcodeUrl  The page/image URL from the API (used in Electron to render via canvas).
    *  @param qrcodeData The raw QR code ticket — encode this directly when generating your own image. */
   onQR: (qrcodeUrl: string, qrcodeData: string) => void;
   onScanned: () => void;
-  onDone: (result: { accountId: string; botToken: string; baseUrl: string }) => void;
+  /**
+   * @param result.ilinkUserId Tencent-issued user identifier (`ilink_user_id`)
+   *   that we forward as the `X-WECHAT-UIN` header. CRIT-3 (v0.4.3): using
+   *   Tencent's own UIN avoids the bot-rotation pattern that fired their
+   *   risk-control system. Optional because legacy login responses may omit it.
+   */
+  onDone: (result: { accountId: string; botToken: string; baseUrl: string; ilinkUserId?: string }) => void;
   onError: (error: Error) => void;
 }
 
@@ -76,7 +104,10 @@ async function runLoginFlow(callbacks: LoginCallbacks, signal: AbortSignal): Pro
   callbacks.onError(new Error('QR code expired too many times'));
 }
 
-type PollResult = 'expired' | 'aborted' | { accountId: string; botToken: string; baseUrl: string };
+type PollResult =
+  | 'expired'
+  | 'aborted'
+  | { accountId: string; botToken: string; baseUrl: string; ilinkUserId?: string };
 
 async function pollQRStatus(qrcode: string, callbacks: LoginCallbacks, signal: AbortSignal): Promise<PollResult> {
   while (!signal.aborted) {
@@ -117,10 +148,17 @@ async function pollQRStatus(qrcode: string, callbacks: LoginCallbacks, signal: A
         if (!result.bot_token || !result.ilink_bot_id) {
           throw new Error('Missing bot_token or ilink_bot_id in confirmed response');
         }
+        // CRIT-2 (v0.4.3): allowlist baseurl; reject attacker-supplied hosts.
+        // CRIT-3 (v0.4.3): forward Tencent's ilink_user_id so the plugin can
+        // use it as the stable UIN instead of a locally-generated random.
         return {
           accountId: result.ilink_bot_id,
           botToken: result.bot_token,
-          baseUrl: result.baseurl || DEFAULT_BASE_URL,
+          baseUrl:
+            result.baseurl && isAllowedBaseUrl(result.baseurl)
+              ? result.baseurl
+              : DEFAULT_BASE_URL,
+          ...(result.ilink_user_id ? { ilinkUserId: result.ilink_user_id } : {}),
         };
     }
   }

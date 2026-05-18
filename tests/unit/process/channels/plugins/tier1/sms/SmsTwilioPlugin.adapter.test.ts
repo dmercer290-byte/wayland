@@ -160,12 +160,11 @@ describe('SmsTwilioPlugin.handleWebhookPayload', () => {
     }
   );
 
-  // F4: inbound MMS emits the message with text but logs a warning that media
-  // ingestion is not yet wired.
-  it('emits MMS payload text but warns about dropped media (F4)', async () => {
+  // F4 (R7): inbound MMS NumMedia / MediaUrl{i} / MediaContentType{i} convert
+  // into IUnifiedAttachment entries; Body is preserved as the caption text.
+  it('drops attachments when NumMedia=0 (F4)', async () => {
     const plugin = new SmsTwilioPlugin();
     const emitted: IUnifiedIncomingMessage[] = [];
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     plugin.onMessage(async (msg) => {
       emitted.push(msg);
     });
@@ -173,22 +172,103 @@ describe('SmsTwilioPlugin.handleWebhookPayload', () => {
     await plugin.handleWebhookPayload(
       {
         From: '+15551234567',
-        To: '+15557654321',
-        Body: 'see photo',
-        MessageSid: 'SM_mms',
-        NumMedia: '2',
-        MediaUrl0: 'https://api.twilio.com/...m0.jpg',
-        MediaUrl1: 'https://api.twilio.com/...m1.jpg',
+        MessageSid: 'SM_no_media',
+        Body: 'plain text',
+        NumMedia: '0',
       },
       {},
       'sms-twilio_default'
     );
 
     expect(emitted).toHaveLength(1);
-    expect(emitted[0].content.text).toBe('see photo');
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('Inbound MMS contains 2 media item(s)')
+    expect(emitted[0].content.type).toBe('text');
+    expect(emitted[0].content.attachments).toBeUndefined();
+  });
+
+  it('maps a single image MMS to a photo attachment (F4)', async () => {
+    const plugin = new SmsTwilioPlugin();
+    const emitted: IUnifiedIncomingMessage[] = [];
+    plugin.onMessage(async (msg) => {
+      emitted.push(msg);
+    });
+
+    await plugin.handleWebhookPayload(
+      {
+        From: '+15551234567',
+        MessageSid: 'SM_one_image',
+        NumMedia: '1',
+        MediaUrl0: 'https://api.twilio.com/2010-04-01/.../Media/ME0.jpg',
+        MediaContentType0: 'image/jpeg',
+      },
+      {},
+      'sms-twilio_default'
     );
-    warn.mockRestore();
+
+    expect(emitted).toHaveLength(1);
+    const msg = emitted[0];
+    expect(msg.content.type).toBe('photo');
+    expect(msg.content.attachments).toHaveLength(1);
+    expect(msg.content.attachments?.[0]).toEqual({
+      type: 'photo',
+      fileId: 'https://api.twilio.com/2010-04-01/.../Media/ME0.jpg',
+      mimeType: 'image/jpeg',
+    });
+  });
+
+  it('maps mixed image + pdf MMS into two attachments (F4)', async () => {
+    const plugin = new SmsTwilioPlugin();
+    const emitted: IUnifiedIncomingMessage[] = [];
+    plugin.onMessage(async (msg) => {
+      emitted.push(msg);
+    });
+
+    await plugin.handleWebhookPayload(
+      {
+        From: '+15551234567',
+        MessageSid: 'SM_mixed',
+        NumMedia: '2',
+        MediaUrl0: 'https://api.twilio.com/.../Media/ME0.jpg',
+        MediaContentType0: 'image/jpeg',
+        MediaUrl1: 'https://api.twilio.com/.../Media/ME1.pdf',
+        MediaContentType1: 'application/pdf',
+      },
+      {},
+      'sms-twilio_default'
+    );
+
+    expect(emitted).toHaveLength(1);
+    const att = emitted[0].content.attachments;
+    expect(att).toHaveLength(2);
+    expect(att?.[0].type).toBe('photo');
+    expect(att?.[1].type).toBe('document');
+    expect(att?.[1].mimeType).toBe('application/pdf');
+    // First attachment dictates the content.type promotion.
+    expect(emitted[0].content.type).toBe('photo');
+  });
+
+  it('preserves Body caption alongside attachment (F4)', async () => {
+    const plugin = new SmsTwilioPlugin();
+    const emitted: IUnifiedIncomingMessage[] = [];
+    plugin.onMessage(async (msg) => {
+      emitted.push(msg);
+    });
+
+    await plugin.handleWebhookPayload(
+      {
+        From: '+15551234567',
+        MessageSid: 'SM_caption',
+        Body: 'caption',
+        NumMedia: '1',
+        MediaUrl0: 'https://api.twilio.com/.../Media/MEcap.jpg',
+        MediaContentType0: 'image/png',
+      },
+      {},
+      'sms-twilio_default'
+    );
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].content.text).toBe('caption');
+    expect(emitted[0].content.attachments).toHaveLength(1);
+    expect(emitted[0].content.attachments?.[0].type).toBe('photo');
   });
 });

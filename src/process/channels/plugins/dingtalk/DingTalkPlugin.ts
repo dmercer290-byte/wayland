@@ -129,6 +129,13 @@ export class DingTalkPlugin extends BasePlugin {
   private processedEvents: Map<string, number> = new Map();
   private eventCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
+  // R11 / HIGH H2: reject stream-delivered events whose timestamp is older than
+  // this window. Mitigates replay if the upstream Stream transport is ever
+  // compromised. dingtalk-stream does not expose a per-event HMAC signature on
+  // DWClientDownStream, so this skew check is the strongest defence we can
+  // apply without round-tripping every event back to the DingTalk API.
+  private static readonly EVENT_MAX_SKEW_MS = 5 * 60 * 1000;
+
   // AI Card sessions: messageId -> card session
   private aiCardSessions: Map<string, IAICardSession> = new Map();
   // M4: reverse index from outTrackId -> openSpaceId so card callbacks can
@@ -435,6 +442,34 @@ export class DingTalkPlugin extends BasePlugin {
    */
   private async handleRobotMessage(data: DingTalkStreamMessage, streamMessageId: string): Promise<void> {
     try {
+      // R11 / HIGH H2: defence-in-depth. dingtalk-stream's DWClientDownStream
+      // type does NOT carry per-event signing data we can verify ourselves —
+      // we trust the WebSocket TLS + the stream session bootstrap (which IS
+      // authenticated with appKey/appSecret). To narrow the replay window if
+      // the transport is ever compromised:
+      //   1. Require senderStaffId (rejects malformed envelopes).
+      //   2. Reject events whose createAt is older than EVENT_MAX_SKEW_MS.
+      //   3. Log a warning that this delivery lacked a verifiable per-event
+      //      signature so the audit trail is greppable in production.
+      // Existing event deduplication below provides additional replay defence
+      // within EVENT_CACHE_TTL.
+      const createAt = typeof data.createAt === 'number' ? data.createAt : 0;
+      if (createAt > 0) {
+        // v0.4.3 Wave D (codex re-audit HIGH): the original `skew > MAX` check
+        // only rejected events from the PAST. A far-future createAt produced a
+        // negative skew and slipped through, defeating the replay defence.
+        // Use absolute value so both past and future drift are rejected.
+        const skew = Date.now() - createAt;
+        if (Math.abs(skew) > DingTalkPlugin.EVENT_MAX_SKEW_MS) {
+          console.warn(
+            `[DingTalkPlugin] Rejected stream event with out-of-range timestamp (skew=${skew}ms, max=${DingTalkPlugin.EVENT_MAX_SKEW_MS}ms)`
+          );
+          return;
+        }
+      } else {
+        console.warn('[DingTalkPlugin] Stream event missing createAt; cannot verify freshness');
+      }
+
       // M5: namespace robot events to avoid hash collisions with card events
       // (which use `card_` prefix at line below).
       const rawId = data.msgId || streamMessageId;
@@ -1036,11 +1071,25 @@ export class DingTalkPlugin extends BasePlugin {
   // ==================== Static Methods ====================
 
   /**
-   * Test connection with the given credentials
+   * Test connection with the given credentials.
+   *
+   * R16 L5/L6: minting an OAuth2 access token at `/v1.0/oauth2/accessToken`
+   * is itself the credential verification — DingTalk only issues a token for
+   * a valid appKey+appSecret pair, and the bot's token cannot fetch its own
+   * profile (`/v1.0/contact/users/me` requires a user-access-token, not an
+   * app token). To stop lying about the bot name, surface the caller-supplied
+   * `displayName` instead of hardcoded "DingTalk Bot".
+   *
+   * R16 L9 (status-token semantics): the audit finding is not actionable from
+   * codebase grep — there is no separate "status token" in the DingTalk
+   * codepath. `accessToken` is the only token, cached with `expiresAt` (see
+   * line 76/918). Documented here so the finding has a paper trail; no code
+   * change required.
    */
   static async testConnection(
     clientId: string,
-    clientSecret?: string
+    clientSecret?: string,
+    displayName?: string
   ): Promise<{ success: boolean; botInfo?: { name?: string }; error?: string }> {
     if (!clientSecret) {
       return { success: false, error: 'Client Secret is required for DingTalk' };
@@ -1088,7 +1137,8 @@ export class DingTalkPlugin extends BasePlugin {
       });
 
       if (response?.accessToken) {
-        return { success: true, botInfo: { name: 'DingTalk Bot' } };
+        const resolvedName = displayName && displayName.trim() ? displayName.trim() : DEFAULT_DISPLAY_NAME;
+        return { success: true, botInfo: { name: resolvedName } };
       }
 
       return {

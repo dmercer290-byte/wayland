@@ -66,6 +66,9 @@ const DingTalkConfigForm: React.FC<DingTalkConfigFormProps> = ({ pluginStatus, m
   // DingTalk credentials
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  // R10 / HIGH H1: optional custom-robot signing secret. Required only when the
+  // operator has enabled "Signing Secret" in DingTalk robot Security Settings.
+  const [webhookSecret, setWebhookSecret] = useState('');
 
   const [testLoading, setTestLoading] = useState(false);
   const [_credentialsTested, setCredentialsTested] = useState(false);
@@ -243,6 +246,10 @@ const DingTalkConfigForm: React.FC<DingTalkConfigFormProps> = ({ pluginStatus, m
         config: {
           clientId: clientId.trim(),
           clientSecret: clientSecret.trim(),
+          // R10 / HIGH H1: forward webhookSecret only when set, so the plugin
+          // can sign custom-robot webhook posts (HMAC-SHA256) for robots that
+          // have "Signing Secret" enabled in DingTalk Security Settings.
+          ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}),
         },
       });
 
@@ -454,6 +461,24 @@ const DingTalkConfigForm: React.FC<DingTalkConfigFormProps> = ({ pluginStatus, m
             disabled={hasExistingUsers}
           />
         )}
+      </PreferenceRow>
+
+      {/* Webhook Secret (optional) — R10 / HIGH H1 */}
+      <PreferenceRow
+        label={t('settings.dingtalk.webhookSecret', 'Webhook Secret (optional)')}
+        description={t(
+          'settings.dingtalk.webhookSecretDesc',
+          'Required if your DingTalk robot has signed webhook security enabled'
+        )}
+      >
+        <Input.Password
+          value={webhookSecret}
+          onChange={(value) => setWebhookSecret(value)}
+          placeholder={pluginStatus?.hasToken && !webhookSecret ? '••••••••••••••••' : 'SEC...'}
+          style={{ width: 240 }}
+          visibilityToggle
+          disabled={hasExistingUsers}
+        />
       </PreferenceRow>
 
       {/* Test Connection Button */}

@@ -124,6 +124,16 @@ const IMessageConfigForm: React.FC<IMessageConfigFormProps> = ({ pluginStatus, o
         )}
       </div>
 
+      <div className='flex items-start gap-8px p-12px rd-8px bg-warning-1 text-warning border border-warning'>
+        <AlertTriangle size={16} className='mt-2px flex-shrink-0' />
+        <span className='text-12px'>
+          {t(
+            'settings.channels.imessage.fdaRelaunchHelp',
+            'IMPORTANT: After granting Full Disk Access for the first time, you MUST fully quit and relaunch the app — macOS only re-reads FDA on app launch, so without a relaunch you will loop on "chat.db not readable" errors.',
+          )}
+        </span>
+      </div>
+
       <div className='text-12px text-t-tertiary p-12px rd-8px bg-fill-2'>
         {t(
           'settings.channels.imessage.automationNote',

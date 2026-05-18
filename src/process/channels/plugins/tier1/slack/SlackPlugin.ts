@@ -417,21 +417,9 @@ export class SlackPlugin extends BasePlugin {
     if (!this.app) {
       throw new Error('SlackPlugin not initialized');
     }
-    // F15 MED: url_verification — Slack pings the endpoint with a challenge
-    // on every subscription setup and requires the body to echo the
-    // challenge string back within 3 s. The shared WebhookReceiver is
-    // responsible for sending the HTTP response (the BasePlugin contract
-    // restricts us to a void return) — but we surface the challenge for
-    // operator visibility so a misconfigured receiver is debuggable
-    // without re-instrumenting the upstream call site.
-    const body = payload as { type?: string; challenge?: string; event?: unknown };
-    if (body?.type === 'url_verification') {
-      const challenge = typeof body.challenge === 'string' ? body.challenge : '';
-      console.info(
-        `[SlackPlugin] url_verification received challenge="${challenge}" — shared WebhookReceiver must echo this in the HTTP response body within 3s`,
-      );
-      return;
-    }
+    // F15 (v0.4.3): url_verification is short-circuited by the shared
+    // WebhookReceiver via the verifier's __challenge field (see
+    // webhook/verifiers/slack.ts). The plugin only sees real events.
 
     await this.app.processEvent({
       body: payload as Record<string, unknown>,

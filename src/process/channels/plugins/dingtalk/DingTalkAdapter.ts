@@ -118,12 +118,13 @@ export function encodeChatId(data: DingTalkStreamMessage): string {
  *
  * Expected formats: `user:<staffId>` or `group:<conversationId>`.
  *
- * M3: bare/unprefixed chatIds previously silent-defaulted to 'user' and
- * misrouted as staffIds. Default is preserved for backwards compatibility,
- * but we now emit a one-time warning per unknown chatId so the misroute is
- * detectable in logs.
+ * R16 M3: bare/unprefixed chatIds previously silent-defaulted to 'user' and
+ * misrouted as staffIds (a silent corruption when callers passed a malformed
+ * id). The R10/R11 pass added a one-time warning; R16 promotes it to a hard
+ * throw so the misroute is caught at the call site rather than swallowed.
+ * Callers handling user-supplied ids must wrap with try/catch or migrate to
+ * the prefixed form via `encodeChatId`.
  */
-const _parseChatIdWarned = new Set<string>();
 export function parseChatId(chatId: string): { type: 'user' | 'group'; id: string } {
   if (chatId.startsWith('user:')) {
     return { type: 'user', id: chatId.slice(5) };
@@ -131,14 +132,7 @@ export function parseChatId(chatId: string): { type: 'user' | 'group'; id: strin
   if (chatId.startsWith('group:')) {
     return { type: 'group', id: chatId.slice(6) };
   }
-  if (!_parseChatIdWarned.has(chatId)) {
-    _parseChatIdWarned.add(chatId);
-    console.warn(
-      `[DingTalkAdapter] parseChatId received unprefixed chatId "${chatId}"; defaulting to type='user'. ` +
-        `Callers should encode with "user:" or "group:" prefix.`
-    );
-  }
-  return { type: 'user', id: chatId };
+  throw new Error(`parseChatId: unrecognized id format: ${chatId}`);
 }
 
 /**

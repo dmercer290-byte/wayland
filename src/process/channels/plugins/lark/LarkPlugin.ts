@@ -15,13 +15,40 @@ import type {
 } from '../../types';
 import { BasePlugin } from '../BasePlugin';
 import {
+  DEFAULT_DISPLAY_NAME,
   extractCardAction,
   isBotMentioned,
   LARK_MESSAGE_LIMIT,
+  type LarkMessageEvent,
   resolveLarkDomain,
   toLarkSendParams,
   toUnifiedIncomingMessage,
 } from './LarkAdapter';
+
+/**
+ * Minimal Lark card-action event shape used by `handleCardAction`. We don't import
+ * the full SDK event type because the SDK ships them as `any` callbacks — this
+ * keeps the field access narrow and lint-clean without a top-level any cast.
+ */
+type LarkCardEventPayload = {
+  event?: {
+    action?: { value?: Record<string, unknown>; tag?: string };
+    operator?: { user_id?: string; open_id?: string };
+    token?: string;
+  };
+};
+
+/**
+ * Minimal Lark bot-menu event shape.
+ */
+type LarkBotMenuPayload = {
+  event?: {
+    operator?: { operator_id?: { user_id?: string; open_id?: string } };
+    event_key?: string;
+    timestamp?: string;
+    chat_id?: string;
+  };
+};
 
 /**
  * LarkPlugin - Lark/Feishu Bot integration for Personal Assistant
@@ -53,8 +80,8 @@ export class LarkPlugin extends BasePlugin {
   private botInfo: { appId: string; openId?: string; name?: string } | null = null;
   private isConnected: boolean = false;
 
-  // Token management
-  private accessToken: string | null = null;
+  // Token expiry timestamp used by ensureAccessToken() to know when to refresh.
+  // (The actual token string is owned by the SDK; we only track expiry here.)
   private tokenExpiresAt: number = 0;
 
   // Display name cache (cacheKey -> resolved name)
@@ -174,11 +201,41 @@ export class LarkPlugin extends BasePlugin {
       // Start event cache cleanup timer
       this.startEventCleanup();
 
-      console.log(`[LarkPlugin] Started for app ${appId}`);
+      console.info(`[LarkPlugin] started app=${appId} domain=${String(domain)}`);
     } catch (error) {
-      console.error('[LarkPlugin] Failed to start:', error);
+      console.error('[LarkPlugin] failed to start:', error);
       throw error;
     }
+  }
+
+  // Warn-once flag for unknown Lark event-schema versions (R15 LOW #18).
+  private warnedSchemaVersions: Set<string> = new Set();
+
+  /**
+   * One-time warn when an incoming event's `schema` field is not `'2.0'`.
+   * Lark may migrate to a newer schema someday; the warn surfaces it early.
+   */
+  private warnOnUnknownSchema(schema: string | undefined): void {
+    if (!schema || schema === '2.0') return;
+    if (this.warnedSchemaVersions.has(schema)) return;
+    this.warnedSchemaVersions.add(schema);
+    console.warn(`[LarkPlugin] unexpected event schema=${schema} (expected '2.0')`);
+  }
+
+  /**
+   * Log a decrypt failure with enough context to debug (R15 LOW #17) — eventId,
+   * the configured algorithm (we only ever use AES via encryptKey so a literal
+   * is fine), and a short hex preview of the raw payload bounded to 100 bytes
+   * so secrets can't accidentally land in logs.
+   */
+  private logDecryptFailure(eventId: string | undefined, rawPayload: Buffer | string | undefined): void {
+    const id = eventId ?? '<no-event-id>';
+    let preview = '<empty>';
+    if (rawPayload) {
+      const buf = Buffer.isBuffer(rawPayload) ? rawPayload : Buffer.from(String(rawPayload));
+      preview = buf.slice(0, 100).toString('hex');
+    }
+    console.error(`[LarkPlugin] decrypt failed event=${id} algo=AES-CBC payload[0..100]=${preview}`);
   }
 
   /**
@@ -189,14 +246,22 @@ export class LarkPlugin extends BasePlugin {
     this.stopEventCleanup();
 
     if (this.wsClient) {
-      // WSClient doesn't expose a public stop; null and let GC reclaim the socket.
+      // SDK exposes `close({ force? })` on WSClient; call it so the socket and
+      // reconnect/ping timers are torn down deterministically instead of waiting
+      // for GC. (R14 MED #8.) close() is best-effort — swallow errors so a stale
+      // socket can never wedge plugin shutdown.
+      try {
+        const ws = this.wsClient as unknown as { close?: (p?: { force?: boolean }) => void };
+        ws.close?.({ force: true });
+      } catch (err) {
+        console.warn('[LarkPlugin] WSClient.close() failed during shutdown:', err);
+      }
       this.wsClient = null;
     }
 
     this.eventDispatcher = null;
     this.client = null;
     this.botInfo = null;
-    this.accessToken = null;
     this.tokenExpiresAt = 0;
     this.activeUsers.clear();
     this.processedEvents.clear();
@@ -204,7 +269,7 @@ export class LarkPlugin extends BasePlugin {
     this.patchQueues.clear();
     this.isConnected = false;
 
-    console.log('[LarkPlugin] Stopped and cleaned up');
+    console.info('[LarkPlugin] stopped and cleaned up');
   }
 
   /**
@@ -219,9 +284,15 @@ export class LarkPlugin extends BasePlugin {
    */
   getBotInfo(): BotInfo | null {
     if (!this.botInfo) return null;
+    // Configured displayName wins over the resolved bot name, which wins over
+    // the DEFAULT_DISPLAY_NAME constant. Mirrors the R17 WeixinPlugin pattern
+    // so admins can override the surfaced bot name without forking the plugin.
+    const configured = this.config?.credentials?.displayName as string | undefined;
+    const displayName =
+      (configured && configured.trim()) || this.botInfo.name || DEFAULT_DISPLAY_NAME;
     return {
       id: this.botInfo.appId,
-      displayName: this.botInfo.name || 'Wayland Core Assistant',
+      displayName,
     };
   }
 
@@ -314,6 +385,16 @@ export class LarkPlugin extends BasePlugin {
   async editMessage(chatId: string, messageId: string, message: IUnifiedOutgoingMessage): Promise<void> {
     if (!this.client) {
       throw new Error('Client not initialized');
+    }
+
+    // R15 LOW #14: allow installations that don't want streaming card edits to
+    // opt out via `credentials.disableCardStreaming = true`. We still need to
+    // ship the *final* render somewhere; sending a fresh message preserves the
+    // user-visible content without thrashing Lark's patch QPS limit.
+    const disableStreaming = this.config?.credentials?.disableCardStreaming === true;
+    if (disableStreaming) {
+      await this.sendMessage(chatId, message);
+      return;
     }
 
     return this.enqueuePatch(chatId, () => this.doEditMessage(messageId, message));
@@ -411,10 +492,14 @@ export class LarkPlugin extends BasePlugin {
   }
 
   /**
-   * Handle incoming message events
+   * Handle incoming message events.
+   *
+   * Typed as `LarkMessageEvent` (R14 MED #9 / #11) so field access goes through
+   * the same surface the adapter validates against — no top-level `any` cast.
    */
-  private async handleMessageEvent(event: any): Promise<void> {
+  private async handleMessageEvent(event: LarkMessageEvent & { schema?: string }): Promise<void> {
     try {
+      this.warnOnUnknownSchema(event.schema);
       const message = event?.event?.message;
       const sender = event?.event?.sender;
 
@@ -445,15 +530,12 @@ export class LarkPlugin extends BasePlugin {
 
       this.activeUsers.add(userId);
 
-      // Resolve real display name via contact.user.get (cached).
+      // Resolve real display name via contact.user.get (cached) and hand it to the adapter
+      // so it never falls back to the `User <slice>` placeholder when we know the real name.
       const senderOpenId: string | undefined = sender.sender_id?.open_id;
       const displayName = await this.resolveUserDisplayName(senderOpenId, userId);
 
-      const unifiedMessage = toUnifiedIncomingMessage(event);
-      if (unifiedMessage) {
-        // Override the adapter's placeholder with the resolved value.
-        unifiedMessage.user.displayName = displayName;
-      }
+      const unifiedMessage = toUnifiedIncomingMessage(event, undefined, { displayName });
 
       if (unifiedMessage && this.messageHandler) {
         if (unifiedMessage.content.type === 'text' && unifiedMessage.content.text) {
@@ -530,7 +612,7 @@ export class LarkPlugin extends BasePlugin {
   /**
    * Handle bot menu click events (application.bot.menu_v6)
    */
-  private async handleBotMenuEvent(event: any): Promise<void> {
+  private async handleBotMenuEvent(event: LarkBotMenuPayload): Promise<void> {
     try {
       const operator = event?.event?.operator;
       const eventKey = event?.event?.event_key;
@@ -595,7 +677,7 @@ export class LarkPlugin extends BasePlugin {
   /**
    * Handle card action callbacks (button clicks)
    */
-  private async handleCardAction(event: any): Promise<void> {
+  private async handleCardAction(event: LarkCardEventPayload): Promise<void> {
     try {
       const action = event?.event?.action;
       const operator = event?.event?.operator;
@@ -623,10 +705,7 @@ export class LarkPlugin extends BasePlugin {
 
       const displayName = await this.resolveUserDisplayName(operator.open_id, userId);
 
-      const unifiedMessage = toUnifiedIncomingMessage(event, actionInfo);
-      if (unifiedMessage) {
-        unifiedMessage.user.displayName = displayName;
-      }
+      const unifiedMessage = toUnifiedIncomingMessage(event, actionInfo, { displayName });
       if (unifiedMessage && this.messageHandler) {
         void this.messageHandler(unifiedMessage).catch((error) =>
           console.error(`[LarkPlugin] Error handling card action:`, error)

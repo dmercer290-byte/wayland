@@ -66,6 +66,21 @@ export const slackVerifier: WebhookVerifier = (input, secret) => {
     payload = formObj;
   }
 
+  // F15 (v0.4.3): url_verification handshake — Slack POSTs a signed
+  //   `{ type: 'url_verification', challenge: '...' }`
+  // and requires a 200 reply with the challenge echoed in the body within 3 s.
+  // We surface `__challenge` so the shared WebhookReceiver short-circuits to a
+  // 200 + plain-text body (same path WhatsApp uses for its GET handshake).
+  // Without this, Slack saw 202 Accepted and refused to enable the endpoint.
+  const typed = payload as { type?: string; challenge?: string };
+  if (typed.type === 'url_verification' && typeof typed.challenge === 'string') {
+    return {
+      ok: true,
+      payload: { ...payload, __challenge: typed.challenge },
+      timestamp: tsNum * 1000,
+    };
+  }
+
   const eventId =
     (payload as { event_id?: string }).event_id ?? (payload as { event?: { client_msg_id?: string } }).event?.client_msg_id;
 

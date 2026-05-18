@@ -42,14 +42,10 @@ describe('DingTalkAdapter — chatId round-trip', () => {
     expect(parseChatId('group:cid')).toEqual({ type: 'group', id: 'cid' });
   });
 
-  it('M3: warns once for unprefixed chatIds (default user behavior preserved)', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const a = parseChatId('legacy-bare-id');
-    const b = parseChatId('legacy-bare-id'); // second call should not re-warn
-    expect(a).toEqual({ type: 'user', id: 'legacy-bare-id' });
-    expect(b).toEqual({ type: 'user', id: 'legacy-bare-id' });
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
+  it('R16 M3: throws for unprefixed legacy chatIds (no silent user fallback)', () => {
+    expect(() => parseChatId('unprefixed-legacy')).toThrow(
+      /parseChatId: unrecognized id format: unprefixed-legacy/
+    );
   });
 });
 

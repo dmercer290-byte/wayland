@@ -26,14 +26,32 @@ import type { Twilio } from 'twilio';
 import twilio from 'twilio';
 
 import type {
+  AttachmentType,
   BotInfo,
   IChannelPluginConfig,
   IPluginCapabilities,
+  IUnifiedAttachment,
   IUnifiedIncomingMessage,
+  IUnifiedMessageContent,
   IUnifiedOutgoingMessage,
+  MessageContentType,
   PluginType,
 } from '../../../types';
 import { BasePlugin } from '../../BasePlugin';
+
+/**
+ * Map a MIME type from Twilio's MediaContentType{i} fields to the unified
+ * AttachmentType. Twilio MMS supports image/* (jpeg/png/gif), audio/* (amr,
+ * mp3, mp4), video/* (mp4, 3gp), and various document types (pdf, vcard).
+ * Anything not in the recognized buckets falls through to 'document'.
+ */
+function mimeToAttachmentType(mime: string): AttachmentType {
+  const lower = mime.toLowerCase();
+  if (lower.startsWith('image/')) return 'photo';
+  if (lower.startsWith('audio/')) return 'audio';
+  if (lower.startsWith('video/')) return 'video';
+  return 'document';
+}
 
 /** E.164 phone-number format: leading `+`, country digit 1-9, then up to 14 digits. */
 const E164_REGEX = /^\+[1-9]\d{1,14}$/;
@@ -229,8 +247,10 @@ export class SmsTwilioPlugin extends BasePlugin {
    * post-STOP is the violating action; the carrier blocks delivery but the
    * intent is logged).
    *
-   * F4 fix: log a warning when inbound MMS media is dropped so operators
-   * notice the gap until full media ingestion lands.
+   * F4 fix: inbound MMS NumMedia / MediaUrl0..N / MediaContentType0..N now
+   * convert into IUnifiedAttachment entries on the unified message; content
+   * type promotes to the first attachment's category (photo/audio/video/
+   * document) while Body is preserved as the caption text.
    */
   async handleWebhookPayload(
     payload: object,
@@ -273,16 +293,6 @@ export class SmsTwilioPlugin extends BasePlugin {
       return;
     }
 
-    // F4: surface inbound media so operators see the gap. Full MMS ingestion
-    // (downloading the MediaUrl0..N and surfacing them as attachments) is a
-    // follow-up — for now we keep the unified message text-only but log.
-    const numMedia = parseInt(params.NumMedia ?? '0', 10);
-    if (Number.isFinite(numMedia) && numMedia > 0) {
-      console.warn(
-        `[sms-twilioPlugin] Inbound MMS contains ${numMedia} media item(s); media ingestion not yet implemented`
-      );
-    }
-
     this.activeUsers.add(unified.user.id);
     await this.emitMessage(unified);
   }
@@ -304,6 +314,18 @@ export class SmsTwilioPlugin extends BasePlugin {
     const to = (params.To ?? '').trim();
     const body = params.Body ?? '';
 
+    const attachments = this.extractInboundAttachments(params);
+    const contentType: MessageContentType =
+      attachments.length > 0 ? attachments[0].type : 'text';
+
+    const content: IUnifiedMessageContent = {
+      type: contentType,
+      text: body,
+    };
+    if (attachments.length > 0) {
+      content.attachments = attachments;
+    }
+
     return {
       id: messageSid,
       platform: 'sms-twilio',
@@ -312,13 +334,33 @@ export class SmsTwilioPlugin extends BasePlugin {
         id: from,
         displayName: from,
       },
-      content: {
-        type: 'text',
-        text: body,
-      },
+      content,
       timestamp: Date.now(),
       raw: { ...params, To: to },
     };
+  }
+
+  /**
+   * F4: convert Twilio's flat NumMedia / MediaUrl{i} / MediaContentType{i}
+   * fields into IUnifiedAttachment entries. Twilio guarantees the
+   * MediaContentType header exists when MediaUrl does; entries without a URL
+   * are skipped defensively.
+   */
+  private extractInboundAttachments(params: TwilioInboundParams): IUnifiedAttachment[] {
+    const numMedia = parseInt(params.NumMedia ?? '0', 10);
+    if (!Number.isFinite(numMedia) || numMedia <= 0) return [];
+    const out: IUnifiedAttachment[] = [];
+    for (let i = 0; i < numMedia; i++) {
+      const url = params[`MediaUrl${i}`];
+      if (!url) continue;
+      const mime = params[`MediaContentType${i}`] ?? 'application/octet-stream';
+      out.push({
+        type: mimeToAttachmentType(mime),
+        fileId: url,
+        mimeType: mime,
+      });
+    }
+    return out;
   }
 
   /**

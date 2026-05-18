@@ -31,6 +31,20 @@ import type {
  */
 export const LARK_MESSAGE_LIMIT = 4000;
 
+/**
+ * Default display name used as a last-resort fallback when no name has been
+ * resolved or configured. Exported so plugin tests can assert against the
+ * exact constant rather than a magic string.
+ */
+export const DEFAULT_DISPLAY_NAME = 'Wayland Core Assistant';
+
+/**
+ * Inbound message types we know how to convert into IUnifiedIncomingMessage
+ * with structured fields. Anything else is rendered as a `[unsupported message
+ * type: X]` placeholder so the chat UI never shows raw JSON.
+ */
+export const LARK_SUPPORTED_MESSAGE_TYPES = ['text', 'image', 'file', 'audio'] as const;
+
 // ==================== Domain Resolution ====================
 
 /**
@@ -89,8 +103,12 @@ export function isBotMentioned(mentions: unknown, botOpenId: string | undefined)
 
 /**
  * Lark message event structure
+ *
+ * `mentions`, `parent_id`, and `root_id` are part of the public Lark IM
+ * receive_v1 schema; modeling them explicitly removes the `any` cast that
+ * used to sit in `handleMessageEvent` (R14 MED #9 / #11).
  */
-interface LarkMessageEvent {
+export interface LarkMessageEvent {
   event?: {
     message?: {
       message_id?: string;
@@ -99,6 +117,9 @@ interface LarkMessageEvent {
       content?: string;
       message_type?: string;
       create_time?: string;
+      mentions?: LarkMention[];
+      parent_id?: string;
+      root_id?: string;
     };
     sender?: {
       sender_id?: {
@@ -110,6 +131,17 @@ interface LarkMessageEvent {
       tenant_key?: string;
     };
   };
+}
+
+/**
+ * Return the chat type ('p2p' | 'group') from a Lark message event, or undefined
+ * when the field is missing or unrecognised. Lark uses a small enum here and we
+ * only care about distinguishing direct from group chats for the mention filter.
+ */
+export function getLarkChatType(event: LarkMessageEvent): 'p2p' | 'group' | undefined {
+  const t = event.event?.message?.chat_type;
+  if (t === 'p2p' || t === 'group') return t;
+  return undefined;
 }
 
 /**
@@ -133,11 +165,36 @@ interface LarkCardActionEvent {
 }
 
 /**
- * Convert Lark event to unified incoming message
+ * Build a human display name from a userId.
+ * - When the caller passed a real `displayName`, use it as-is (R9: no hardcoded fallback wins over a resolved name).
+ * - When no userId is present at all, return `Unknown User` instead of the visually-broken `User <empty>`.
+ * - Otherwise keep the legacy `User <last6>` placeholder so callers without a resolver still get a stable identity.
+ */
+function resolveDisplayName(userId: string, displayName?: string): string {
+  if (displayName && displayName.length > 0) return displayName;
+  if (!userId) return 'Unknown User';
+  return `User ${userId.slice(-6)}`;
+}
+
+/**
+ * Optional context passed by the plugin so the adapter doesn't have to
+ * fabricate a placeholder display name when a real one has already been resolved.
+ */
+type ToUnifiedOptions = {
+  displayName?: string;
+};
+
+/**
+ * Convert Lark event to unified incoming message.
+ *
+ * When `opts.displayName` is supplied it wins over the adapter's `User <slice>`
+ * placeholder. When omitted the legacy fallback is kept so external callers
+ * (tests, future code paths) still produce a stable identity.
  */
 export function toUnifiedIncomingMessage(
   event: LarkMessageEvent | LarkCardActionEvent,
-  actionInfo?: IMessageAction
+  actionInfo?: IMessageAction,
+  opts: ToUnifiedOptions = {}
 ): IUnifiedIncomingMessage | null {
   // Handle card action
   if (actionInfo && 'operator' in (event.event || {})) {
@@ -155,7 +212,7 @@ export function toUnifiedIncomingMessage(
       chatId,
       user: {
         id: userId,
-        displayName: `User ${userId.slice(-6)}`,
+        displayName: resolveDisplayName(userId, opts.displayName),
       },
       content: {
         type: 'action',
@@ -177,10 +234,11 @@ export function toUnifiedIncomingMessage(
   const userId = sender.sender_id?.user_id || sender.sender_id?.open_id || '';
   if (!userId) return null;
 
-  const user = toUnifiedUser(sender);
+  const user = toUnifiedUser(sender, opts.displayName);
   if (!user) return null;
 
   const content = extractMessageContent(message);
+  const replyToMessageId = message.parent_id || message.root_id;
 
   return {
     id: message.message_id || Date.now().toString(),
@@ -190,13 +248,19 @@ export function toUnifiedIncomingMessage(
     content,
     timestamp: message.create_time ? parseInt(message.create_time, 10) : Date.now(),
     raw: event,
+    ...(replyToMessageId ? { replyToMessageId } : {}),
   };
 }
 
 /**
- * Convert Lark sender to unified user format
+ * Convert Lark sender to unified user format.
+ * Accepts an optional pre-resolved `displayName` (e.g., from contact.user.get)
+ * to avoid the `User <last6>` placeholder when the caller already knows the real name.
  */
-export function toUnifiedUser(sender: LarkMessageEvent['event']['sender']): IUnifiedUser | null {
+export function toUnifiedUser(
+  sender: LarkMessageEvent['event']['sender'],
+  displayName?: string
+): IUnifiedUser | null {
   if (!sender?.sender_id) return null;
 
   const userId = sender.sender_id.user_id || sender.sender_id.open_id || '';
@@ -204,12 +268,31 @@ export function toUnifiedUser(sender: LarkMessageEvent['event']['sender']): IUni
 
   return {
     id: userId,
-    displayName: `User ${userId.slice(-6)}`, // Lark doesn't provide name in message event
+    displayName: resolveDisplayName(userId, displayName),
   };
 }
 
 /**
- * Extract message content from Lark message
+ * Lark message content payload shape (JSON-parsed `message.content` string).
+ */
+type LarkContentPayload = {
+  text?: string;
+  image_key?: string;
+  file_key?: string;
+  file_name?: string;
+  duration?: number;
+};
+
+function asContentPayload(raw: unknown): LarkContentPayload {
+  return raw && typeof raw === 'object' ? (raw as LarkContentPayload) : {};
+}
+
+/**
+ * Extract message content from Lark message.
+ *
+ * Unsupported message types render a `[unsupported message type: X]` placeholder
+ * (R14 MED #9) instead of raw JSON so the chat surface never shows ugly blobs;
+ * the structured payload is still available via `raw` on the parent message.
  */
 function extractMessageContent(message: LarkMessageEvent['event']['message']): IUnifiedMessageContent {
   if (!message) {
@@ -217,31 +300,28 @@ function extractMessageContent(message: LarkMessageEvent['event']['message']): I
   }
 
   const messageType = message.message_type;
-  let content: string;
+  let parsed: unknown;
 
   try {
-    content = message.content ? JSON.parse(message.content) : {};
+    parsed = message.content ? JSON.parse(message.content) : {};
   } catch {
-    content = message.content || '';
+    parsed = message.content || '';
   }
+
+  const payload = asContentPayload(parsed);
 
   switch (messageType) {
     case 'text':
       return {
         type: 'text',
-        text: typeof content === 'object' ? (content as any).text || '' : String(content),
+        text: payload.text || (typeof parsed === 'string' ? parsed : ''),
       };
 
     case 'image':
       return {
         type: 'photo',
         text: '',
-        attachments: [
-          {
-            type: 'photo',
-            fileId: typeof content === 'object' ? (content as any).image_key || '' : '',
-          },
-        ],
+        attachments: [{ type: 'photo', fileId: payload.image_key || '' }],
       };
 
     case 'file':
@@ -251,8 +331,8 @@ function extractMessageContent(message: LarkMessageEvent['event']['message']): I
         attachments: [
           {
             type: 'document',
-            fileId: typeof content === 'object' ? (content as any).file_key || '' : '',
-            fileName: typeof content === 'object' ? (content as any).file_name || '' : '',
+            fileId: payload.file_key || '',
+            fileName: payload.file_name || '',
           },
         ],
       };
@@ -264,16 +344,17 @@ function extractMessageContent(message: LarkMessageEvent['event']['message']): I
         attachments: [
           {
             type: 'audio',
-            fileId: typeof content === 'object' ? (content as any).file_key || '' : '',
-            duration: typeof content === 'object' ? (content as any).duration || 0 : 0,
+            fileId: payload.file_key || '',
+            duration: payload.duration || 0,
           },
         ],
       };
 
     default:
+      console.warn(`[LarkAdapter] unsupported message type: ${messageType ?? 'unknown'}`);
       return {
         type: 'text',
-        text: typeof content === 'object' ? JSON.stringify(content) : String(content),
+        text: `[unsupported message type: ${messageType ?? 'unknown'}]`,
       };
   }
 }
@@ -356,12 +437,16 @@ export function toLarkSendParams(message: IUnifiedOutgoingMessage): {
   content: string | Record<string, unknown>;
   rawText?: string; // Original text for text messages
 } {
-  // If message has replyMarkup (card), send as interactive
+  // If message has replyMarkup (card), validate the minimum card shape before
+  // shipping it to Lark. An invalid card payload turns into a 230xxx error from
+  // the API; falling back to text avoids surfacing that to end users (R15 LOW #15).
   if (message.replyMarkup) {
-    return {
-      contentType: 'interactive',
-      content: message.replyMarkup as Record<string, unknown>,
-    };
+    const card = message.replyMarkup as Record<string, unknown>;
+    const hasElements = Array.isArray((card as { elements?: unknown }).elements);
+    if (card && typeof card === 'object' && hasElements) {
+      return { contentType: 'interactive', content: card };
+    }
+    console.warn('[LarkAdapter] invalid card schema in replyMarkup; falling back to plain text');
   }
 
   // If message has buttons, convert to interactive card

@@ -258,10 +258,20 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
     }
   };
 
-  const enableWeixinPlugin = async (accountId: string, botToken: string) => {
+  const enableWeixinPlugin = async (
+    accountId: string,
+    botToken: string,
+    ilinkUserId?: string
+  ) => {
     const enableResult = await channel.enablePlugin.invoke({
       pluginId: 'weixin_default',
-      config: { accountId, botToken },
+      // CRIT-3 (v0.4.3): persist Tencent's ilink_user_id so subsequent restarts
+      // re-use the same UIN rather than minting a random and tripping risk control.
+      config: {
+        accountId,
+        botToken,
+        ...(ilinkUserId ? { ilinkUserId } : {}),
+      },
     });
     if (enableResult.success) {
       Message.success(t('settings.weixin.pluginEnabled', 'WeChat channel enabled'));
@@ -297,8 +307,12 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
 
     es.addEventListener('done', (e: MessageEvent) => {
       es.close();
-      const { accountId, botToken } = JSON.parse(e.data) as { accountId: string; botToken: string };
-      enableWeixinPlugin(accountId, botToken).catch((err: unknown) => {
+      const { accountId, botToken, ilinkUserId } = JSON.parse(e.data) as {
+        accountId: string;
+        botToken: string;
+        ilinkUserId?: string;
+      };
+      enableWeixinPlugin(accountId, botToken, ilinkUserId).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         Message.error(msg || t('settings.weixin.enableFailed', 'Failed to enable WeChat plugin'));
         setLoginState('idle');
@@ -350,11 +364,12 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
 
     try {
       const result = await window.electronAPI.weixinLoginStart();
-      const { accountId, botToken } = result as {
+      const { accountId, botToken, ilinkUserId } = result as {
         accountId: string;
         botToken: string;
+        ilinkUserId?: string;
       };
-      await enableWeixinPlugin(accountId, botToken);
+      await enableWeixinPlugin(accountId, botToken, ilinkUserId);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (msg.toLowerCase().includes('expired') || msg.toLowerCase().includes('too many')) {

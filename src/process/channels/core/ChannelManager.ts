@@ -609,7 +609,14 @@ export class ChannelManager {
           error: 'Client ID and Client Secret are required for DingTalk',
         };
       }
-      const result = await DingTalkPlugin.testConnection(clientId, clientSecret);
+      // R16 L5/L6: surface the caller-configured displayName so the returned
+      // botUsername reflects what users see in DingTalk, not the hardcoded
+      // "DingTalk Bot" string. `extraConfig` is typed narrowly upstream; the
+      // dingtalk form passes displayName as a sibling field, so widen via
+      // Record for the lookup.
+      const cfg = extraConfig as Record<string, unknown> | undefined;
+      const displayName = typeof cfg?.displayName === 'string' ? cfg.displayName : undefined;
+      const result = await DingTalkPlugin.testConnection(clientId, clientSecret, displayName);
       return {
         success: result.success,
         botUsername: result.botInfo?.name,

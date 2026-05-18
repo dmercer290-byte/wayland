@@ -77,4 +77,31 @@ describe('slackVerifier', () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  it('surfaces __challenge on signed url_verification handshake (v0.4.3 F15)', () => {
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const challengeBody = JSON.stringify({
+      type: 'url_verification',
+      token: 'whatever',
+      challenge: 'abc123-challenge-string',
+    });
+    const sig = signSlack(ts, challengeBody);
+    const result = slackVerifier(
+      {
+        headers: { 'x-slack-signature': sig, 'x-slack-request-timestamp': ts },
+        rawBody: Buffer.from(challengeBody),
+        query: {},
+        url,
+      },
+      SIGNING_SECRET
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect((result.payload as { __challenge?: string }).__challenge).toBe(
+        'abc123-challenge-string'
+      );
+      // The WebhookReceiver short-circuits on __challenge and never dispatches,
+      // so eventId is not required here.
+    }
+  });
 });
