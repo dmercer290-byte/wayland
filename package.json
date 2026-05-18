@@ -128,6 +128,7 @@
     "better-sqlite3": "^12.4.1",
     "buffer": "^6.0.3",
     "classnames": "^2.5.1",
+    "cmdk": "^1.1.1",
     "cookie": "^1.0.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
