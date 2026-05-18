@@ -57,5 +57,19 @@
     "pickerSearch": "Search specialists",
     "pickerEmpty": "No specialists found.",
     "pickerCancel": "Cancel"
+  },
+  "rightRail": {
+    "teammates": "Teammates",
+    "workspace": "Workspace",
+    "workspaceLinked": "Browse files in the workspace panel →",
+    "workspaceEmpty": "No workspace bound to this team yet.",
+    "rituals": "Rituals",
+    "ritualsEmpty": "No rituals — not a Standing Company.",
+    "roleLeader": "leader",
+    "roleSpecialist": "specialist"
+  },
+  "activity": {
+    "tabLabel": "Activity",
+    "empty": "No team activity yet."
   }
 }

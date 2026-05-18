@@ -18,9 +18,13 @@ import { useWCoreModelSelection } from '@/renderer/pages/conversation/platforms/
 import TeamTabs from './components/TeamTabs';
 import TeamChatView from './components/TeamChatView';
 import TeamAgentIdentity from './components/TeamAgentIdentity';
+import TeamRightRail from './components/TeamRightRail';
+import TeamActivityTab from './components/TeamActivityTab';
+import TeamHeaderBadges from './components/TeamHeaderBadges';
 import { TeamTabsProvider, useTeamTabs } from './hooks/TeamTabsContext';
 import { TeamPermissionProvider } from './hooks/TeamPermissionContext';
 import { useTeamSession } from './hooks/useTeamSession';
+import { useTeamSourceLauncher } from './hooks/useTeamSourceLauncher';
 import { dispatchWorkspaceHasFilesEvent } from '@/renderer/utils/workspace/workspaceEvents';
 
 type Props = {
@@ -180,6 +184,13 @@ const TeamPageContent: React.FC<TeamPageContentProps> = ({ team, onRenameTeam })
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(false);
   const [fullscreenSlotId, setFullscreenSlotId] = useState<string | null>(null);
+  // W2c — chat vs activity view. Activity tab is mutually exclusive with the
+  // agent tabs; clicking an agent tab snaps back to chat.
+  const [viewMode, setViewMode] = useState<'chat' | 'activity'>('chat');
+
+  // W2c — best-effort lookup of the bundle launcher this team was spawned
+  // from. Used for header Standing badge + right-rail rituals.
+  const { launcher } = useTeamSourceLauncher(team.name);
 
   const activeAgent = agents.find((a) => a.slotId === activeSlotId);
   const leadAgent = agents.find((a) => a.role === 'leader');
@@ -275,6 +286,8 @@ const TeamPageContent: React.FC<TeamPageContentProps> = ({ team, onRenameTeam })
 
   const handleTabClick = useCallback(
     (slotId: string) => {
+      // W2c — clicking an agent tab always exits Activity view.
+      setViewMode('chat');
       switchTab(slotId);
       if (fullscreenSlotId) setFullscreenSlotId(slotId);
       requestAnimationFrame(() => {
@@ -350,8 +363,25 @@ const TeamPageContent: React.FC<TeamPageContentProps> = ({ team, onRenameTeam })
   }, [agents, pendingCounts]);
 
   const tabsSlot = useMemo(
-    () => <TeamTabs onTabClick={handleTabClick} pendingCounts={slotPendingCounts} />,
-    [handleTabClick, slotPendingCounts]
+    () => (
+      <TeamTabs
+        onTabClick={handleTabClick}
+        pendingCounts={slotPendingCounts}
+        showActivityTab
+        activityActive={viewMode === 'activity'}
+        onActivityClick={() => setViewMode('activity')}
+      />
+    ),
+    [handleTabClick, slotPendingCounts, viewMode]
+  );
+
+  // W2c — header extras: Standing badge + backend rollup. We keep the
+  // title slot as the raw `team.name` string so the inline rename flow
+  // (useTitleRename → canRenameTitle requires a string title) keeps
+  // working unchanged.
+  const headerExtra = useMemo(
+    () => <TeamHeaderBadges agents={agents} launcher={launcher} />,
+    [agents, launcher]
   );
 
   return (
@@ -368,32 +398,38 @@ const TeamPageContent: React.FC<TeamPageContentProps> = ({ team, onRenameTeam })
         sider={sider}
         workspaceEnabled={workspaceEnabled}
         tabsSlot={tabsSlot}
+        headerExtra={headerExtra}
         conversationId={activeAgent?.conversationId}
         agentName={undefined}
         workspacePath={effectiveWorkspace}
         onRenameTitle={onRenameTeam}
       >
         <div className='relative flex h-full'>
-          {fullscreenSlotId ? (
-            // Fullscreen: single agent fills the entire content area
-            (() => {
-              const agent = agents.find((a) => a.slotId === fullscreenSlotId);
-              if (!agent) return null;
-              const isLeaderSlot = agent.slotId === leadAgent?.slotId;
-              return (
-                <div className='flex-1 h-full'>
-                  <AgentChatSlot
-                    agent={agent}
-                    teamId={team.id}
-                    isLeader={isLeaderSlot}
-                    isFullscreen
-                    onToggleFullscreen={() => setFullscreenSlotId(null)}
-                    onRemove={() => handleRemoveAgent(agent.slotId)}
-                  />
-                </div>
-              );
-            })()
-          ) : (
+          <div className='relative flex flex-1 min-w-0 h-full'>
+            {viewMode === 'activity' ? (
+              <div className='flex flex-1 min-w-0 flex-col'>
+                <TeamActivityTab teamId={team.id} />
+              </div>
+            ) : fullscreenSlotId ? (
+              // Fullscreen: single agent fills the entire content area
+              (() => {
+                const agent = agents.find((a) => a.slotId === fullscreenSlotId);
+                if (!agent) return null;
+                const isLeaderSlot = agent.slotId === leadAgent?.slotId;
+                return (
+                  <div className='flex-1 h-full'>
+                    <AgentChatSlot
+                      agent={agent}
+                      teamId={team.id}
+                      isLeader={isLeaderSlot}
+                      isFullscreen
+                      onToggleFullscreen={() => setFullscreenSlotId(null)}
+                      onRemove={() => handleRemoveAgent(agent.slotId)}
+                    />
+                  </div>
+                );
+              })()
+            ) : (
             <>
               {showLeftArrow && (
                 <div
@@ -462,6 +498,13 @@ const TeamPageContent: React.FC<TeamPageContentProps> = ({ team, onRenameTeam })
               )}
             </>
           )}
+          </div>
+          <TeamRightRail
+            agents={agents}
+            statusMap={statusMap}
+            launcher={launcher}
+            workspacePath={effectiveWorkspace}
+          />
         </div>
       </ChatLayout>
     </TeamPermissionProvider>

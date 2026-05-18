@@ -57,5 +57,19 @@
     "pickerSearch": "[TODO:translate] Search specialists",
     "pickerEmpty": "[TODO:translate] No specialists found.",
     "pickerCancel": "[TODO:translate] Cancel"
+  },
+  "rightRail": {
+    "teammates": "[TODO:translate] Teammates",
+    "workspace": "[TODO:translate] Workspace",
+    "workspaceLinked": "[TODO:translate] Browse files in the workspace panel →",
+    "workspaceEmpty": "[TODO:translate] No workspace bound to this team yet.",
+    "rituals": "[TODO:translate] Rituals",
+    "ritualsEmpty": "[TODO:translate] No rituals — not a Standing Company.",
+    "roleLeader": "[TODO:translate] leader",
+    "roleSpecialist": "[TODO:translate] specialist"
+  },
+  "activity": {
+    "tabLabel": "[TODO:translate] Activity",
+    "empty": "[TODO:translate] No team activity yet."
   }
 }
