@@ -207,3 +207,8 @@ graphify-out/
 .graphify_python
 
 .snow/
+
+# Team Blitz workstream (orchestrator-local, never tracked)
+.blackboard/
+.planning/
+design-mockups/
