@@ -6,6 +6,7 @@
 
 import { useMemo } from 'react';
 import useSWR from 'swr';
+import { ipcBridge } from '@/common';
 import { ConfigStorage } from '@/common/config/storage';
 import type { AcpBackendConfig } from '@/common/types/acpTypes';
 import { DETECTED_AGENTS_SWR_KEY, fetchDetectedAgents } from '@/renderer/utils/model/agentTypes';
@@ -38,6 +39,28 @@ function configToAvailableAgent(config: AcpBackendConfig): AvailableAgent {
 }
 
 /**
+ * Convert an extension-contributed assistant (from ipcBridge.extensions.getAssistants)
+ * into an AvailableAgent shape. Extension assistants live in a separate store from
+ * ConfigStorage('assistants') and must be merged in so they surface in the
+ * TeamCreateModal leader dropdown alongside built-in presets.
+ */
+function extensionAssistantToAvailableAgent(ext: Record<string, unknown>): AvailableAgent {
+  const presetAgentType = typeof ext.presetAgentType === 'string' ? ext.presetAgentType : undefined;
+  const context = typeof ext.context === 'string' ? ext.context : undefined;
+  const avatar = typeof ext.avatar === 'string' ? ext.avatar : undefined;
+  return {
+    backend: presetAgentType || 'gemini',
+    name: String(ext.name ?? ''),
+    customAgentId: String(ext.id ?? ''),
+    isPreset: true,
+    isExtension: true,
+    context,
+    avatar,
+    presetAgentType,
+  };
+}
+
+/**
  * Hook to fetch available CLI agents and preset assistants for the conversation tab dropdown.
  *
  * Two independent data sources:
@@ -58,7 +81,28 @@ export const useConversationAgents = (): UseConversationAgentsResult => {
     return agents.filter((a) => a.isPreset && a.enabled !== false);
   });
 
-  const presetAssistants = useMemo(() => (presetConfigs || []).map(configToAvailableAgent), [presetConfigs]);
+  // Extension-contributed assistants (shared SWR key with useAssistantList / usePresetAssistantInfo)
+  const { data: extensionAssistants, isLoading: isLoadingExtensionAssistants } = useSWR(
+    'extensions.assistants',
+    () => ipcBridge.extensions.getAssistants.invoke().catch(() => [] as Record<string, unknown>[])
+  );
+
+  const presetAssistants = useMemo(() => {
+    const configBased = (presetConfigs || []).map(configToAvailableAgent);
+    const extensionBased = (extensionAssistants || [])
+      .filter((ext) => ext && ext.enabled !== false)
+      .map(extensionAssistantToAvailableAgent);
+    // Dedupe by customAgentId — config layer wins if both sources surface the same ID
+    const seen = new Set<string>();
+    const merged: AvailableAgent[] = [];
+    for (const agent of [...configBased, ...extensionBased]) {
+      const key = agent.customAgentId;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(agent);
+    }
+    return merged;
+  }, [presetConfigs, extensionAssistants]);
 
   const refresh = async () => {
     await mutate();
@@ -67,7 +111,7 @@ export const useConversationAgents = (): UseConversationAgentsResult => {
   return {
     cliAgents: cliAgents || [],
     presetAssistants,
-    isLoading: isLoadingAgents || isLoadingPresets,
+    isLoading: isLoadingAgents || isLoadingPresets || isLoadingExtensionAssistants,
     refresh,
   };
 };

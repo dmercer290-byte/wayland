@@ -561,6 +561,58 @@ describe('TeamMcpServer', () => {
       expect(response.error).toContain('disabled');
       expect(spawnAgent).not.toHaveBeenCalled();
     });
+
+    // Extension assistants are stored with `id: ext-<bare>` after
+    // AssistantResolver prefixes them. Launcher prompts written against
+    // the extension's own manifest use the bare form. The spawn handler
+    // must accept BOTH so contributed launchers work as authored.
+    // See: src/process/extensions/resolvers/AssistantResolver.ts:66
+    //      src/renderer/hooks/agent/usePresetAssistantInfo.ts:385
+    it('spawns an extension preset using the bare custom_agent_id (ext- prefix tolerance)', async () => {
+      mockAssistants.value = [
+        {
+          id: 'ext-research',
+          name: 'Scout',
+          isPreset: true,
+          enabled: true,
+          presetAgentType: 'claude',
+        },
+      ];
+
+      const response = (await tcpRequest(server.getPort(), {
+        tool: 'team_spawn_agent',
+        args: { name: 'Scout', custom_agent_id: 'research' },
+        from_slot_id: 'slot-lead',
+        auth_token: authToken,
+      })) as Record<string, unknown>;
+
+      expect(response.error).toBeUndefined();
+      // customAgentId forwarded as-given (bare) — downstream resolution
+      // tolerates both forms.
+      expect(spawnAgent).toHaveBeenCalledWith('Scout', 'claude', undefined, 'research');
+    });
+
+    it('spawns an extension preset using the prefixed custom_agent_id (backwards-compatible)', async () => {
+      mockAssistants.value = [
+        {
+          id: 'ext-copy',
+          name: 'Quill',
+          isPreset: true,
+          enabled: true,
+          presetAgentType: 'claude',
+        },
+      ];
+
+      const response = (await tcpRequest(server.getPort(), {
+        tool: 'team_spawn_agent',
+        args: { name: 'Quill', custom_agent_id: 'ext-copy' },
+        from_slot_id: 'slot-lead',
+        auth_token: authToken,
+      })) as Record<string, unknown>;
+
+      expect(response.error).toBeUndefined();
+      expect(spawnAgent).toHaveBeenCalledWith('Quill', 'claude', undefined, 'ext-copy');
+    });
   });
 
   // -------------------------------------------------------------------------

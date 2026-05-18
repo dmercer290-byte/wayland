@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import semver from 'semver';
 import { z } from 'zod';
 
 // ============ Reserved Prefixes ============
@@ -57,11 +58,18 @@ export const ExtensionMetaSchema = z
      */
     apiVersion: z
       .string()
-      .regex(/^\^?\d+\.\d+\.\d+(-[\w.]+)?$/, 'apiVersion must be semver format')
+      .refine((v) => semver.validRange(v) !== null, {
+        message: 'apiVersion must be a valid semver range (e.g., "^1.0.0", "1.0.0", ">=1.0.0 <2.0.0")',
+      })
       .optional(),
     /** P2: Extension dependencies */
     dependencies: z
-      .record(z.string(), z.string().regex(/^\^?\d+\.\d+\.\d+(-[\w.]+)?$/, 'Dependency version must be semver format'))
+      .record(
+        z.string(),
+        z.string().refine((v) => semver.validRange(v) !== null, {
+          message: 'Dependency version must be a valid semver range',
+        })
+      )
       .optional()
       .describe('Extension dependencies: { extensionName: versionRange }'),
     /** P2: WAYLAND core version compatibility */
@@ -69,7 +77,9 @@ export const ExtensionMetaSchema = z
       .object({
         wayland: z
           .string()
-          .regex(/^\^?\d+\.\d+\.\d+(-[\w.]+)?$/, 'Engine version must be semver format')
+          .refine((v) => semver.validRange(v) !== null, {
+            message: 'Engine version must be a valid semver range (e.g., "^1.0.0", ">=1.0.0 <2.0.0")',
+          })
           .optional()
           .describe('Compatible Wayland core version range'),
       })

@@ -100,4 +100,30 @@ describe('extensions/protocol/assetAllowlist', () => {
     // Either it doesn't exist or it's outside any extension dir — both must reject.
     expect(resolveAllowedAssetPath(sshKey)).toBeNull();
   });
+
+  it('allows assets reached via a symlinked extension dev-mount (manifest gated)', async () => {
+    // Simulate the dev-mount pattern:
+    //   ln -s /path/to/repo  ~/.wayland-dev/extensions/my-bundle
+    // The bundle dir contains aion-extension.json, so widening the
+    // allowlist to its canonical target is safe.
+    const realBundle = path.join(tempDir, 'real-bundle');
+    await fs.mkdir(path.join(realBundle, 'icons'), { recursive: true });
+    await fs.writeFile(
+      path.join(realBundle, 'aion-extension.json'),
+      JSON.stringify({ name: 'my-bundle', displayName: 'My Bundle', version: '0.1.0', contributes: {} }),
+      'utf-8'
+    );
+    const iconFile = path.join(realBundle, 'icons', 'avatar.svg');
+    await fs.writeFile(iconFile, '<svg/>', 'utf-8');
+
+    const symlink = path.join(envRoot, 'my-bundle');
+    await fs.symlink(realBundle, symlink, 'dir');
+
+    // Request the asset via the symlink path — Electron will canonicalise
+    // before serving, so the resolved path is realBundle/icons/avatar.svg.
+    const resolved = resolveAllowedAssetPath(path.join(symlink, 'icons', 'avatar.svg'));
+    expect(resolved).not.toBeNull();
+    expect(resolved).toContain('icons');
+    expect(resolved).toContain('avatar.svg');
+  });
 });

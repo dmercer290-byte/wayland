@@ -58,7 +58,20 @@ export class ExtensionLoader {
     try {
       const entries = await fs.readdir(baseDir, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        // Accept real directories AND symlinks that resolve to a directory.
+        // Dev mounts and Hub installs commonly use symlinks; withFileTypes
+        // reports the link itself (isDirectory()=false), so we stat() the
+        // target for symlinks before deciding.
+        let isDirOrLinkedDir = entry.isDirectory();
+        if (!isDirOrLinkedDir && entry.isSymbolicLink()) {
+          try {
+            const targetStat = await fs.stat(path.join(baseDir, entry.name));
+            isDirOrLinkedDir = targetStat.isDirectory();
+          } catch {
+            // Broken symlink — skip silently
+          }
+        }
+        if (!isDirOrLinkedDir) continue;
         const extensionDir = path.join(baseDir, entry.name);
         const manifestPath = path.join(extensionDir, EXTENSION_MANIFEST_FILE);
 

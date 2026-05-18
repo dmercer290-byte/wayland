@@ -19,8 +19,10 @@
  *   - The bundled hub resources directory (`<resources>/hub`).
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 import {
+  EXTENSION_MANIFEST_FILE,
   getAppDataExtensionsDir,
   getEnvExtensionsDirs,
   getHubResourcesDir,
@@ -52,6 +54,38 @@ export function buildAssetAllowlist(): string[] {
   push(getUserExtensionsDir());
   push(getAppDataExtensionsDir());
   push(getHubResourcesDir());
+
+  // Expand: when an extension dir contains symlinked children (the dev-mount
+  // pattern: `ln -s /path/to/repo ~/.wayland-dev/extensions/my-ext`), the
+  // requested asset URL canonicalises to the symlink TARGET, which sits
+  // outside the scan root after realpath resolution. Walk each scan root
+  // and add the canonical target of any symlink whose target is a real
+  // extension (contains an aion-extension.json). The manifest gate keeps
+  // this narrow — random symlinks pointing at arbitrary dirs stay rejected.
+  const scanRoots = [...roots];
+  for (const root of scanRoots) {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue; // root doesn't exist or unreadable
+    }
+    for (const entry of entries) {
+      if (!entry.isSymbolicLink()) continue;
+      try {
+        const target = fs.realpathSync.native(path.join(root, entry.name));
+        const targetStat = fs.statSync(target);
+        if (!targetStat.isDirectory()) continue;
+        // Only widen the allowlist when the symlinked target is itself a
+        // valid extension. Prevents using symlinks-into-extensions-dir as a
+        // generic escape hatch into arbitrary directories.
+        if (!fs.existsSync(path.join(target, EXTENSION_MANIFEST_FILE))) continue;
+        push(target);
+      } catch {
+        // broken symlink — ignore
+      }
+    }
+  }
 
   return roots;
 }

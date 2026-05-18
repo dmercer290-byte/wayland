@@ -381,7 +381,13 @@ export class TeamMcpServer {
     // does not need to specify agent_type separately.
     if (customAgentId) {
       const assistants = (await ProcessConfig.get('assistants')) ?? [];
-      const preset = assistants.find((a) => a.id === customAgentId && a.isPreset);
+      // Accept both bare and ext-prefixed IDs. Extension-contributed presets are
+      // stored with `id: ext-<bare>`, but launcher prompts written against the
+      // extension's own manifest use the bare form. Mirrors the renderer-side
+      // tolerance in usePresetAssistantInfo.ts.
+      const preset = assistants.find(
+        (a) => (a.id === customAgentId || a.id === `ext-${customAgentId}`) && a.isPreset
+      );
       if (!preset) {
         const availableIds = assistants
           .filter((a) => a.isPreset && a.enabled !== false)
@@ -542,7 +548,10 @@ export class TeamMcpServer {
     }
 
     const assistants = (await ProcessConfig.get('assistants')) ?? [];
-    const assistant = assistants.find((a) => a.id === customAgentId && a.isPreset);
+    // Accept both bare and ext-prefixed IDs (see handleSpawnAgent for rationale).
+    const assistant = assistants.find(
+      (a) => (a.id === customAgentId || a.id === `ext-${customAgentId}`) && a.isPreset
+    );
     if (!assistant) {
       const availableIds = assistants
         .filter((a) => a.isPreset && a.enabled !== false)

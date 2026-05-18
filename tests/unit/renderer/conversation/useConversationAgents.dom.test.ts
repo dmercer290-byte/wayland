@@ -22,6 +22,7 @@ const configStorageMock = vi.hoisted(() => ({
 
 const ipcMock = vi.hoisted(() => ({
   getAvailableAgents: vi.fn(),
+  getExtensionAssistants: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,9 @@ vi.mock('../../../../src/common', () => ({
   ipcBridge: {
     acpConversation: {
       getAvailableAgents: { invoke: ipcMock.getAvailableAgents },
+    },
+    extensions: {
+      getAssistants: { invoke: ipcMock.getExtensionAssistants },
     },
   },
 }));
@@ -108,8 +112,12 @@ function makePresetConfig(overrides: Partial<AcpBackendConfig> = {}): AcpBackend
 // Helpers
 // ---------------------------------------------------------------------------
 
-function setupMocks(presetConfigs: AcpBackendConfig[] = []) {
+function setupMocks(
+  presetConfigs: AcpBackendConfig[] = [],
+  extensionAssistants: Array<Record<string, unknown>> = []
+) {
   ipcMock.getAvailableAgents.mockResolvedValue({ success: true, data: CLI_AGENTS });
+  ipcMock.getExtensionAssistants.mockResolvedValue(extensionAssistants);
   configStorageMock.get.mockImplementation(async (key: string) => {
     if (key === 'assistants') {
       return presetConfigs;
@@ -294,6 +302,7 @@ describe('useConversationAgents', () => {
 
     it('returns empty arrays when ConfigStorage returns null', async () => {
       ipcMock.getAvailableAgents.mockResolvedValue({ success: true, data: [] });
+      ipcMock.getExtensionAssistants.mockResolvedValue([]);
       configStorageMock.get.mockResolvedValue(null);
 
       const { result } = renderHook(() => useConversationAgents());
@@ -304,6 +313,138 @@ describe('useConversationAgents', () => {
 
       expect(result.current.cliAgents).toEqual([]);
       expect(result.current.presetAssistants).toEqual([]);
+    });
+  });
+
+  // -- Extension-contributed assistants merge (Patch B for teams integration) --
+
+  describe('extension-assistants merge', () => {
+    it('merges extension-contributed assistants into presetAssistants', async () => {
+      setupMocks(
+        [],
+        [
+          {
+            id: 'ext-research',
+            name: 'Scout',
+            isPreset: true,
+            isBuiltin: false,
+            enabled: true,
+            presetAgentType: 'claude',
+            avatar: 'icons/scout.svg',
+            context: 'You are Scout, a research specialist.',
+          },
+          {
+            id: 'ext-cold-outbound',
+            name: 'Cold Outbound',
+            isPreset: true,
+            isBuiltin: false,
+            enabled: true,
+            presetAgentType: 'claude',
+          },
+        ]
+      );
+
+      const { result } = renderHook(() => useConversationAgents());
+
+      await waitFor(() => {
+        expect(result.current.presetAssistants.length).toBe(2);
+      });
+
+      const ids = result.current.presetAssistants.map((a) => a.customAgentId);
+      expect(ids).toEqual(expect.arrayContaining(['ext-research', 'ext-cold-outbound']));
+
+      const scout = result.current.presetAssistants.find((a) => a.customAgentId === 'ext-research')!;
+      expect(scout.backend).toBe('claude');
+      expect(scout.isPreset).toBe(true);
+      expect(scout.isExtension).toBe(true);
+      expect(scout.context).toBe('You are Scout, a research specialist.');
+    });
+
+    it('filters out extension assistants with enabled === false', async () => {
+      setupMocks(
+        [],
+        [
+          {
+            id: 'ext-active',
+            name: 'Active',
+            isPreset: true,
+            enabled: true,
+            presetAgentType: 'claude',
+          },
+          {
+            id: 'ext-disabled',
+            name: 'Disabled',
+            isPreset: true,
+            enabled: false,
+            presetAgentType: 'claude',
+          },
+        ]
+      );
+
+      const { result } = renderHook(() => useConversationAgents());
+
+      await waitFor(() => {
+        expect(result.current.presetAssistants.length).toBe(1);
+      });
+
+      expect(result.current.presetAssistants[0].customAgentId).toBe('ext-active');
+    });
+
+    it('config-layer presets win on customAgentId collision', async () => {
+      // If somehow the same ID surfaces in both stores, config-layer is authoritative.
+      setupMocks(
+        [makePresetConfig({ id: 'shared-id', name: 'From Config', presetAgentType: 'claude' })],
+        [
+          {
+            id: 'shared-id',
+            name: 'From Extension',
+            isPreset: true,
+            enabled: true,
+            presetAgentType: 'gemini',
+          },
+        ]
+      );
+
+      const { result } = renderHook(() => useConversationAgents());
+
+      await waitFor(() => {
+        expect(result.current.presetAssistants.length).toBe(1);
+      });
+
+      expect(result.current.presetAssistants[0].name).toBe('From Config');
+      expect(result.current.presetAssistants[0].backend).toBe('claude');
+    });
+
+    it('returns config-layer presets unchanged when no extension assistants are loaded', async () => {
+      setupMocks([makePresetConfig({ id: 'p1', name: 'Only Config', presetAgentType: 'gemini' })], []);
+
+      const { result } = renderHook(() => useConversationAgents());
+
+      await waitFor(() => {
+        expect(result.current.presetAssistants.length).toBe(1);
+      });
+
+      expect(result.current.presetAssistants[0].customAgentId).toBe('p1');
+      expect(result.current.presetAssistants[0].isExtension).toBeUndefined();
+    });
+
+    it('survives extension IPC failure (defaults to empty)', async () => {
+      ipcMock.getAvailableAgents.mockResolvedValue({ success: true, data: CLI_AGENTS });
+      ipcMock.getExtensionAssistants.mockRejectedValue(new Error('IPC unavailable'));
+      configStorageMock.get.mockImplementation(async (key: string) => {
+        if (key === 'assistants') {
+          return [makePresetConfig({ id: 'p1', name: 'Config Only', presetAgentType: 'gemini' })];
+        }
+        return null;
+      });
+
+      const { result } = renderHook(() => useConversationAgents());
+
+      await waitFor(() => {
+        expect(result.current.presetAssistants.length).toBe(1);
+      });
+
+      expect(result.current.presetAssistants[0].customAgentId).toBe('p1');
     });
   });
 });

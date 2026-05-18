@@ -7,6 +7,7 @@
 import type { LoadedExtension } from '../../types';
 import fs from 'fs';
 import path from 'path';
+import semver from 'semver';
 
 /**
  * Current Wayland extension API version.
@@ -15,53 +16,42 @@ import path from 'path';
 export const WAYLAND_VERSION = getAionUIVersion();
 export const EXTENSION_API_VERSION = '1.0.0';
 
-type ParsedVersion = { major: number; minor: number; patch: number };
-
-function parseVersion(version: string): ParsedVersion | null {
-  const clean = version.replace(/^[\^~]/, '');
-  const parts = clean.split('.').map((p) => parseInt(p, 10));
-  if (parts.length !== 3 || parts.some(isNaN)) {
-    return null;
+/**
+ * Check whether a version satisfies a semver range expression.
+ *
+ * Uses the npm `semver` package so the full range grammar is supported —
+ * single versions (`1.0.0`), caret (`^1.0.0`), tilde (`~1.0.0`), comparators
+ * (`>=1.0.0`), compound ranges (`>=1.0.0 <2.0.0`), x-ranges (`1.x`), and
+ * pre-releases. Earlier inline parser only handled single-version, caret,
+ * and tilde and would silently return false for any other shape — letting
+ * valid extensions get rejected with a misleading "incompatibility" message.
+ */
+function satisfiesVersion(version: string, range: string): boolean {
+  const cleanVersion = semver.coerce(version)?.version ?? version;
+  try {
+    return semver.satisfies(cleanVersion, range, { includePrerelease: true });
+  } catch {
+    return false;
   }
-  return { major: parts[0], minor: parts[1], patch: parts[2] };
 }
 
-function satisfiesVersion(version: string, range: string): boolean {
-  const parsedVersion = parseVersion(version);
-  const parsedRange = parseVersion(range);
-  if (!parsedVersion || !parsedRange) return false;
-  if (range === version) return true;
-
-  if (range.startsWith('^')) {
-    if (parsedRange.major === 0) {
-      if (parsedRange.minor === 0) {
-        return parsedVersion.major === 0 && parsedVersion.minor === 0 && parsedVersion.patch === parsedRange.patch;
-      }
-      return (
-        parsedVersion.major === 0 &&
-        parsedVersion.minor === parsedRange.minor &&
-        parsedVersion.patch >= parsedRange.patch
-      );
-    }
-    return (
-      parsedVersion.major === parsedRange.major &&
-      (parsedVersion.minor > parsedRange.minor ||
-        (parsedVersion.minor === parsedRange.minor && parsedVersion.patch >= parsedRange.patch))
-    );
+/**
+ * Detect dev (unpacked) mode so engine-compat mismatches downgrade from
+ * "skip" to "warn." Lets extensions authored against a future Wayland
+ * version surface during integration without blocking the dev session.
+ *
+ * Production users still get the strict check.
+ */
+function isUnpackedDevMode(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const electron = require('electron') as { app?: { isPackaged?: boolean } };
+    if (typeof electron?.app?.isPackaged === 'boolean') return !electron.app.isPackaged;
+  } catch {
+    // Non-Electron context (unit tests, node scripts) — treat as dev
+    return true;
   }
-  if (range.startsWith('~')) {
-    return (
-      parsedVersion.major === parsedRange.major &&
-      parsedVersion.minor === parsedRange.minor &&
-      parsedVersion.patch >= parsedRange.patch
-    );
-  }
-
-  return (
-    parsedVersion.major === parsedRange.major &&
-    parsedVersion.minor === parsedRange.minor &&
-    parsedVersion.patch === parsedRange.patch
-  );
+  return false;
 }
 
 /**
@@ -161,9 +151,20 @@ export function filterByEngineCompatibility(extensions: LoadedExtension[]): {
   const compatible: LoadedExtension[] = [];
   const incompatible: Array<{ extension: LoadedExtension; issues: string[] }> = [];
 
+  const devMode = isUnpackedDevMode();
+
   for (const ext of extensions) {
     const result = validateEngineCompatibility(ext);
     if (result.valid) {
+      compatible.push(ext);
+    } else if (devMode) {
+      // Dev / unpacked: surface as warning but still load. Lets integration
+      // sessions verify extensions whose engine declarations don't match the
+      // current Wayland version (e.g. a bundle authored against an unreleased
+      // v1.x while we're still on v0.4.x) without editing the bundle.
+      for (const issue of result.issues) {
+        console.warn(`[Extensions] Engine incompatibility (dev override — loading anyway): ${issue}`);
+      }
       compatible.push(ext);
     } else {
       incompatible.push({ extension: ext, issues: result.issues });
