@@ -768,8 +768,17 @@ ${collectedResponses.join('\n')}`;
 
     const emitStart = Date.now();
     ipcBridge.acpConversation.responseStream.emit(processedMessage);
-    // Only emit terminal events to team bus for agent lifecycle management
-    if (processedMessage.type === 'finish' || processedMessage.type === 'error') {
+    // Forward to team bus:
+    //  - `finish`/`error`: terminal lifecycle events TeammateManager uses for wake watchdog
+    //  - `acp_context_usage`: per-turn token accounting that W1e's TeammateManager
+    //    listens for to write `team_event_log` event_type='token_usage' rows
+    //    (foundation for the W2d cost meter). Without this branch the W1e
+    //    token_usage hook is a dead code path.
+    if (
+      processedMessage.type === 'finish' ||
+      processedMessage.type === 'error' ||
+      processedMessage.type === 'acp_context_usage'
+    ) {
       teamEventBus.emit('responseStream', {
         ...processedMessage,
         conversation_id: this.conversation_id,
