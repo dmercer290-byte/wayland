@@ -18,6 +18,7 @@ import {
   isSandboxedAfterImport,
   previewImport,
 } from '@process/team/importExport/importTeam';
+import { TeamExportSchema } from '@process/team/importExport/TeamExportSchema';
 
 function payload(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
@@ -149,5 +150,32 @@ describe('isSandboxedAfterImport — legacy helper kept for historical coverage'
         { canReadFiles: false, canWriteFiles: true }
       )
     ).toBe(true);
+  });
+});
+
+describe('TeamExportSchema — W5 audit HIGH-1 service-boundary re-validation', () => {
+  // The accept path in `TeamSessionService.acceptTeamImport` re-runs
+  // `TeamExportSchema.safeParse` on the parsed payload it receives from
+  // the renderer. End-to-end coverage of `acceptTeamImport` lands in the
+  // W5.2 e2e harness (see top-of-file note). Here we lock in the exact
+  // failure mode the service relies on: a parsed object missing
+  // `leader.id` must NOT pass `safeParse`. This is the regression test
+  // that wedges open the boundary check at the service layer.
+  it('safeParse rejects parsed objects missing leader.id (used by acceptTeamImport re-check)', () => {
+    const result = TeamExportSchema.safeParse({
+      version: 'v1',
+      id: 'team-1',
+      name: 'Bad',
+      leader: {}, // <-- missing id
+      teammates: [],
+      capabilities: {
+        canReadFiles: false,
+        canWriteFiles: false,
+        canSpawnAgents: false,
+        canNetworkRequest: false,
+        canCrossTeamMessage: false,
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });

@@ -4,12 +4,69 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { z } from 'zod';
 import { ipcBridge } from '@/common';
 import { suggestRoster } from '@process/team/suggestRoster';
 import type { TeamSessionService } from '@process/team/TeamSessionService';
 import { ExtensionRegistry } from '@process/extensions/ExtensionRegistry';
 import type { SpecialistCatalog } from '@process/team/importExport/importTeam';
 import type { RitualsResolver } from '@process/team/importExport/exportTeam';
+
+// W5 audit HIGH-1 (2026-05-19) — IPC boundary schemas for the new W4 providers.
+// Renderer-supplied params used to flow straight through to the service layer
+// for these endpoints. Each schema below is `.strict()` so unknown keys are
+// rejected, and every string is bounded so a hostile renderer cannot starve
+// the main process with megabyte-class payloads on identifier fields. The
+// `parsed` field on `importAccept` is deliberately `z.unknown()` here — it is
+// re-validated against `TeamExportSchema` inside `acceptTeamImport` itself so
+// the structural guarantees are enforced exactly once, in the service layer.
+
+const importAcceptParamSchema = z
+  .object({
+    userId: z.string().min(1).max(64),
+    parsed: z.unknown(), // re-validated by TeamSessionService.acceptTeamImport
+    capabilityGrants: z.record(z.string(), z.boolean()),
+    source: z.string().min(1).max(256),
+  })
+  .strict();
+
+const importPreviewParamSchema = z
+  .object({
+    // Hard cap mirrors the service-layer DOS limit; size cap here means the
+    // structured-clone copy never crosses the IPC boundary if it's oversized.
+    jsonText: z.string().max(1024 * 1024),
+  })
+  .strict();
+
+const exportParamSchema = z
+  .object({
+    teamId: z.string().min(1).max(64),
+  })
+  .strict();
+
+const suggestRosterParamSchema = z
+  .object({
+    goalText: z.string().max(8192),
+    // Specialist payloads are normalized inside `suggestRoster`; the bridge
+    // just enforces a sane array cap so the worker thread cannot be flooded.
+    specialists: z.array(z.unknown()).max(200),
+    detectedBackends: z.array(z.string()).max(50),
+    targetSize: z.number().int().min(2).max(6).optional(),
+  })
+  .strict();
+
+const restartAgentParamSchema = z
+  .object({
+    teamId: z.string().min(1).max(64),
+    slotId: z.string().min(1).max(128),
+  })
+  .strict();
+
+const teamIdOnlyParamSchema = z
+  .object({
+    teamId: z.string().min(1).max(64),
+  })
+  .strict();
 
 /**
  * Wrap an async provider handler so that unhandled rejections are caught and
@@ -73,7 +130,8 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   );
 
   ipcBridge.team.restartAgent.provider(
-    safeProvider(async ({ teamId, slotId }) => {
+    safeProvider(async (raw) => {
+      const { teamId, slotId } = restartAgentParamSchema.parse(raw);
       await teamSessionService.restartAgent(teamId, slotId);
     })
   );
@@ -105,13 +163,15 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   // W3b — promote/demote handlers. Service methods are idempotent; the
   // provider just translates IPC → service and surfaces errors via safeProvider.
   ipcBridge.team.promoteToStanding.provider(
-    safeProvider(async ({ teamId }) => {
+    safeProvider(async (raw) => {
+      const { teamId } = teamIdOnlyParamSchema.parse(raw);
       await teamSessionService.promoteTeamToStanding(teamId);
     })
   );
 
   ipcBridge.team.demoteFromStanding.provider(
-    safeProvider(async ({ teamId }) => {
+    safeProvider(async (raw) => {
+      const { teamId } = teamIdOnlyParamSchema.parse(raw);
       await teamSessionService.demoteTeamFromStanding(teamId);
     })
   );
@@ -152,8 +212,11 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   // W3c — pure server-side roster suggester. No I/O; runs the keyword
   // scorer + recommendBackend over the renderer-provided specialist pool.
   ipcBridge.team.suggestRoster.provider(
-    safeProvider(async (params) => {
-      return suggestRoster(params);
+    safeProvider(async (raw) => {
+      const validated = suggestRosterParamSchema.parse(raw);
+      // Cast back to the ipcBridge param shape — `suggestRoster` does its
+      // own per-element normalization on the specialist pool.
+      return suggestRoster(validated as Parameters<typeof suggestRoster>[0]);
     })
   );
 
@@ -161,7 +224,8 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   // registry; if the registry has not booted yet the export still works
   // but omits rituals.
   ipcBridge.team.export.provider(
-    safeProvider(async ({ teamId }) => {
+    safeProvider(async (raw) => {
+      const { teamId } = exportParamSchema.parse(raw);
       return teamSessionService.exportTeam(teamId, makeRitualsResolver());
     })
   );
@@ -170,7 +234,8 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   // failures are translated to JSON error sentinels by safeProvider so the
   // renderer can surface them in the import dialog.
   ipcBridge.team.importPreview.provider(
-    safeProvider(async ({ jsonText }) => {
+    safeProvider(async (raw) => {
+      const { jsonText } = importPreviewParamSchema.parse(raw);
       return teamSessionService.previewTeamImport(jsonText, makeSpecialistCatalog());
     })
   );
@@ -179,10 +244,14 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   // W4b will add a renderer-side capability-review dialog ahead of this
   // call; until then, the renderer MUST pass an empty grants map.
   ipcBridge.team.importAccept.provider(
-    safeProvider(async ({ userId, parsed, capabilityGrants, source }) => {
+    safeProvider(async (raw) => {
+      const { userId, parsed, capabilityGrants, source } = importAcceptParamSchema.parse(raw);
+      // `parsed` is re-validated inside `acceptTeamImport` against
+      // `TeamExportSchema`. We cast to the service-layer type here because
+      // the strict re-parse on the inside is the source of truth.
       return teamSessionService.acceptTeamImport({
         userId,
-        parsed,
+        parsed: parsed as Parameters<typeof teamSessionService.acceptTeamImport>[0]['parsed'],
         capabilityGrants,
         source,
         specialistCatalog: makeSpecialistCatalog(),

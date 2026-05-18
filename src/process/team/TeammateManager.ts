@@ -171,6 +171,14 @@ export class TeammateManager extends EventEmitter {
     if (!agent) return;
 
     if (agent.conversationId) {
+      // W5 audit HIGH-2 fix (2026-05-19): drop the ACP team context BEFORE
+      // killing the worker so a racing file-op request between kill + the
+      // next addAgent/registerAcpTeamContext cannot resolve the stale ctx.
+      // The conversationId is reused when the slot restarts, so leaving the
+      // registry entry from a prior process is a latent UAF on the ctx
+      // accessor. `unregisterAcpTeamContext` is safe to call for non-imported
+      // teams (no-ops below the guard).
+      this.unregisterAcpTeamContext(agent.conversationId);
       this.workerTaskManager.kill(agent.conversationId);
       this.finalizedTurns.delete(agent.conversationId);
     }
@@ -388,6 +396,13 @@ export class TeammateManager extends EventEmitter {
     }
     this.wakeTimeouts.clear();
     this.activeWakes.clear();
+    // W5 audit HIGH-2 fix (2026-05-19): drain ACP team-context registry
+    // entries for every owned conversation so a disposed session cannot
+    // leak gate-routing data into the next team that reuses any of these
+    // conversation IDs. Safe for non-imported teams.
+    for (const agent of this.agents) {
+      this.unregisterAcpTeamContext(agent.conversationId);
+    }
     this.removeAllListeners();
   }
 

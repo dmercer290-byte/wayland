@@ -13,6 +13,16 @@
  *
  * Callers MUST pass the returned HTML through DOMPurify-sanitized rendering
  * only — this module is the only safe path for sandboxed team task content.
+ *
+ * @deprecated Not yet wired into production. v0.6.0-wayland-teams ships
+ * without a dedicated task-description render sink: `TeamActivityTab`
+ * renders all event payload strings via React text children (auto-escaped),
+ * so there is no live HTML sink for imported-team content today. This
+ * helper is preserved as a defense-in-depth utility for the W5.2 / v0.6.1
+ * task tab work that introduces the first real HTML sink for imported
+ * teams. Wiring `dangerouslySetInnerHTML` before that sink lands would
+ * widen the attack surface, not close it. The W5 audit MED (gemini CRIT-1
+ * downgrade) tracked this gap and accepted Option B (note + export test).
  */
 
 import DOMPurify from 'dompurify';

@@ -33,7 +33,8 @@ import {
   type ImportPreviewResult,
   type SpecialistCatalog,
 } from './importExport/importTeam';
-import type { TeamExport } from './importExport/TeamExportSchema';
+import { TeamExportSchema, type TeamExport } from './importExport/TeamExportSchema';
+import { TeamImportError } from './importExport/errors';
 
 export class TeamSessionService {
   private readonly sessions: Map<string, TeamSession> = new Map();
@@ -912,7 +913,24 @@ export class TeamSessionService {
     source: string;
     specialistCatalog: SpecialistCatalog;
   }): Promise<TTeam> {
-    const { userId, parsed, capabilityGrants, source, specialistCatalog } = params;
+    const { userId, parsed: rawParsed, capabilityGrants, source, specialistCatalog } = params;
+
+    // W5 audit HIGH-1 fix (2026-05-19): re-validate the parsed payload at the
+    // service boundary. The bridge layer also validates structurally via Zod,
+    // but the accept path used to trust whatever object the renderer handed
+    // back from the preview round-trip. If a malicious renderer (compromised
+    // preload, dev-mode injection) skipped preview and crafted a `parsed`
+    // object directly, the only previous safety net was specialist-id +
+    // capability whitelisting. Re-running the strict schema here closes the
+    // gap with zero behavior change for honest callers.
+    const reparse = TeamExportSchema.safeParse(rawParsed);
+    if (!reparse.success) {
+      throw new TeamImportError(
+        `Invalid parsed payload: ${reparse.error.message}`,
+        'TEAM_IMPORT_VALIDATION'
+      );
+    }
+    const parsed = reparse.data;
 
     // Re-check specialist availability at accept-time so a payload that was
     // valid at preview cannot slip past if the user uninstalled a bundle in
