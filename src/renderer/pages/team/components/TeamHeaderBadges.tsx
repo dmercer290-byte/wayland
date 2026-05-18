@@ -14,25 +14,12 @@ import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AssistantListItem } from '@/renderer/pages/settings/AssistantSettings/types';
 import type { TeamAgent } from '@/common/types/teamTypes';
+import { getBackendLabel } from '@renderer/utils/model/backendLabel';
 
 type Props = {
   agents: TeamAgent[];
   launcher: AssistantListItem | null;
 };
-
-const BACKEND_LABEL: Record<string, string> = {
-  claude: 'Claude',
-  gemini: 'Gemini',
-  codex: 'Codex',
-  qwen: 'Qwen',
-  codebuddy: 'CodeBuddy',
-  goose: 'Goose',
-  auggie: 'Augment',
-  kimi: 'Kimi',
-  wcore: 'Wayland Core',
-};
-
-const backendDisplayName = (agentType: string): string => BACKEND_LABEL[agentType] ?? agentType;
 
 const TeamHeaderBadges: React.FC<Props> = ({ agents, launcher }) => {
   const { t } = useTranslation();
@@ -45,7 +32,7 @@ const TeamHeaderBadges: React.FC<Props> = ({ agents, launcher }) => {
       counts.set(a.agentType, (counts.get(a.agentType) ?? 0) + 1);
     }
     return Array.from(counts.entries())
-      .map(([type, count]) => `${count} × ${backendDisplayName(type)}`)
+      .map(([type, count]) => `${count} × ${getBackendLabel(type)}`)
       .join(', ');
   }, [agents]);
 

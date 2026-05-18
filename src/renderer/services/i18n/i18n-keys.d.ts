@@ -2554,6 +2554,8 @@ export type I18nKey =
   | 'team.sider.renameTitle'
   | 'team.sider.title'
   | 'team.sider.unpin'
+  | 'teams.activeSidebar.rollup'
+  | 'teams.activeSidebar.title'
   | 'teams.activity.empty'
   | 'teams.activity.tabLabel'
   | 'teams.buildMyOwn.cta'

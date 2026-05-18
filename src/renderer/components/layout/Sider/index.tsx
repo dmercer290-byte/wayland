@@ -9,6 +9,7 @@ import { blurActiveElement } from '@renderer/utils/ui/focus';
 import { useThemeContext } from '@renderer/hooks/context/ThemeContext';
 import { useAllCronJobs } from '@renderer/pages/cron/useCronJobs';
 import {
+  SiderActiveTeams,
   SiderToolbar,
   SiderSearchEntry,
   SiderScheduledEntry,
@@ -239,8 +240,10 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
                 collapsed ? 'mx-6px' : 'mx-10px'
               )}
             />
-            {/* Scrollable content: team + scheduled tasks + conversation history */}
+            {/* Scrollable content: active rollup + team + scheduled tasks + conversation history */}
             <div className={classNames('flex-1 min-h-0 overflow-y-auto', siderStyles.scrollArea)}>
+              {/* W2d — Active section: running teams with token+cost rollup */}
+              <SiderActiveTeams pathname={pathname} collapsed={collapsed} onSessionClick={onSessionClick} />
               {/* Team section */}
               <TeamSiderSection
                 collapsed={collapsed}

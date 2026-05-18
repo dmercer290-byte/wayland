@@ -71,5 +71,9 @@
   "activity": {
     "tabLabel": "[TODO:translate] Activity",
     "empty": "[TODO:translate] No team activity yet."
+  },
+  "activeSidebar": {
+    "title": "[TODO:translate] Active",
+    "rollup": "[TODO:translate] {{tokens}} tokens · ~{{usd}} this week"
   }
 }

@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import type { AssistantListItem } from '@/renderer/pages/settings/AssistantSettings/types';
 import type { TeamAgent, TeammateStatus } from '@/common/types/teamTypes';
 import { getAgentLogo } from '@renderer/utils/model/agentLogo';
+import { getBackendLabel } from '@renderer/utils/model/backendLabel';
 
 type Props = {
   agents: TeamAgent[];
@@ -30,20 +31,6 @@ const STATUS_DOT_COLOR: Record<TeammateStatus, string> = {
   completed: 'bg-gray-400',
   failed: 'bg-red-500',
 };
-
-const BACKEND_LABEL: Record<string, string> = {
-  claude: 'Claude',
-  gemini: 'Gemini',
-  codex: 'Codex',
-  qwen: 'Qwen',
-  codebuddy: 'CodeBuddy',
-  goose: 'Goose',
-  auggie: 'Augment',
-  kimi: 'Kimi',
-  wcore: 'Wayland Core',
-};
-
-const backendDisplayName = (agentType: string): string => BACKEND_LABEL[agentType] ?? agentType;
 
 const initialsFromName = (name: string): string => {
   const trimmed = name.trim();
@@ -66,7 +53,7 @@ const TeammateRow: React.FC<{
     agent.role === 'leader'
       ? t('teams.rightRail.roleLeader', { defaultValue: 'leader' })
       : t('teams.rightRail.roleSpecialist', { defaultValue: 'specialist' });
-  const backend = backendDisplayName(agent.agentType);
+  const backend = getBackendLabel(agent.agentType);
   const dotClass = STATUS_DOT_COLOR[status] ?? STATUS_DOT_COLOR.idle;
 
   return (
