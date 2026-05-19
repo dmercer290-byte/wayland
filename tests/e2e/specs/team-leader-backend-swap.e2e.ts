@@ -34,8 +34,10 @@ test.describe('Leader backend swap — C4', () => {
       }
     }
 
-    // Start as wcore so the swap target is a same-conversationType peer (the
-    // service rejects cross-conversationType swaps with a descriptive error).
+    // Start as `claude` so the swap target stays in the same conversationType
+    // family — TeamSessionService.changeAgentBackend rejects cross-type swaps
+    // (claude/acp → gemini/gemini etc.) to avoid silently dropping chat
+    // history. claude ↔ codex are both 'acp', so the swap is allowed.
     const teamName = `${TEAM_NAME_PREFIX} ${Date.now()}`;
     const created = await invokeBridge<{ id: string } | null>(page, 'team.create', {
       userId: 'system_default_user',
@@ -47,9 +49,9 @@ test.describe('Leader backend swap — C4', () => {
           slotId: SLOT,
           conversationId: '',
           role: 'leader',
-          agentType: 'wcore',
+          agentType: 'claude',
           agentName: 'Leader',
-          conversationType: 'wcore',
+          conversationType: 'acp',
           status: 'idle',
         },
       ],
@@ -66,20 +68,15 @@ test.describe('Leader backend swap — C4', () => {
     const pillVisible = await pill.isVisible().catch(() => false);
     test.fixme(
       !pillVisible,
-      'AgentBackendPill is hidden — host has fewer than 2 installed CLIs (detected ∪ wayland-core = 1). C4 swap UI is unreachable in this env.'
+      'AgentBackendPill is hidden — host has fewer than 2 installed CLIs. C4 swap UI is unreachable in this env.'
     );
 
-    // Open the pill and pick a different option than the current selection.
+    // Open the pill and pick the codex option (same conversationType as claude).
     await pill.click();
-    const otherOption = page.locator(`[data-testid^="agent-backend-pill-${SLOT}-option-"]`).filter({
-      hasNot: page.locator('text=wcore'),
-    }).first();
-    await expect(otherOption).toBeVisible({ timeout: 5_000 });
-
-    const chosenTestId = (await otherOption.getAttribute('data-testid')) ?? '';
-    const chosenBackend = chosenTestId.replace(`agent-backend-pill-${SLOT}-option-`, '');
-    expect(chosenBackend).toBeTruthy();
-    await otherOption.click();
+    const chosenBackend = 'codex';
+    const codexOption = page.locator(`[data-testid="agent-backend-pill-${SLOT}-option-${chosenBackend}"]`);
+    await expect(codexOption).toBeVisible({ timeout: 5_000 });
+    await codexOption.click();
 
     // Backend agrees the swap happened.
     await expect
