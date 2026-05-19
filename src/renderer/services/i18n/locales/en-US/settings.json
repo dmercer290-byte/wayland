@@ -1583,7 +1583,8 @@
     "notifications": "Notifications",
     "storage": "Storage",
     "skills": "Skills & Tools",
-    "agents": "Agents"
+    "agents": "Agents",
+    "constitution": "Constitution"
   },
   "channelsIndex": {
     "title": "Channels",
@@ -1757,6 +1758,17 @@
   },
   "skillsPage": {
     "title": "Skills & Tools"
+  },
+  "constitutionPage": {
+    "subtitle": "Wayland's rules. Loaded fresh on every turn — edits apply immediately, no restart. See §11 for how overrides work.",
+    "tocTitle": "Sections",
+    "tocEmpty": "No sections yet",
+    "reset": "Reset",
+    "resetTooltip": "Reset to the default Constitution",
+    "resetConfirmTitle": "Reset Constitution?",
+    "resetConfirmBody": "Your current edits will be lost. The default Constitution will be restored.",
+    "resetCancel": "Cancel",
+    "loading": "Loading…"
   },
   "agentsPage": {
     "title": "Agents",

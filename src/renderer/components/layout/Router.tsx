@@ -11,6 +11,7 @@ const AssistantsLibraryPage = React.lazy(() => import('@renderer/pages/assistant
 const AgentSettings = React.lazy(() => import('@renderer/pages/settings/AgentSettings'));
 const AgentsSettings = React.lazy(() => import('@renderer/pages/settings/AgentsSettings'));
 const AssistantSettings = React.lazy(() => import('@renderer/pages/settings/AssistantSettings'));
+const ConstitutionSettings = React.lazy(() => import('@renderer/pages/settings/ConstitutionSettings'));
 const CapabilitiesSettings = React.lazy(() => import('@renderer/pages/settings/CapabilitiesSettings'));
 const ChannelsIndex = React.lazy(() => import('@renderer/pages/settings/ChannelsIndex'));
 const ChannelDetailPage = React.lazy(() => import('@renderer/pages/settings/ChannelsIndex/ChannelDetailPage'));
@@ -78,6 +79,7 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
           />
           {/* WORKSPACE */}
           <Route path='/settings/assistants' element={withRouteFallback(AssistantSettings)} />
+          <Route path='/settings/constitution' element={withRouteFallback(ConstitutionSettings)} />
           <Route path='/settings/agents' element={withRouteFallback(AgentsSettings)} />
           <Route path='/settings/skills' element={withRouteFallback(SkillsSettings)} />
           {/* AI MODELS */}

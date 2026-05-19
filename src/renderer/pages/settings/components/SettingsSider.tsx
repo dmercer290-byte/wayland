@@ -12,6 +12,7 @@ import {
   Pencil,
   Puzzle,
   Radio,
+  ScrollText,
   Server,
   Sparkles,
   Zap,
@@ -33,6 +34,7 @@ export const BUILTIN_TAB_IDS = [
   'assistants',
   'agents',
   'skills',
+  'constitution',
   // AI MODELS
   'providers',
   'images',
@@ -162,6 +164,12 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         label: t('settings.assistants', { defaultValue: 'Assistants' }),
         icon: <BookOpen />,
         path: 'assistants',
+      },
+      constitution: {
+        id: 'constitution',
+        label: t('settings.sider.constitution', { defaultValue: 'Constitution' }),
+        icon: <ScrollText />,
+        path: 'constitution',
       },
       agents: {
         id: 'agents',

@@ -32,6 +32,7 @@ import { initSpeechToTextBridge } from './speechToTextBridge';
 import { initTaskBridge } from './taskBridge';
 import { initUpdateBridge } from './updateBridge';
 import { initWebuiBridge } from './webuiBridge';
+import { initConstitutionBridge } from './constitutionBridge';
 import { initSystemSettingsBridge } from './systemSettingsBridge';
 import { initAmbientBridge } from './ambientBridge';
 import { initWindowControlsBridge } from './windowControlsBridge';
@@ -102,6 +103,7 @@ export function initAllBridges(deps: BridgeDependencies): void {
   initStorageBridge();
   initNicknamesBridge();
   initSyncIpc();
+  initConstitutionBridge();
 }
 
 /**
@@ -146,6 +148,7 @@ export {
   initTaskBridge,
   initUpdateBridge,
   initWebuiBridge,
+  initConstitutionBridge,
   initRemoteAgentBridge,
   initHubBridge,
   initTeamBridge,

@@ -45,6 +45,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   webuiChangeUsername: (newUsername: string) => ipcRenderer.invoke('webui-direct-change-username', { newUsername }),
   // Feedback: collect and compress recent log files
   collectFeedbackLogs: () => ipcRenderer.invoke('feedback:collect-logs'),
+  // Wayland Constitution: agent behavioral spec stored at ~/.wayland/CONSTITUTION.md
+  readConstitution: (): Promise<string> => ipcRenderer.invoke('constitution:read'),
+  writeConstitution: (content: string): Promise<boolean> => ipcRenderer.invoke('constitution:write', content),
+  resetConstitution: (): Promise<string> => ipcRenderer.invoke('constitution:reset'),
   // 生��二维码 token / Generate QR token
   webuiGenerateQRToken: () => ipcRenderer.invoke('webui-direct-generate-qr-token'),
   // WeChat login IPC

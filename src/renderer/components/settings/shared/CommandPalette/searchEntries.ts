@@ -21,6 +21,7 @@ const ENTRIES: SearchEntry[] = [
   { id: 'page-assistants', title: 'Assistants', subtitle: 'Page', path: 'assistants' },
   { id: 'page-agents', title: 'Agents', subtitle: 'Page', path: 'agents' },
   { id: 'page-skills', title: 'Skills & Tools', subtitle: 'Page', path: 'skills' },
+  { id: 'page-constitution', title: 'Constitution', subtitle: 'Page', path: 'constitution' },
   { id: 'page-providers', title: 'Providers', subtitle: 'Page', path: 'providers' },
   { id: 'page-channels', title: 'Channels', subtitle: 'Page', path: 'channels' },
   { id: 'page-mcp', title: 'MCP Servers', subtitle: 'Page', path: 'mcp' },
