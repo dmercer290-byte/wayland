@@ -13,7 +13,7 @@
  */
 
 import { test, expect } from '../fixtures';
-import { invokeBridge } from '../helpers';
+import { invokeBridge, navigateTo } from '../helpers';
 
 test.describe('Team Launcher — build my own', () => {
   test('empty → suggest → add → create flow', async ({ page }) => {
@@ -30,7 +30,7 @@ test.describe('Team Launcher — build my own', () => {
     }
 
     // /teams → BuildMyOwn card.
-    await page.evaluate(() => window.location.assign('#/teams'));
+    await navigateTo(page, '#/teams');
     await page.waitForURL(/#\/teams(\?|$)/, { timeout: 10_000 });
     await expect(page.locator('[data-testid="teams-library-page"]')).toBeVisible({ timeout: 15_000 });
 

@@ -23,7 +23,7 @@
  */
 
 import { test, expect } from '../fixtures';
-import { invokeBridge } from '../helpers';
+import { invokeBridge, navigateTo } from '../helpers';
 
 const LAUNCHER_ID = 'ext-cold-outbound';
 
@@ -42,7 +42,7 @@ test.describe('Golden path smoke — Cold Outbound', () => {
     }
 
     // (1) /teams loads.
-    await page.evaluate(() => window.location.assign('#/teams'));
+    await navigateTo(page, '#/teams');
     await page.waitForURL(/#\/teams(\?|$)/, { timeout: 10_000 });
     await expect(page.locator('[data-testid="teams-library-page"]')).toBeVisible({ timeout: 15_000 });
 
@@ -84,7 +84,7 @@ test.describe('Golden path smoke — Cold Outbound', () => {
     expect(state.agents.length).toBe(3);
 
     // (6) Back to /teams — no "Failed to load" banner, library re-renders.
-    await page.evaluate(() => window.location.assign('#/teams'));
+    await navigateTo(page, '#/teams');
     await page.waitForURL(/#\/teams(\?|$)/, { timeout: 10_000 });
     await expect(page.locator('[data-testid="teams-library-page"]')).toBeVisible({ timeout: 15_000 });
     // Library subtitle still reads the bundle count.

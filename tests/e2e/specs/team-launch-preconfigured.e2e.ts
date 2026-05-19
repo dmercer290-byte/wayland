@@ -18,7 +18,7 @@
  */
 
 import { test, expect } from '../fixtures';
-import { invokeBridge } from '../helpers';
+import { invokeBridge, navigateTo } from '../helpers';
 
 const LAUNCHER_ID = 'ext-marketing-agency';
 const EXPECTED_TEAMMATE_COUNT = 4; // 5 teammates in bundle; first becomes leader.
@@ -38,7 +38,7 @@ test.describe('Team Launcher — pre-configured (marketing-agency)', () => {
     }
 
     // /teams → click the marketing-agency Standing card.
-    await page.evaluate(() => window.location.assign('#/teams'));
+    await navigateTo(page, '#/teams');
     await page.waitForURL(/#\/teams(\?|$)/, { timeout: 10_000 });
     await expect(page.locator('[data-testid="teams-library-page"]')).toBeVisible({ timeout: 15_000 });
 

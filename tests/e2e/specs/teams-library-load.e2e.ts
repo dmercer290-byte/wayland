@@ -15,6 +15,7 @@
  */
 
 import { test, expect } from '../fixtures';
+import { invokeBridge, navigateTo } from '../helpers';
 
 const STANDING_IDS = [
   'ext-marketing-agency',
@@ -32,8 +33,15 @@ test.describe('Teams Library — load', () => {
   test('renders Standing Companies + Teams sections with vendored bundle', async ({ page }) => {
     test.setTimeout(60_000);
 
-    // Hash-route navigation: TeamsLibraryPage lives at /teams.
-    await page.evaluate(() => window.location.assign('#/teams'));
+    // Settle the renderer's bridge layer before navigating — matches the
+    // pattern used by team-empty-state / team-communication specs. Without
+    // this, ProtectedLayout can redirect us to /login mid-navigation while
+    // the auth check is still resolving on first paint.
+    await invokeBridge(page, 'team.list', { userId: 'system_default_user' }).catch(() => undefined);
+
+    // Hash-route navigation: TeamsLibraryPage lives at /teams. Use the helper
+    // (handles settings escape + waits for body content > 50 chars).
+    await navigateTo(page, '#/teams');
     await page.waitForURL(/#\/teams(\?|$)/, { timeout: 10_000 });
 
     const pageRoot = page.locator('[data-testid="teams-library-page"]');

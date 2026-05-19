@@ -15,7 +15,7 @@
  */
 
 import { test, expect } from '../fixtures';
-import { invokeBridge } from '../helpers';
+import { invokeBridge, navigateTo } from '../helpers';
 
 const LAUNCHER_ID = 'ext-marketing-agency';
 
@@ -34,7 +34,7 @@ test.describe('Team Launcher — backend selection', () => {
     }
 
     // /teams → click marketing-agency.
-    await page.evaluate(() => window.location.assign('#/teams'));
+    await navigateTo(page, '#/teams');
     await page.waitForURL(/#\/teams(\?|$)/, { timeout: 10_000 });
     await expect(page.locator('[data-testid="teams-library-page"]')).toBeVisible({ timeout: 15_000 });
 
