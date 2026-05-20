@@ -5,6 +5,7 @@
  */
 
 import type { TextToSpeechAudio, TextToSpeechConfig } from '@/common/types/ttsTypes';
+import { acquireBinary } from '@process/services/voice/voiceBinaryManifest';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -42,7 +43,8 @@ const KOKORO_BINARY_NAME = process.platform === 'win32' ? 'kokoro-cli.exe' : 'ko
 /**
  * Injectable runtime seam. Production wires it to the filesystem and a real
  * subprocess; unit tests substitute fakes so no binary is required. Task D2
- * replaces the resolve* members with download-on-demand acquisition.
+ * adds `acquireBinary` — an optional async hook that downloads the binary when
+ * it is not yet cached; when absent the provider hard-disables on missing binary.
  */
 export type KokoroLocalRuntime = {
   /** Absolute path to the kokoro-cli binary, or null when not installed. */
@@ -51,6 +53,13 @@ export type KokoroLocalRuntime = {
   resolveModel: (voice: string) => string | null;
   /** Run the binary; resolves raw audio bytes (WAV). */
   run: (binary: string, args: string[]) => Promise<Uint8Array>;
+  /**
+   * Optional: download the binary on demand. When provided and `resolveBinary`
+   * returns null, `synthesize` calls this to attempt acquisition before giving up.
+   * If acquisition fails the error is caught and re-thrown as KokoroLocalUnavailableError.
+   * Unit tests omit this member to test the hard-disable path without network access.
+   */
+  acquireBinary?: () => Promise<string>;
 };
 
 export const defaultKokoroLocalRuntime: KokoroLocalRuntime = {
@@ -58,6 +67,7 @@ export const defaultKokoroLocalRuntime: KokoroLocalRuntime = {
     const binaryPath = path.join(KOKORO_BIN_DIR, KOKORO_BINARY_NAME);
     return existsSync(binaryPath) ? binaryPath : null;
   },
+  acquireBinary: () => acquireBinary('onnx-runtime'),
   resolveModel: (voice) => {
     const modelPath = path.join(KOKORO_MODEL_DIR, `${voice}.onnx`);
     return existsSync(modelPath) ? modelPath : null;
@@ -82,11 +92,22 @@ export class KokoroLocal {
     config: TextToSpeechConfig,
     runtime: KokoroLocalRuntime = defaultKokoroLocalRuntime,
   ): Promise<TextToSpeechAudio> {
-    const binary = runtime.resolveBinary();
+    let binary = runtime.resolveBinary();
     if (!binary) {
-      throw new KokoroLocalUnavailableError(
-        'TTS_KOKORO_LOCAL_UNAVAILABLE: kokoro-cli binary is not installed',
-      );
+      if (runtime.acquireBinary) {
+        try {
+          binary = await runtime.acquireBinary();
+        } catch {
+          throw new KokoroLocalUnavailableError(
+            'TTS_KOKORO_LOCAL_UNAVAILABLE: kokoro-cli binary could not be acquired',
+          );
+        }
+      }
+      if (!binary) {
+        throw new KokoroLocalUnavailableError(
+          'TTS_KOKORO_LOCAL_UNAVAILABLE: kokoro-cli binary is not installed',
+        );
+      }
     }
 
     const voice = config.voice || 'default';
