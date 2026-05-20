@@ -1,0 +1,44 @@
+/**
+ * @license
+ * Copyright 2025 AionUi (aionui.com)
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { SKILL_SCANNER_VERSION, type SkillFinding, type SkillSecurityReport, type SkillVerdict } from '@/common/types/skillTypes';
+import { SKILL_GUARD_RULES, type SkillScanInput } from './skillGuardRules';
+import { skillGuardLlmScan, type LlmScanCall } from './skillGuardLlmScan';
+
+/**
+ * Skill Guard — layered security scan for imported / vendored skills.
+ *
+ * This is a WARNING system, NOT a guarantee. Reports are framed as
+ * "Scanned — no red flags found", never as "verified safe". The agent
+ * permission system (`AcpPermissionRequest`) is the real enforcement
+ * boundary; Skill Guard surfaces signal so the user makes a better choice.
+ */
+export class SkillGuard {
+  static async scan(skills: SkillScanInput[], opts: { llm?: boolean; llmCall?: LlmScanCall } = {}): Promise<SkillSecurityReport[]> {
+    const llmScanned = !!opts.llm;
+    const llmResults = llmScanned ? await skillGuardLlmScan(skills, opts.llmCall) : skills.map(() => ({ findings: [] as SkillFinding[] }));
+
+    const scannedAt = Date.now();
+    return skills.map((skill, i) => {
+      const regexFindings = SKILL_GUARD_RULES.flatMap((rule) => rule.test(skill));
+      const llmFindings = llmResults[i]?.findings ?? [];
+      const findings = [...regexFindings, ...llmFindings];
+      return {
+        verdict: computeVerdict(findings),
+        findings,
+        scannedAt,
+        scannerVersion: SKILL_SCANNER_VERSION,
+        llmScanned,
+      };
+    });
+  }
+}
+
+const computeVerdict = (findings: SkillFinding[]): SkillVerdict => {
+  if (findings.length === 0) return 'clean';
+  if (findings.some((f) => f.severity === 'critical')) return 'blocked';
+  return 'review';
+};
