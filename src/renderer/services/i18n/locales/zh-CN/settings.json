@@ -950,7 +950,8 @@
     "notifications": "通知",
     "storage": "存储",
     "skills": "技能与工具",
-    "agents": "智能体"
+    "agents": "智能体",
+    "constitution": "章程"
   },
   "channelsIndex": {
     "title": "消息渠道",
@@ -991,6 +992,20 @@
   },
   "skillsPage": {
     "title": "技能与工具"
+  },
+  "constitutionPage": {
+    "subtitle": "Wayland 的规则。每轮对话都会重新加载——编辑即时生效，无需重启。覆盖机制的工作方式请参见 §11。",
+    "tocTitle": "章节",
+    "tocEmpty": "暂无章节",
+    "reset": "重置",
+    "resetTooltip": "重置为默认章程",
+    "resetConfirmTitle": "重置章程？",
+    "resetConfirmBody": "当前的编辑内容将丢失。系统将恢复默认章程。",
+    "resetCancel": "取消",
+    "loading": "加载中…",
+    "tokenCount": "{{value}} 个令牌",
+    "tokenWarning": "即将达到遵循上限（约 2,000 个令牌）。请考虑拆分为专家叠加层。",
+    "tokenError": "已超过遵循上限。请将章节移至 ~/.wayland/specialists/<id>.md 中的专家叠加层。"
   },
   "agentsPage": {
     "title": "智能体"

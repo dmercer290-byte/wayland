@@ -951,7 +951,8 @@
     "notifications": "通知",
     "storage": "儲存",
     "skills": "技能與工具",
-    "agents": "智能體"
+    "agents": "智能體",
+    "constitution": "章程"
   },
   "channelsIndex": {
     "title": "訊息渠道",
@@ -992,6 +993,20 @@
   },
   "skillsPage": {
     "title": "技能與工具"
+  },
+  "constitutionPage": {
+    "subtitle": "Wayland 的規則。每輪對話都會重新載入——編輯即時生效，無需重新啟動。覆寫機制的運作方式請參見 §11。",
+    "tocTitle": "章節",
+    "tocEmpty": "尚無章節",
+    "reset": "重設",
+    "resetTooltip": "重設為預設章程",
+    "resetConfirmTitle": "重設章程？",
+    "resetConfirmBody": "目前的編輯內容將遺失。系統將還原預設章程。",
+    "resetCancel": "取消",
+    "loading": "載入中…",
+    "tokenCount": "{{value}} 個權杖",
+    "tokenWarning": "即將達到遵循上限（約 2,000 個權杖）。請考慮拆分為專家疊加層。",
+    "tokenError": "已超過遵循上限。請將章節移至 ~/.wayland/specialists/<id>.md 中的專家疊加層。"
   },
   "agentsPage": {
     "title": "智能體"

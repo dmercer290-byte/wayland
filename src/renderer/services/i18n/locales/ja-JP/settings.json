@@ -951,7 +951,8 @@
     "notifications": "通知",
     "storage": "ストレージ",
     "skills": "スキルとツール",
-    "agents": "エージェント"
+    "agents": "エージェント",
+    "constitution": "憲章"
   },
   "channelsIndex": {
     "title": "チャンネル",
@@ -992,6 +993,20 @@
   },
   "skillsPage": {
     "title": "スキルとツール"
+  },
+  "constitutionPage": {
+    "subtitle": "Wayland のルール。毎ターンごとに新しく読み込まれ、編集は再起動なしで即座に反映されます。オーバーライドの仕組みは §11 を参照してください。",
+    "tocTitle": "セクション",
+    "tocEmpty": "セクションはまだありません",
+    "reset": "リセット",
+    "resetTooltip": "デフォルトの憲章にリセット",
+    "resetConfirmTitle": "憲章をリセットしますか？",
+    "resetConfirmBody": "現在の編集内容は失われます。デフォルトの憲章が復元されます。",
+    "resetCancel": "キャンセル",
+    "loading": "読み込み中…",
+    "tokenCount": "{{value}} トークン",
+    "tokenWarning": "遵守上限（約 2,000 トークン）に近づいています。専門オーバーレイへの分割を検討してください。",
+    "tokenError": "遵守上限を超えています。セクションを ~/.wayland/specialists/<id>.md の専門オーバーレイに移動してください。"
   },
   "agentsPage": {
     "title": "エージェント"

@@ -951,7 +951,8 @@
     "notifications": "알림",
     "storage": "저장소",
     "skills": "스킬 및 도구",
-    "agents": "에이전트"
+    "agents": "에이전트",
+    "constitution": "헌장"
   },
   "channelsIndex": {
     "title": "채널",
@@ -992,6 +993,20 @@
   },
   "skillsPage": {
     "title": "스킬 및 도구"
+  },
+  "constitutionPage": {
+    "subtitle": "Wayland의 규칙. 매 턴마다 새로 로드되며 편집 사항은 재시작 없이 즉시 적용됩니다. 재정의 작동 방식은 §11을 참조하세요.",
+    "tocTitle": "섹션",
+    "tocEmpty": "아직 섹션이 없습니다",
+    "reset": "초기화",
+    "resetTooltip": "기본 헌장으로 초기화",
+    "resetConfirmTitle": "헌장을 초기화하시겠습니까?",
+    "resetConfirmBody": "현재 편집 내용이 사라집니다. 기본 헌장이 복원됩니다.",
+    "resetCancel": "취소",
+    "loading": "로딩 중…",
+    "tokenCount": "{{value}} 토큰",
+    "tokenWarning": "준수 한도(~2,000 토큰)에 근접하고 있습니다. 전문 오버레이로 분할하는 것을 고려하세요.",
+    "tokenError": "준수 한도를 초과했습니다. 섹션을 ~/.wayland/specialists/<id>.md의 전문 오버레이로 이동하세요."
   },
   "agentsPage": {
     "title": "에이전트"

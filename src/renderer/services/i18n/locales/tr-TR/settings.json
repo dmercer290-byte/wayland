@@ -949,7 +949,8 @@
     "notifications": "Bildirimler",
     "storage": "Depolama",
     "skills": "Beceriler ve Araçlar",
-    "agents": "Ajanlar"
+    "agents": "Ajanlar",
+    "constitution": "Anayasa"
   },
   "channelsIndex": {
     "title": "Kanallar",
@@ -990,6 +991,20 @@
   },
   "skillsPage": {
     "title": "Beceriler ve Araçlar"
+  },
+  "constitutionPage": {
+    "subtitle": "Wayland'in kuralları. Her turda yeniden yüklenir — düzenlemeler yeniden başlatma olmadan anında uygulanır. Geçersiz kılmaların nasıl çalıştığı için §11'e bakın.",
+    "tocTitle": "Bölümler",
+    "tocEmpty": "Henüz bölüm yok",
+    "reset": "Sıfırla",
+    "resetTooltip": "Varsayılan Anayasaya sıfırla",
+    "resetConfirmTitle": "Anayasa sıfırlansın mı?",
+    "resetConfirmBody": "Mevcut düzenlemeleriniz kaybolacak. Varsayılan Anayasa geri yüklenecek.",
+    "resetCancel": "İptal",
+    "loading": "Yükleniyor…",
+    "tokenCount": "{{value}} token",
+    "tokenWarning": "Uyum üst sınırına (~2,000 token) yaklaşılıyor. Bölümleri uzman katmanlarına ayırmayı düşünün.",
+    "tokenError": "Uyum üst sınırı aşıldı. Bölümleri ~/.wayland/specialists/<id>.md konumundaki uzman katmanlarına taşıyın."
   },
   "agentsPage": {
     "title": "Ajanlar"
