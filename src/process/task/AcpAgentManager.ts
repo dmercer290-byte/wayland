@@ -987,7 +987,7 @@ ${collectedResponses.join('\n')}`;
     // a `session/load` replay that emits historical events. If `bootstrapping`
     // is false during that replay, those events flow through transformMessage
     // → addOrUpdateMessage and get inserted as fresh SQLite rows with new
-    // client-side UUIDs (upstream aionui-org/AionUi#2887 / H9). The bootstrap
+    // client-side UUIDs (upstream upstream issue #2887 / H9). The bootstrap
     // gate is now released only inside initAgent() AFTER `agent.start()`
     // resolves; the `agent_status` allowlist in handleStreamEvent keeps init
     // progress visible to the UI in the meantime.
