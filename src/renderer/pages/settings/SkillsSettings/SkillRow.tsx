@@ -6,7 +6,14 @@
 
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, ShieldAlert, ShieldOff, ShieldQuestion, Star } from 'lucide-react';
+import {
+  MoreHorizontal,
+  Shield,
+  ShieldAlert,
+  ShieldOff,
+  ShieldQuestion,
+  Star,
+} from 'lucide-react';
 import type { SkillIndexEntry, SkillSource, SkillVerdict } from '@/common/types/skillTypes';
 
 type Props = {
@@ -16,16 +23,15 @@ type Props = {
   onClick?: (entry: SkillIndexEntry) => void;
 };
 
+// Shield icon + colour per verdict, used by both this row and the detail drawer.
 export const VERDICT_ICON: Record<SkillVerdict, React.ReactNode> = {
-  clean: <Shield size={14} style={{ color: 'var(--success)' }} />,
-  review: <ShieldAlert size={14} style={{ color: 'var(--warning)' }} />,
-  blocked: <ShieldOff size={14} style={{ color: 'var(--danger)' }} />,
-  unscanned: <ShieldQuestion size={14} style={{ color: 'var(--text-tertiary)' }} />,
+  clean: <Shield size={16} style={{ color: 'var(--success, #46c46a)' }} />,
+  review: <ShieldAlert size={16} style={{ color: 'var(--warning, #e9a40e)' }} />,
+  blocked: <ShieldOff size={16} style={{ color: 'var(--danger, #f05e42)' }} />,
+  unscanned: <ShieldQuestion size={16} style={{ color: 'var(--text-tertiary)' }} />,
 };
 
-// Static map avoids a dynamic-key t() lookup whose template-literal type
-// is too wide for react-i18next's overload signatures. Verdict copy is
-// short and verdict count is small, so a static map is the right tool.
+// Friendly source labels — also consumed by the detail drawer.
 export const SOURCE_LABEL: Record<SkillSource, string> = {
   'wayland-library': 'Wayland library',
   team: 'Team',
@@ -41,22 +47,45 @@ export const STATUS_LABEL: Record<SkillVerdict, string> = {
   unscanned: 'Not yet scanned',
 };
 
-const SOURCE_BADGE_CLASS: Record<string, string> = {
-  'wayland-library': 'bg-[rgba(var(--primary-6),0.08)] text-primary-6 border-[rgba(var(--primary-6),0.2)]',
-  team: 'bg-[rgba(var(--color-team),0.08)] text-[rgb(var(--color-team))] border-[rgba(var(--color-team),0.2)]',
-  user: 'bg-[rgba(var(--success-6),0.08)] text-[rgb(var(--success-6))] border-[rgba(var(--success-6),0.2)]',
-  imported: 'bg-[rgba(var(--orange-6),0.08)] text-orange-6 border-[rgba(var(--orange-6),0.2)]',
-  'cli-discovered':
-    'bg-[rgba(var(--primary-6),0.08)] text-primary-6 border-[rgba(var(--primary-6),0.2)]',
+// Per-source pill colour. Matches the mockup's b-wayland / b-team / b-import /
+// b-you styles (orange for Wayland brand, blue for Team, green for user, amber
+// for imported). Falls back to the wayland-library pill for unknown sources.
+const SOURCE_BADGE_STYLE: Record<SkillSource, React.CSSProperties> = {
+  'wayland-library': {
+    background: 'rgba(255,107,53,0.13)',
+    color: 'rgb(255,107,53)',
+    borderColor: 'rgba(255,107,53,0.34)',
+  },
+  team: {
+    background: 'rgba(110,140,200,0.13)',
+    color: 'rgb(140,170,230)',
+    borderColor: 'rgba(110,140,200,0.34)',
+  },
+  user: {
+    background: 'rgba(70,196,106,0.13)',
+    color: 'rgb(70,196,106)',
+    borderColor: 'rgba(70,196,106,0.32)',
+  },
+  imported: {
+    background: 'rgba(233,164,14,0.13)',
+    color: 'rgb(233,164,14)',
+    borderColor: 'rgba(233,164,14,0.34)',
+  },
+  'cli-discovered': {
+    background: 'rgba(111,200,220,0.13)',
+    color: 'rgb(111,200,220)',
+    borderColor: 'rgba(111,200,220,0.34)',
+  },
 };
 
 const SkillRow: React.FC<Props> = ({ entry, pinned, onTogglePin, onClick }) => {
   const { t } = useTranslation(undefined, { keyPrefix: 'skills' });
   const verdict = entry.security?.verdict ?? 'unscanned';
-  const sourceLabel =
-    entry.sourceLabel ?? SOURCE_LABEL[entry.source] ?? entry.source;
-  const badgeClass =
-    SOURCE_BADGE_CLASS[entry.source] ?? SOURCE_BADGE_CLASS['wayland-library'];
+  const sourceLabel = entry.sourceLabel ?? SOURCE_LABEL[entry.source] ?? entry.source;
+  const badgeStyle = SOURCE_BADGE_STYLE[entry.source] ?? SOURCE_BADGE_STYLE['wayland-library'];
+  const isBlocked = verdict === 'blocked';
+  const isReview = verdict === 'review';
+  const showStatusPill = isBlocked || isReview;
 
   const handlePin = useCallback(
     (e: React.MouseEvent) => {
@@ -66,54 +95,121 @@ const SkillRow: React.FC<Props> = ({ entry, pinned, onTogglePin, onClick }) => {
     [entry.name, pinned, onTogglePin]
   );
 
+  const stopProp = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
+
   return (
     <div
-      className='group flex items-center gap-12px px-16px py-10px hover:bg-fill-1 transition-colors cursor-pointer'
+      className='group flex items-start gap-12px px-16px py-12px hover:bg-fill-1 transition-colors cursor-pointer'
       style={{ borderBottom: '1px solid var(--border-1)' }}
       onClick={() => onClick?.(entry)}
     >
-      {/* Name + source badge */}
-      <div className='flex-1 min-w-0 flex items-center gap-8px'>
-        <span
-          className='text-14px font-medium truncate'
-          style={{ color: 'var(--text-primary)' }}
-          title={entry.name}
-        >
-          {entry.name}
-        </span>
-        <span
-          className={`shrink-0 text-10px px-6px py-1px rd-4px border font-medium uppercase ${badgeClass}`}
-        >
-          {sourceLabel}
-        </span>
-      </div>
-
-      {/* Description — hidden on small screens */}
-      {entry.description && (
-        <p
-          className='hidden md:block flex-1 min-w-0 text-12px line-clamp-1 m-0'
-          style={{ color: 'var(--text-secondary)' }}
-          title={entry.description}
-        >
-          {entry.description}
-        </p>
-      )}
-
-      {/* Security verdict */}
-      <div className='shrink-0 flex items-center' title={STATUS_LABEL[verdict]}>
+      {/* Shield square — colour signals verdict at a glance. */}
+      <div
+        className='shrink-0 mt-2px flex items-center justify-center rd-8px'
+        style={{
+          width: 32,
+          height: 32,
+          background:
+            verdict === 'blocked'
+              ? 'rgba(240,94,66,0.13)'
+              : verdict === 'review'
+                ? 'rgba(233,164,14,0.13)'
+                : verdict === 'clean'
+                  ? 'rgba(70,196,106,0.13)'
+                  : 'var(--fill-2)',
+        }}
+        title={STATUS_LABEL[verdict]}
+      >
         {VERDICT_ICON[verdict]}
       </div>
 
-      {/* Pin star */}
-      <button
-        type='button'
-        className='shrink-0 p-4px rd-4px outline-none border-none bg-transparent cursor-pointer transition-colors'
-        style={{ color: pinned ? 'var(--brand)' : 'var(--text-tertiary)' }}
-        title={pinned ? t('actions.unpin') : t('actions.pin')}
-        onClick={handlePin}
-      >
-        <Star size={14} fill={pinned ? 'currentColor' : 'none'} />
-      </button>
+      {/* Body — name + badges row, description, category tag */}
+      <div className='flex-1 min-w-0 flex flex-col gap-4px'>
+        <div className='flex items-center gap-8px flex-wrap'>
+          <span
+            className='text-13px font-semibold truncate'
+            style={{ color: 'var(--text-primary)', maxWidth: 360 }}
+            title={entry.name}
+          >
+            {entry.name}
+          </span>
+          <span
+            className='shrink-0 text-10px px-7px py-1px rd-4px border font-medium uppercase'
+            style={{ letterSpacing: '0.04em', ...badgeStyle }}
+          >
+            {sourceLabel}
+          </span>
+          {showStatusPill ? (
+            <span
+              className='shrink-0 text-10px px-7px py-1px rd-4px border font-medium uppercase'
+              style={{
+                letterSpacing: '0.04em',
+                ...(isBlocked
+                  ? {
+                      background: 'rgba(240,94,66,0.13)',
+                      color: 'rgb(240,94,66)',
+                      borderColor: 'rgba(240,94,66,0.36)',
+                    }
+                  : {
+                      background: 'rgba(233,164,14,0.13)',
+                      color: 'rgb(233,164,14)',
+                      borderColor: 'rgba(233,164,14,0.34)',
+                    }),
+              }}
+            >
+              {isBlocked
+                ? t('filters.verdict.blocked', 'Blocked')
+                : t('filters.verdict.review', 'Review')}
+            </span>
+          ) : null}
+        </div>
+
+        {entry.description ? (
+          <p
+            className='text-12px m-0'
+            style={{
+              color: isBlocked ? 'var(--danger, #f05e42)' : 'var(--text-secondary)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={entry.description}
+          >
+            {entry.description}
+          </p>
+        ) : null}
+
+        {entry.metadata.category ? (
+          <div
+            className='text-10px uppercase font-medium'
+            style={{ color: 'var(--text-tertiary)', letterSpacing: '0.06em' }}
+          >
+            {entry.metadata.category.replace(/-/g, ' ')}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Right side — pin star + more menu */}
+      <div className='shrink-0 flex items-center gap-4px' onClick={stopProp}>
+        <button
+          type='button'
+          className='p-6px rd-6px outline-none border-none bg-transparent cursor-pointer transition-colors hover:bg-fill-2'
+          style={{ color: pinned ? 'var(--brand)' : 'var(--text-tertiary)' }}
+          title={pinned ? t('actions.unpin', 'Unpin') : t('actions.pin', 'Pin')}
+          onClick={handlePin}
+        >
+          <Star size={16} fill={pinned ? 'currentColor' : 'none'} />
+        </button>
+        <button
+          type='button'
+          className='p-6px rd-6px outline-none border-none bg-transparent cursor-pointer transition-colors hover:bg-fill-2'
+          style={{ color: 'var(--text-tertiary)' }}
+          title='More'
+          onClick={stopProp}
+        >
+          <MoreHorizontal size={16} />
+        </button>
+      </div>
     </div>
   );
 };

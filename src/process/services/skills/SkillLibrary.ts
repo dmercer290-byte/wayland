@@ -49,10 +49,16 @@ const TAG = '[SkillLibrary]';
  * `readFile(index.json)` failure includes a real path the user can grep for.
  */
 function resolveSkillsLibraryDir(): string {
-  // require.main is the entry; __filename only the current chunk. Either
-  // anchors us at a sibling of the skills-library tree once normalized.
-  const mainModuleDir = path.dirname((require.main?.filename ?? __filename) as string);
-  const baseDir = path.basename(mainModuleDir) === 'chunks' ? path.dirname(mainModuleDir) : mainModuleDir;
+  // Anchor on __dirname (the bundle file's directory) — NOT require.main.
+  // In Electron, `require.main?.filename` resolves to the app directory
+  // passed on the command line (`.`), which walks up further than the
+  // actual bundle and lands the library lookup outside the project. Inside
+  // the esbuild-bundled main process, __dirname is the bundle's directory,
+  // which is `out/main/` (dev) or `app.asar/out/main/` (packaged), or
+  // `out/main/chunks/` when electron-vite code-splits. The `chunks/`
+  // basename collapse handles the split case.
+  const myDir = path.dirname(__filename);
+  const baseDir = path.basename(myDir) === 'chunks' ? path.dirname(myDir) : myDir;
   const baseDirUnpacked = baseDir.replace('app.asar', 'app.asar.unpacked');
 
   const candidates = [
@@ -94,6 +100,8 @@ type SkillStats = {
   bySource: Record<SkillSource, number>;
   pinned: number;
   flagged: number;
+  /** Count of entries with `security.verdict === 'clean'` (verified safe). */
+  verified: number;
 };
 
 export class SkillLibrary {
@@ -234,11 +242,20 @@ export class SkillLibrary {
 
     const bySource = {} as Record<SkillSource, number>;
     let flagged = 0;
+    let verified = 0;
 
     for (const entry of this.entries) {
       bySource[entry.source] = (bySource[entry.source] ?? 0) + 1;
-      if (entry.security && entry.security.verdict !== 'clean') {
+      const verdict = entry.security?.verdict;
+      // Flagged = SkillGuard saw a real problem. Unscanned/clean don't count
+      // — every freshly-vendored skill is "unscanned" until scanned on
+      // demand, so treating unscanned as flagged would surface a
+      // 2,096-flagged stat that is just noise.
+      if (verdict === 'review' || verdict === 'blocked') {
         flagged += 1;
+      }
+      if (verdict === 'clean') {
+        verified += 1;
       }
     }
 
@@ -252,7 +269,7 @@ export class SkillLibrary {
       // treat as 0.
     }
 
-    return { total: this.entries.length, bySource, pinned, flagged };
+    return { total: this.entries.length, bySource, pinned, flagged, verified };
   }
 
   /**

@@ -34,6 +34,8 @@ export type SkillStats = {
   bySource: Record<SkillSource, number>;
   pinned: number;
   flagged: number;
+  /** Count of entries with `security.verdict === 'clean'` (verified safe). */
+  verified: number;
 };
 
 export const shell = {
