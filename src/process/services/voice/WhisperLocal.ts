@@ -10,6 +10,7 @@ import type {
   SpeechToTextResult,
   WhisperLocalSpeechToTextConfig,
 } from '@/common/types/speech';
+import { acquireBinary } from '@process/services/voice/voiceBinaryManifest';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -44,7 +45,8 @@ const WHISPER_BINARY_NAME = process.platform === 'win32' ? 'whisper-cli.exe' : '
 /**
  * Injectable runtime seam. Production wires it to the filesystem and a real
  * subprocess; unit tests substitute fakes so no binary is required. Task D2
- * replaces the resolve* members with download-on-demand acquisition.
+ * adds `acquireBinary` — an optional async hook that downloads the binary when
+ * it is not yet cached; when absent the provider hard-disables on missing binary.
  */
 export type WhisperLocalRuntime = {
   /** Absolute path to the whisper.cpp binary, or null when not installed. */
@@ -55,6 +57,13 @@ export type WhisperLocalRuntime = {
   run: (binary: string, args: string[]) => Promise<string>;
   /** Persist the request audio to a temp file; returns the path and a cleanup fn. */
   stageAudio: (request: SpeechToTextRequest) => Promise<{ filePath: string; cleanup: () => Promise<void> }>;
+  /**
+   * Optional: download the binary on demand. When provided and `resolveBinary`
+   * returns null, `transcribe` calls this to attempt acquisition before giving up.
+   * If acquisition fails the error is caught and re-thrown as WhisperLocalUnavailableError.
+   * Unit tests omit this member to test the hard-disable path without network access.
+   */
+  acquireBinary?: () => Promise<string>;
 };
 
 const toBuffer = (audioBuffer: SpeechToTextAudioBuffer): Buffer => {
@@ -76,6 +85,7 @@ export const defaultWhisperLocalRuntime: WhisperLocalRuntime = {
     const binaryPath = path.join(WHISPER_BIN_DIR, WHISPER_BINARY_NAME);
     return existsSync(binaryPath) ? binaryPath : null;
   },
+  acquireBinary: () => acquireBinary('whisper-cpp'),
   resolveModel: (model) => {
     const modelPath = path.join(WHISPER_MODEL_DIR, `ggml-${model}.bin`);
     return existsSync(modelPath) ? modelPath : null;
@@ -117,9 +127,22 @@ export class WhisperLocal {
   ): Promise<SpeechToTextResult> {
     const model = config.model || DEFAULT_WHISPER_LOCAL_MODEL;
 
-    const binary = runtime.resolveBinary();
+    let binary = runtime.resolveBinary();
     if (!binary) {
-      throw new WhisperLocalUnavailableError('STT_WHISPER_LOCAL_UNAVAILABLE: whisper.cpp binary is not installed');
+      if (runtime.acquireBinary) {
+        try {
+          binary = await runtime.acquireBinary();
+        } catch {
+          throw new WhisperLocalUnavailableError(
+            'STT_WHISPER_LOCAL_UNAVAILABLE: whisper.cpp binary could not be acquired',
+          );
+        }
+      }
+      if (!binary) {
+        throw new WhisperLocalUnavailableError(
+          'STT_WHISPER_LOCAL_UNAVAILABLE: whisper.cpp binary is not installed',
+        );
+      }
     }
     const modelPath = runtime.resolveModel(model);
     if (!modelPath) {
