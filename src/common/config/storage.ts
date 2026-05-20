@@ -218,6 +218,30 @@ export interface IConfigStorageRefer {
   };
   // Skills Market: whether the wayland-skills builtin skill is enabled
   'skillsMarket.enabled'?: boolean;
+  /**
+   * Global skills preference layer.
+   *
+   * Precedence rules (highest → lowest):
+   *   1. `disabled` (global) — a skill listed here is NEVER loaded, even if a
+   *      per-assistant `enabledSkills` entry would otherwise include it.
+   *   2. `pinned` (global) — skills that are always-on across every assistant
+   *      unless overridden by `disabled`.
+   *   3. Per-assistant `enabledSkills` / `disabledBuiltinSkills` — scoped to
+   *      a single assistant; evaluated after the global layer is applied.
+   *
+   * `revision` is bumped whenever the preference set is programmatically
+   * modified; readers can use it to detect staleness without deep comparison.
+   */
+  'skills.preferences'?: {
+    /** Skills pinned globally (always loaded for every assistant). */
+    pinned: string[];
+    /** Skills disabled globally (never loaded, overrides per-assistant enables). */
+    disabled: string[];
+    /** Monotonically increasing version counter. */
+    revision: number;
+  };
+  /** Migration flag: skills.preferences seeded from existing assistant enabledSkills. */
+  'migration.skillsPreferences_v1'?: boolean;
   // Ambient Mode (M1 skeleton): enable bubble + agent-driven UI flow
   'ambient.enabled'?: boolean;
   // Ambient Mode: persisted bubble window position (displayId used for multi-monitor recovery)
