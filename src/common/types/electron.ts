@@ -72,6 +72,11 @@ export interface ElectronBridgeAPI {
   writeConstitution?: (content: string) => Promise<boolean>;
   resetConstitution?: () => Promise<string>;
   readConstitutionWithOverlay?: (assistantId?: string) => Promise<{ constitution: string; overlay: string | null }>;
+  // Per-specialist Constitution overlays at ~/.wayland/specialists/<id>.md
+  listConstitutionSpecialists?: () => Promise<{ id: string; bytes: number }[]>;
+  readConstitutionSpecialist?: (id: string) => Promise<string>;
+  writeConstitutionSpecialist?: (id: string, content: string) => Promise<boolean>;
+  deleteConstitutionSpecialist?: (id: string) => Promise<boolean>;
 }
 
 declare global {

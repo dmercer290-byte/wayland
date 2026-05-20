@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import type { SaveState } from '@renderer/components/settings/shared/feedback/SavedIndicator';
 import SettingsPageShell from '@renderer/pages/settings/components/SettingsPageShell';
 import TipTapMarkdownEditor from '@renderer/pages/conversation/Preview/components/editors/TipTapMarkdownEditor';
+import SpecialistOverlays from './SpecialistOverlays';
 
 type TocEntry = { id: string; text: string; level: number };
 
@@ -275,6 +276,8 @@ const ConstitutionSettings: React.FC = () => {
           </aside>
         </div>
       )}
+
+      {!loading && <SpecialistOverlays />}
     </SettingsPageShell>
   );
 };

@@ -19,8 +19,10 @@ import { ipcMain } from 'electron';
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'fs';
@@ -257,6 +259,95 @@ export function readConstitutionWithOverlay(assistantId?: string): {
 }
 
 /**
+ * List the per-specialist overlay files in `~/.wayland/specialists/`.
+ *
+ * Returns each `*.md` file as `{ id, bytes }` where `id` is the filename
+ * without its extension. If the directory does not exist (no overlay was
+ * ever created) an empty array is returned. Sorted by `id` ascending.
+ */
+const listConstitutionSpecialists = (): { id: string; bytes: number }[] => {
+  const { dir } = resolveConstitutionPaths();
+  const specialistsDir = join(dir, SPECIALISTS_DIR);
+  if (!existsSync(specialistsDir)) return [];
+  try {
+    return readdirSync(specialistsDir)
+      .filter((name) => name.toLowerCase().endsWith('.md'))
+      .map((name) => {
+        const id = name.slice(0, -3);
+        let bytes = 0;
+        try {
+          bytes = statSync(join(specialistsDir, name)).size;
+        } catch {
+          // unreadable entry — report it with 0 bytes rather than dropping it
+        }
+        return { id, bytes };
+      })
+      .toSorted((a, b) => a.id.localeCompare(b.id));
+  } catch (err) {
+    console.error('[constitutionBridge] listSpecialists failed:', err);
+    return [];
+  }
+};
+
+/**
+ * Read a single specialist overlay file. The `id` is restricted to
+ * `[A-Za-z0-9_-]+` to prevent path traversal; an invalid id or a missing
+ * file returns `''`.
+ */
+const readConstitutionSpecialist = (id: string): string => {
+  if (!ASSISTANT_ID_PATTERN.test(id)) return '';
+  const { dir } = resolveConstitutionPaths();
+  const overlayPath = join(dir, SPECIALISTS_DIR, `${id}.md`);
+  if (!existsSync(overlayPath)) return '';
+  try {
+    return readFileSync(overlayPath, 'utf-8');
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Atomically write a specialist overlay file, creating the `specialists/`
+ * directory if needed. The `id` is sanitized against path traversal.
+ * Returns `false` on an invalid id or any IO failure.
+ */
+const writeConstitutionSpecialist = (id: string, content: string): boolean => {
+  if (!ASSISTANT_ID_PATTERN.test(id)) return false;
+  const { dir } = resolveConstitutionPaths();
+  const specialistsDir = join(dir, SPECIALISTS_DIR);
+  const overlayPath = join(specialistsDir, `${id}.md`);
+  try {
+    mkdirSync(specialistsDir, { recursive: true });
+    // Atomic write: write to .tmp then rename. Same pattern as writeConstitution.
+    const tmp = `${overlayPath}.tmp`;
+    writeFileSync(tmp, content, 'utf-8');
+    renameSync(tmp, overlayPath);
+    return true;
+  } catch (err) {
+    console.error('[constitutionBridge] writeSpecialist failed:', err);
+    return false;
+  }
+};
+
+/**
+ * Delete a specialist overlay file. Idempotent: a missing file is treated as
+ * success. The `id` is sanitized against path traversal. Returns `false` on
+ * an invalid id or any IO failure.
+ */
+const deleteConstitutionSpecialist = (id: string): boolean => {
+  if (!ASSISTANT_ID_PATTERN.test(id)) return false;
+  const { dir } = resolveConstitutionPaths();
+  const overlayPath = join(dir, SPECIALISTS_DIR, `${id}.md`);
+  try {
+    if (existsSync(overlayPath)) unlinkSync(overlayPath);
+    return true;
+  } catch (err) {
+    console.error('[constitutionBridge] deleteSpecialist failed:', err);
+    return false;
+  }
+};
+
+/**
  * Register the Constitution IPC handlers. Called once from initAllBridges.
  */
 export function initConstitutionBridge(): void {
@@ -265,6 +356,16 @@ export function initConstitutionBridge(): void {
   ipcMain.handle('constitution:reset', () => resetConstitution());
   ipcMain.handle('constitution:readWithOverlay', (_event, assistantId?: string) =>
     readConstitutionWithOverlay(assistantId),
+  );
+  ipcMain.handle('constitution:listSpecialists', () => listConstitutionSpecialists());
+  ipcMain.handle('constitution:readSpecialist', (_event, id: string) =>
+    readConstitutionSpecialist(id),
+  );
+  ipcMain.handle('constitution:writeSpecialist', (_event, id: string, content: string) =>
+    writeConstitutionSpecialist(id, content),
+  );
+  ipcMain.handle('constitution:deleteSpecialist', (_event, id: string) =>
+    deleteConstitutionSpecialist(id),
   );
 }
 
@@ -276,4 +377,8 @@ export const __test__ = {
   resetConstitution,
   resolveConstitutionPaths,
   readConstitutionWithOverlay,
+  listConstitutionSpecialists,
+  readConstitutionSpecialist,
+  writeConstitutionSpecialist,
+  deleteConstitutionSpecialist,
 };

@@ -1773,6 +1773,24 @@
     "tokenWarning": "Approaching adherence ceiling (~2,000 tokens). Consider splitting into specialist overlays.",
     "tokenError": "Past the adherence ceiling. Move sections into specialist overlays at ~/.wayland/specialists/<id>.md."
   },
+  "constitutionSpecialists": {
+    "title": "Specialist Overlays",
+    "description": "Overlays add assistant-specific rules on top of the Constitution. They are opt-in by assistant ID and compose into that assistant's prompt.",
+    "addButton": "Add overlay",
+    "idLabel": "Assistant ID",
+    "idPlaceholder": "e.g. copy, spark, humanizer",
+    "idInvalid": "Use only letters, numbers, hyphens, and underscores.",
+    "idDuplicate": "An overlay with that ID already exists.",
+    "create": "Create",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteConfirmTitle": "Delete overlay?",
+    "deleteConfirmBody": "The overlay for \"{{value}}\" will be permanently removed.",
+    "cancel": "Cancel",
+    "empty": "No specialist overlays yet. Add one to give a specific assistant extra rules.",
+    "close": "Close",
+    "tokenCount": "{{value}} tokens"
+  },
   "agentsPage": {
     "title": "Agents",
     "subtitle": "Auto-detected local agents and remote agent connections. Built-in agents are always available."
