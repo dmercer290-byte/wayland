@@ -233,14 +233,20 @@ const MicrophoneCheck: React.FC = () => {
             ? 'text-[rgb(var(--danger-6))]'
             : 'text-t-secondary';
 
+  // While listening the bar runs orange — Sean's note: a grey bar reads
+  // as "not working." Brand primary signals the mic is actively
+  // sampling. The bar only flips to a status color once the grade
+  // settles (good=success, quiet/hot=warning, no-signal=danger).
   const barColorClass: string =
     state === 'listening'
-      ? 'bg-[rgba(255,255,255,0.30)]'
+      ? 'bg-[rgb(var(--primary-6))]'
       : state === 'graded' && grade === 'good'
         ? 'bg-[rgb(var(--success-6))]'
         : state === 'graded' && (grade === 'too-quiet' || grade === 'too-hot')
           ? 'bg-[rgb(var(--warning-6))]'
-          : 'bg-[var(--color-text-4)]';
+          : state === 'graded' && grade === 'no-signal'
+            ? 'bg-[rgb(var(--danger-6))]'
+            : 'bg-[var(--color-text-4)]';
 
   return (
     <div className='flex flex-col gap-12px'>

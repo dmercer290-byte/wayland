@@ -93,16 +93,22 @@ const ChannelsIndex: React.FC = () => {
     status === 'connected' ? t('settings.channelsIndex.configure') : t('settings.channelsIndex.setUp');
 
   const renderTier = (tier: ChannelTier) => (
-    <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-14px pt-12px'>
+    // overflow-hidden on the wrapper + min-w-0 on each card defends against
+    // the first-paint case where Electron's renderer briefly measures the
+    // content area wider than its eventual parent, causing the 3rd column
+    // to clip off the right edge. UnoCSS's grid-cols-3 maps to
+    // repeat(3, minmax(0, 1fr)) — min-w-0 on the children lets that minmax
+    // actually shrink past content min-width instead of pushing the grid
+    // wider.
+    <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-14px pt-12px overflow-hidden'>
       {CHANNELS.filter((c) => c.tier === tier).map((channel) => {
         const Icon = channel.icon;
         const isComingSoon = channel.status === 'soon';
-        // Coming-soon tiles remain clickable so users can read about what's planned + when.
         const clickable = true;
         return (
           <article
             key={channel.id}
-            className={`flex flex-col gap-12px p-18px rounded-12px bg-[var(--color-bg-2)] border border-[var(--color-border-2)] min-h-[150px] transition-all duration-160 ${
+            className={`flex flex-col gap-12px p-18px rounded-12px bg-[var(--color-bg-2)] border border-[var(--color-border-2)] min-h-[150px] min-w-0 transition-all duration-160 ${
               isComingSoon
                 ? 'hover:border-[var(--color-border-3)] hover:bg-[var(--color-bg-3)] cursor-pointer'
                 : 'hover:border-[var(--brand-soft-border)] hover:bg-[var(--color-bg-3)] hover:-translate-y-2px cursor-pointer'

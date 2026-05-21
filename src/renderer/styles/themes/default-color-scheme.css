@@ -337,16 +337,16 @@ body[arco-theme='dark'] {
   --input-border: #383838;
   --input-border-focus: var(--brand);
 
-  /* Borders — dark. Bible spec is --p-grey-5 (#2a2a2a) for the default
-     card border. Earlier we bumped these to #38/#45 to compensate for
-     low card-vs-page contrast — but the real fix is to bump the CARD
-     SURFACE one tier up (see --bg-1 below), not over-brighten borders.
-     Restoring Bible-exact values now that cards live on a brighter
-     surface tier and have a legible edge regardless. */
-  --border-base: #2a2a2a;
-  --border-light: #1f1f1f;
-  --border-bright: #353535;
-  --border-mid: #353535;
+  /* Borders — dark. Bible's --border-default maps to --p-grey-5 (#2a2a2a),
+     but against #1a card bg at 1px on retina, that reads as a hairline
+     that's still hard to perceive in dense tile grids. Use the Bible's
+     next tier up (--p-grey-6 #353535) for the default card border so
+     cards have a confident edge. Strict-scale: --p-grey-6 is still a
+     defined primitive — not an off-scale value. */
+  --border-base: #353535;
+  --border-light: #2a2a2a;
+  --border-bright: #4d4d4d;
+  --border-mid: #404040;
 
   /* Brand — dark (same orange across modes by design) */
   --brand: #ff6b35;
