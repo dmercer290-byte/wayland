@@ -287,17 +287,16 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
       const okLabel = props.okText ?? t('common.confirm', { defaultValue: 'Confirm' });
       return {
         render: () => (
-          <div className='flex justify-end gap-10px mt-10px'>
-            {/* Default buttons ship with rounded corners; text can be overridden via cancelText/okText */}
-            <Button onClick={onCancel} className='px-20px min-w-80px' style={{ borderRadius: 8 }}>
+          <div className='flex justify-end gap-12px'>
+            {/* Canonical recipe: secondary rectangular 8px, primary pill h-32px px-16px */}
+            <Button onClick={onCancel} className='px-16px min-w-80px' style={{ borderRadius: 8 }}>
               {cancelLabel}
             </Button>
             <Button
               type='primary'
               onClick={props.onOk}
               loading={props.confirmLoading}
-              className='px-20px min-w-80px'
-              style={{ borderRadius: 8 }}
+              className='!rounded-[100px] !h-32px !px-16px min-w-80px'
             >
               {okLabel}
             </Button>
@@ -335,7 +334,7 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
     const headerClassName = classNames(HEADER_BASE_CLASS, headerConfig.className);
 
     const headerStyle: CSSProperties = {
-      borderBottom: '1px solid var(--bg-3)',
+      borderBottom: '1px solid var(--color-border-2)',
       ...headerConfig.style,
     };
 
