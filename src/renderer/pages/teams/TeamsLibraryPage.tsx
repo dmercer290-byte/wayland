@@ -29,7 +29,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ipcBridge } from '@/common';
-import { LibraryPageHeader } from '@/renderer/components/layout/library';
+import { LibraryPageHeader, LibrarySectionHeader } from '@/renderer/components/layout/library';
 import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import { useAssistantList } from '@/renderer/hooks/assistant';
 import type { AssistantListItem } from '@/renderer/pages/settings/AssistantSettings/types';
@@ -249,17 +249,14 @@ const TeamsLibraryPage: React.FC = () => {
 
         {standing.length > 0 && (
           <section className={styles.sectionGroup} data-testid='teams-group-standing'>
-            <header className={styles.sectionHeader}>
-              <span className={`${styles.sectionTitle} ${styles.sectionTitleStanding}`}>
-                {t('teams.group.standing', { defaultValue: 'Standing Companies' })}
-              </span>
-              <span className={styles.sectionHint}>
-                {t('teams.group.standingHint', {
-                  count: standing.length,
-                  defaultValue: '{{count}} — persistent, ritualized orgs that run continuously',
-                })}
-              </span>
-            </header>
+            <LibrarySectionHeader
+              label={t('teams.group.standing', { defaultValue: 'Standing Companies' })}
+              variant='tier'
+              hint={t('teams.group.standingHint', {
+                count: standing.length,
+                defaultValue: '{{count}} — persistent, ritualized orgs that run continuously',
+              })}
+            />
             <div className={styles.gridStanding}>
               {standing.map((team) => (
                 <TeamCard key={team.id} team={team} localeKey={localeKey} onLaunch={handleLaunchTeam} />

@@ -54,10 +54,6 @@
   text-transform: uppercase;
 }
 
-.sectionTitleStanding {
-  color: var(--color-standing);
-}
-
 .sectionTitleTeams {
   color: var(--color-team);
 }

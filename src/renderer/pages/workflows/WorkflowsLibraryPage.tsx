@@ -27,7 +27,7 @@ import { Download, Sparkles } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
-import { LibraryPageHeader } from '@/renderer/components/layout/library';
+import { LibraryPageHeader, LibrarySectionHeader } from '@/renderer/components/layout/library';
 import type { SkillIndexEntry } from '@/common/types/skillTypes';
 import WorkflowCard from './WorkflowCard';
 import WorkflowDetailModal from './WorkflowDetailModal';
@@ -271,20 +271,13 @@ const WorkflowsLibraryPage: React.FC = () => {
               )
             ) : (
               <>
-                {/* Featured — Forge Orange header + accented cards so the
-                    curated tier reads as a distinct emphasis without
-                    leaving the page rhythm. Only shows on All-workflows. */}
                 {activeCategory === null && featured.length > 0 ? (
                   <section>
-                    <h2
-                      className='text-13px font-semibold uppercase m-0 mb-10px flex items-center gap-8px'
-                      style={{ color: 'rgb(var(--primary-6))', letterSpacing: '0.08em' }}
-                    >
-                      <span>{t('section.featured', 'Featured workflows')}</span>
-                      <span style={{ color: 'var(--color-text-3)', fontWeight: 400 }}>
-                        · {featured.length}
-                      </span>
-                    </h2>
+                    <LibrarySectionHeader
+                      label={t('section.featured', 'Featured workflows')}
+                      count={featured.length}
+                      variant='tier'
+                    />
                     <div
                       className='grid gap-12px'
                       style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', minWidth: 0 }}
@@ -296,46 +289,18 @@ const WorkflowsLibraryPage: React.FC = () => {
                   </section>
                 ) : null}
 
-                {/* "All workflows" header — high-contrast prominent label
-                    so it reads as a tier marker, not as muted body chrome
-                    (Sean: 'all workflows is barely visible'). Tight 8px
-                    gap below collapses the dead space between Featured
-                    and Lifestyle that read as a layout error. */}
                 {activeCategory === null && featured.length > 0 ? (
-                  <div
-                    className='flex items-center gap-12px'
-                    style={{ color: 'var(--color-text-1)' }}
-                  >
-                    <h2
-                      className='text-13px font-semibold uppercase m-0 shrink-0'
-                      style={{ letterSpacing: '0.08em' }}
-                    >
-                      {t('section.all', 'All workflows')}
-                    </h2>
-                    <span
-                      className='text-11px shrink-0'
-                      style={{ color: 'var(--color-text-3)' }}
-                    >
-                      · {workflows.length - featured.length}
-                    </span>
-                    <div
-                      className='flex-1 h-1px'
-                      style={{ background: 'var(--color-border-2)' }}
-                    />
-                  </div>
+                  <LibrarySectionHeader
+                    label={t('section.all', 'All workflows')}
+                    count={workflows.length - featured.length}
+                    variant='primary'
+                    divider
+                  />
                 ) : null}
 
                 {visibleSections.map((s) => (
                   <section key={s.slug}>
-                    <h2
-                      className='text-13px font-semibold uppercase m-0 mb-10px flex items-center gap-8px'
-                      style={{ color: 'var(--color-text-3)', letterSpacing: '0.08em' }}
-                    >
-                      <span>{s.label}</span>
-                      <span style={{ color: 'var(--color-text-3)', fontWeight: 400 }}>
-                        · {s.entries.length}
-                      </span>
-                    </h2>
+                    <LibrarySectionHeader label={s.label} count={s.entries.length} />
                     <div
                       className='grid gap-12px'
                       style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', minWidth: 0 }}
