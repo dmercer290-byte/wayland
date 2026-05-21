@@ -389,3 +389,25 @@
     height: 60px;
   }
 }
+
+/* Suppress Arco Input's own wrapper chrome on the login page. Arco's
+   <Input> wraps the bare <input> in .arco-input-inner-wrapper, which
+   ships its own border + background — combined with our styled
+   .login-page__input border that reads as a visible double-border. */
+.login-page__input-wrapper :global(.arco-input-inner-wrapper) {
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+.login-page__input-wrapper :global(.arco-input-inner-wrapper:focus-within) {
+  border: none;
+  box-shadow: none;
+}
+.login-page__input-wrapper :global(.arco-input-suffix) {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #777;
+}

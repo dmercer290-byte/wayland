@@ -271,33 +271,27 @@ export const TextToSpeechSettingsSection: React.FC<{
         </Form.Item>
 
         <Form.Item label={t('settings.textToSpeechSpeed')}>
-          {/* Arco centers each mark label on its tick. The leftmost (0.5×) and
-              rightmost (2×) labels would otherwise spill past the track edge
-              by ~half their text width. Two-layer fix:
-                1. The wrapper reserves px-24px so the labels have room.
-                2. The CSS at the bottom of this file shifts the FIRST and
-                   LAST `.arco-slider-mark-text` so they hug the track edges
-                   instead of centering past them. */}
-          <div className='w-full px-24px tts-speed-slider'>
-            <Slider
-              min={0.5}
-              max={2.0}
-              step={0.1}
-              value={config.speed}
-              onChange={(value) => onChange((current) => ({ ...current, speed: value as number }))}
-              marks={{ 0.5: '0.5×', 1: '1×', 1.5: '1.5×', 2: '2×' }}
-              className='w-full'
-            />
-          </div>
-          <style>{`
-            .tts-speed-slider .arco-slider-mark-text:first-child {
-              transform: translateX(0) !important;
-              left: 0 !important;
-            }
-            .tts-speed-slider .arco-slider-mark-text:last-child {
-              transform: translateX(-100%) !important;
-            }
-          `}</style>
+          {/* Anchor the leftmost and rightmost mark labels inside the
+              slider's container by passing element nodes with explicit
+              horizontal offset. The first mark hugs the left edge (no
+              translateX), the last mark hugs the right edge
+              (translateX(-100%)), and the middle marks keep Arco's
+              centered-on-tick default. No scoped CSS needed — these
+              transforms ride directly on the rendered mark elements. */}
+          <Slider
+            min={0.5}
+            max={2.0}
+            step={0.1}
+            value={config.speed}
+            onChange={(value) => onChange((current) => ({ ...current, speed: value as number }))}
+            marks={{
+              0.5: <span style={{ transform: 'translateX(0)', display: 'inline-block' }}>0.5×</span>,
+              1: '1×',
+              1.5: '1.5×',
+              2: <span style={{ transform: 'translateX(-100%)', display: 'inline-block' }}>2×</span>,
+            }}
+            className='w-full'
+          />
         </Form.Item>
 
         <Form.Item label={t('settings.textToSpeechAutoRead')}>
