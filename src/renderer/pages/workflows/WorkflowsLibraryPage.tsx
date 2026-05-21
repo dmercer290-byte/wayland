@@ -34,6 +34,7 @@ import {
   LibrarySectionHeader,
 } from '@/renderer/components/layout/library';
 import type { SkillIndexEntry } from '@/common/types/skillTypes';
+import BuildWorkflowModal from './BuildWorkflowModal';
 import WorkflowCard from './WorkflowCard';
 import WorkflowDetailModal from './WorkflowDetailModal';
 
@@ -84,10 +85,15 @@ const WorkflowsLibraryPage: React.FC = () => {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<SkillIndexEntry | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [buildOpen, setBuildOpen] = useState(false);
 
-  useEffect(() => {
+  const refreshWorkflows = useCallback(() => {
     void ipcBridge.skills.list.invoke({ type: 'workflow' }).then((list) => setWorkflows(list));
   }, []);
+
+  useEffect(() => {
+    refreshWorkflows();
+  }, [refreshWorkflows]);
 
   const searching = query.trim().length > 0;
 
@@ -175,15 +181,7 @@ const WorkflowsLibraryPage: React.FC = () => {
         <Button
           type='primary'
           icon={<Sparkles size={14} />}
-          onClick={() => {
-            // eslint-disable-next-line no-alert
-            window.alert(
-              t(
-                'build.placeholder',
-                'Workflow builder coming next: describe it in plain language → AI drafts a SKILL.md with category + depends inferred from the live skill library → review + save.',
-              ),
-            );
-          }}
+          onClick={() => setBuildOpen(true)}
         >
           {t('actions.build', 'Build a workflow')}
         </Button>
@@ -289,6 +287,11 @@ const WorkflowsLibraryPage: React.FC = () => {
         </div>
 
         <WorkflowDetailModal entry={selected} onClose={() => setSelected(null)} />
+        <BuildWorkflowModal
+          visible={buildOpen}
+          onClose={() => setBuildOpen(false)}
+          onSaved={refreshWorkflows}
+        />
         </div>
       </div>
     </div>
