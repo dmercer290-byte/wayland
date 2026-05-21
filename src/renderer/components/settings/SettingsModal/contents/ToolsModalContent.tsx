@@ -271,10 +271,14 @@ export const TextToSpeechSettingsSection: React.FC<{
         </Form.Item>
 
         <Form.Item label={t('settings.textToSpeechSpeed')}>
-          {/* Reserve horizontal padding so the leftmost (0.5×) and rightmost
-              (2×) mark labels — which Arco centers on each mark position —
-              don't overflow the slider's container edges. */}
-          <div className='w-full px-12px'>
+          {/* Arco centers each mark label on its tick. The leftmost (0.5×) and
+              rightmost (2×) labels would otherwise spill past the track edge
+              by ~half their text width. Two-layer fix:
+                1. The wrapper reserves px-24px so the labels have room.
+                2. The CSS at the bottom of this file shifts the FIRST and
+                   LAST `.arco-slider-mark-text` so they hug the track edges
+                   instead of centering past them. */}
+          <div className='w-full px-24px tts-speed-slider'>
             <Slider
               min={0.5}
               max={2.0}
@@ -285,6 +289,15 @@ export const TextToSpeechSettingsSection: React.FC<{
               className='w-full'
             />
           </div>
+          <style>{`
+            .tts-speed-slider .arco-slider-mark-text:first-child {
+              transform: translateX(0) !important;
+              left: 0 !important;
+            }
+            .tts-speed-slider .arco-slider-mark-text:last-child {
+              transform: translateX(-100%) !important;
+            }
+          `}</style>
         </Form.Item>
 
         <Form.Item label={t('settings.textToSpeechAutoRead')}>
@@ -441,7 +454,7 @@ export const SpeechToTextSettingsSection: React.FC<{
                 </div>
                 <Button
                   size='small'
-                  className='!rounded-[100px] !px-16px !h-32px'
+                  className=''
                   onClick={handleOpenProvidersPage}
                 >
                   {t('settings.voiceProviderKeyDeferCTA', 'Open Providers →')}

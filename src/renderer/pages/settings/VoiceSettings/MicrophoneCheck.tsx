@@ -2,33 +2,38 @@
  * @license
  * Copyright 2026 Ferrox Labs
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Ported from Flow's MicCheckSettings.svelte pattern:
+ * - 4-second timed test → auto-stop → single grade
+ * - 5 grade states: no-signal / listening / too-quiet / good / too-hot
+ * - Bar width driven via direct DOM mutation in RAF, not React state
+ *   per frame. State only flips on the grade transition. This is the
+ *   anti-flicker trick — React re-renders ~5x per test instead of ~240x.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@arco-design/web-react';
-import { Mic, MicOff, Square } from 'lucide-react';
+import { Mic, Square } from 'lucide-react';
 import WaylandSelect from '@/renderer/components/base/WaylandSelect';
 
-type CheckState = 'idle' | 'requesting' | 'live' | 'error';
-type Quality = 'silent' | 'quiet' | 'active' | 'loud' | 'clipping';
+type CheckState = 'idle' | 'requesting' | 'listening' | 'graded' | 'error';
+type Grade = 'no-signal' | 'too-quiet' | 'good' | 'too-hot';
 
-const SILENT_PCT = 1; // peak < 1% => "silent"
-const QUIET_PCT = 8; // peak < 8% => "quiet"
-const LOUD_PCT = 85; // peak >= 85% => "loud"
-const CLIPPING_PCT = 95; // peak >= 95% for 3 frames => "clipping"
-const PEAK_DECAY_PER_FRAME = 0.5; // peak indicator drops 0.5% per ~16ms
+const TEST_DURATION_MS = 4000;
+
+// Grade thresholds — peak amplitude over the test window, 0-1.
+const PEAK_NO_SIGNAL = 0.02; // below this → mic isn't picking anything up
+const PEAK_TOO_QUIET = 0.12; // below this → speak louder
+const PEAK_TOO_HOT = 0.85; // above this → clipping / reduce gain
 
 const DEFAULT_DEVICE_ID = '';
 
 const MicrophoneCheck: React.FC = () => {
   const { t } = useTranslation();
   const [state, setState] = useState<CheckState>('idle');
+  const [grade, setGrade] = useState<Grade | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [level, setLevel] = useState(0);
-  const [peak, setPeak] = useState(0);
-  const [rms, setRms] = useState(0);
-  const [quality, setQuality] = useState<Quality>('silent');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>(DEFAULT_DEVICE_ID);
 
@@ -36,8 +41,9 @@ const MicrophoneCheck: React.FC = () => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
-  const peakRef = useRef(0);
-  const clipFramesRef = useRef(0);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const peakOverWindowRef = useRef(0);
 
   const refreshDevices = useCallback(async (): Promise<void> => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -66,6 +72,10 @@ const MicrophoneCheck: React.FC = () => {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    if (stopTimerRef.current != null) {
+      clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -75,30 +85,42 @@ const MicrophoneCheck: React.FC = () => {
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
-    peakRef.current = 0;
-    clipFramesRef.current = 0;
+    if (barRef.current) {
+      barRef.current.style.width = '0%';
+    }
   }, []);
 
   useEffect(() => cleanup, [cleanup]);
 
-  const handleStop = useCallback((): void => {
+  const finishWithGrade = useCallback((): void => {
+    const peak = peakOverWindowRef.current;
+    let finalGrade: Grade;
+    if (peak < PEAK_NO_SIGNAL) finalGrade = 'no-signal';
+    else if (peak < PEAK_TOO_QUIET) finalGrade = 'too-quiet';
+    else if (peak >= PEAK_TOO_HOT) finalGrade = 'too-hot';
+    else finalGrade = 'good';
     cleanup();
-    setState('idle');
-    setLevel(0);
-    setPeak(0);
-    setRms(0);
-    setQuality('silent');
+    setGrade(finalGrade);
+    setState('graded');
   }, [cleanup]);
+
+  const handleStop = useCallback((): void => {
+    // User-cancelled — finalize whatever we observed so far rather than just bailing.
+    if (state === 'listening') {
+      finishWithGrade();
+    } else {
+      cleanup();
+      setState('idle');
+      setGrade(null);
+    }
+  }, [cleanup, finishWithGrade, state]);
 
   const handleStart = useCallback(async (): Promise<void> => {
     setState('requesting');
+    setGrade(null);
     setErrorMsg('');
-    setLevel(0);
-    setPeak(0);
-    setRms(0);
-    setQuality('silent');
-    peakRef.current = 0;
-    clipFramesRef.current = 0;
+    peakOverWindowRef.current = 0;
+    if (barRef.current) barRef.current.style.width = '0%';
 
     const constraints: MediaStreamConstraints = {
       audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
@@ -135,100 +157,99 @@ const MicrophoneCheck: React.FC = () => {
     audioCtxRef.current = ctx;
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.7;
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.8;
     source.connect(analyser);
     analyserRef.current = analyser;
 
     void refreshDevices();
 
-    setState('live');
-
-    // Use time-domain data for RMS + peak instead of frequency-domain so
-    // the meter reflects actual amplitude, not spectral energy.
+    setState('listening');
     const timeBuffer = new Uint8Array(analyser.fftSize);
 
     const tick = (): void => {
       if (!analyserRef.current) return;
       analyserRef.current.getByteTimeDomainData(timeBuffer);
 
-      // Sample is 0..255, centered at 128. Peak = max abs deviation.
       let instantaneousPeak = 0;
-      let sumSquares = 0;
       for (let i = 0; i < timeBuffer.length; i++) {
         const deviation = Math.abs(timeBuffer[i] - 128);
         if (deviation > instantaneousPeak) instantaneousPeak = deviation;
-        sumSquares += deviation * deviation;
       }
-      const peakPct = Math.round((instantaneousPeak / 128) * 100);
-      const rmsPct = Math.round((Math.sqrt(sumSquares / timeBuffer.length) / 128) * 100);
+      const normalized = instantaneousPeak / 128; // 0..1
 
-      setLevel(peakPct);
-      setRms(rmsPct);
-
-      // Held peak with decay — gives a peak-hold ribbon above the live bar.
-      const decayed = Math.max(0, peakRef.current - PEAK_DECAY_PER_FRAME);
-      peakRef.current = Math.max(decayed, peakPct);
-      setPeak(Math.round(peakRef.current));
-
-      // Clipping requires sustained presence — 3 consecutive frames over threshold.
-      if (peakPct >= CLIPPING_PCT) {
-        clipFramesRef.current += 1;
-      } else {
-        clipFramesRef.current = 0;
+      if (normalized > peakOverWindowRef.current) {
+        peakOverWindowRef.current = normalized;
       }
 
-      let nextQuality: Quality;
-      if (clipFramesRef.current >= 3) {
-        nextQuality = 'clipping';
-      } else if (peakPct < SILENT_PCT) {
-        nextQuality = 'silent';
-      } else if (peakPct < QUIET_PCT) {
-        nextQuality = 'quiet';
-      } else if (peakPct >= LOUD_PCT) {
-        nextQuality = 'loud';
-      } else {
-        nextQuality = 'active';
+      // Drive the bar via direct DOM, not React state — eliminates the
+      // per-frame re-render cascade that caused flicker in the prior
+      // implementation. The CSS transition (0.08s linear) smooths the bar.
+      if (barRef.current) {
+        const pct = Math.min(normalized * 100, 100);
+        barRef.current.style.width = `${pct}%`;
       }
-      setQuality(nextQuality);
 
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
-  }, [cleanup, refreshDevices, selectedDeviceId, t]);
 
-  const isLive = state === 'live';
-  const isRequesting = state === 'requesting';
+    stopTimerRef.current = setTimeout(finishWithGrade, TEST_DURATION_MS);
+  }, [cleanup, finishWithGrade, refreshDevices, selectedDeviceId, t]);
+
+  const isTesting = state === 'requesting' || state === 'listening';
 
   const deviceOptionLabel = (d: MediaDeviceInfo, index: number): string => {
     if (d.label) return d.label;
     return t('settings.voiceMicDeviceFallback', { defaultValue: 'Microphone {{n}}', n: index + 1 });
   };
 
-  const qualityLabel: Record<Quality, string> = {
-    silent: t('settings.voiceMicQualitySilent', 'No signal detected'),
-    quiet: t('settings.voiceMicQualityQuiet', 'Quiet — speak louder or move closer'),
-    active: t('settings.voiceMicQualityActive', 'Picking up clearly'),
-    loud: t('settings.voiceMicQualityLoud', 'Strong signal'),
-    clipping: t('settings.voiceMicQualityClipping', 'Clipping — back off or reduce input gain'),
-  };
+  // Status sentence per state — matches Flow's MicCheckSettings copy 1:1.
+  const statusText: string =
+    state === 'listening'
+      ? t('settings.voiceMicListening', 'Listening — say something to check levels…')
+      : state === 'requesting'
+        ? t('settings.voiceMicRequesting', 'Requesting microphone access…')
+        : state === 'error'
+          ? errorMsg
+          : state === 'graded' && grade
+            ? grade === 'no-signal'
+              ? t('settings.voiceMicGradeNoSignal', 'No audio detected. Check your mic connection.')
+              : grade === 'too-quiet'
+                ? t('settings.voiceMicGradeQuiet', 'Voice is quiet. Try speaking louder or moving closer.')
+                : grade === 'good'
+                  ? t('settings.voiceMicGradeGood', 'Sounds good!')
+                  : t('settings.voiceMicGradeHot', 'Level is very high. Try moving back or reducing input gain.')
+            : t('settings.voiceMicIdleHint', 'Speak to test your microphone…');
 
-  const qualityDot: Record<Quality, string> = {
-    silent: 'bg-[var(--color-text-4)]',
-    quiet: 'bg-[rgb(var(--warning-6))]',
-    active: 'bg-[rgb(var(--success-6))]',
-    loud: 'bg-[rgb(var(--success-6))]',
-    clipping: 'bg-[rgb(var(--danger-6))]',
-  };
+  const statusColorClass: string =
+    state === 'graded' && grade === 'good'
+      ? 'text-[rgb(var(--success-6))]'
+      : state === 'graded' && (grade === 'too-quiet' || grade === 'too-hot')
+        ? 'text-[rgb(var(--warning-6))]'
+        : state === 'graded' && grade === 'no-signal'
+          ? 'text-[rgb(var(--danger-6))]'
+          : state === 'error'
+            ? 'text-[rgb(var(--danger-6))]'
+            : 'text-t-secondary';
+
+  const barColorClass: string =
+    state === 'listening'
+      ? 'bg-[rgba(255,255,255,0.30)]'
+      : state === 'graded' && grade === 'good'
+        ? 'bg-[rgb(var(--success-6))]'
+        : state === 'graded' && (grade === 'too-quiet' || grade === 'too-hot')
+          ? 'bg-[rgb(var(--warning-6))]'
+          : 'bg-[var(--color-text-4)]';
 
   return (
-    <div className='flex flex-col gap-12px rounded-12px border border-solid border-[var(--color-border-2)] bg-[var(--color-bg-2)] p-12px'>
+    <div className='flex flex-col gap-12px'>
       <div className='flex items-center gap-12px flex-wrap'>
         <WaylandSelect
           size='small'
           value={selectedDeviceId}
           onChange={(value: string) => setSelectedDeviceId(value)}
-          disabled={isLive || isRequesting}
+          disabled={isTesting}
           style={{ minWidth: 240 }}
         >
           <WaylandSelect.Option value={DEFAULT_DEVICE_ID}>
@@ -240,93 +261,34 @@ const MicrophoneCheck: React.FC = () => {
             </WaylandSelect.Option>
           ))}
         </WaylandSelect>
-        {isLive ? (
-          <Button
-            type='outline'
-            size='small'
-            status='danger'
-            icon={<Square size={12} />}
-            onClick={handleStop}
-          >
-            {t('settings.voiceMicStop', 'Stop')}
-          </Button>
-        ) : (
-          <Button
-            type='outline'
-            size='small'
-            icon={<Mic size={14} />}
-            loading={isRequesting}
-            disabled={isRequesting}
-            onClick={() => void handleStart()}
-          >
-            {isRequesting
-              ? t('settings.voiceMicRequesting', 'Requesting access…')
-              : t('settings.voiceMicStart', 'Start live meter')}
-          </Button>
-        )}
+        <Button
+          size='small'
+          icon={isTesting ? <Square size={12} /> : <Mic size={14} />}
+          loading={state === 'requesting'}
+          onClick={isTesting ? handleStop : () => void handleStart()}
+        >
+          {isTesting
+            ? t('settings.voiceMicStop', 'Stop Test')
+            : t('settings.voiceMicTest', 'Test Microphone')}
+        </Button>
       </div>
 
-      {/* Live meter — peak bar with held-peak ribbon + RMS ghost */}
       <div className='flex flex-col gap-6px'>
-        <div className='relative h-10px rd-full bg-[var(--color-fill-2)] overflow-hidden'>
-          {/* RMS (average loudness) — subtle ghost behind the peak */}
+        <div className='h-8px rd-full bg-[var(--color-fill-2)] overflow-hidden'>
           <div
-            className='absolute inset-y-0 left-0 bg-[rgba(255,107,53,0.25)] transition-[width] duration-75'
-            style={{ width: `${rms}%` }}
+            ref={barRef}
+            className={`h-full rd-full ${barColorClass} mic-meter-bar`}
+            style={{ width: '0%' }}
           />
-          {/* Instantaneous peak — primary bar */}
-          <div
-            className={`absolute inset-y-0 left-0 transition-[width] duration-75 ${
-              quality === 'clipping' ? 'bg-[rgb(var(--danger-6))]' : 'bg-[rgb(var(--primary-6))]'
-            }`}
-            style={{ width: `${level}%` }}
-          />
-          {/* Held peak — 2px vertical line that decays */}
-          {peak > 0 && isLive && (
-            <div
-              className='absolute inset-y-0 w-2px bg-[var(--color-text-1)] transition-[left] duration-75'
-              style={{ left: `calc(${Math.min(peak, 100)}% - 1px)` }}
-            />
-          )}
         </div>
-
-        {/* Quality + numeric readouts */}
-        <div className='flex items-center justify-between text-12px'>
-          <div className='flex items-center gap-6px text-t-secondary'>
-            <span
-              className={`inline-block w-8px h-8px rd-full ${
-                isLive ? qualityDot[quality] : 'bg-[var(--color-text-4)]'
-              }`}
-            />
-            <span>
-              {isLive
-                ? qualityLabel[quality]
-                : state === 'error'
-                  ? errorMsg
-                  : t('settings.voiceMicIdleHint', 'Pick a device and start the live meter to verify input.')}
-            </span>
-          </div>
-          {isLive && (
-            <div className='flex items-center gap-12px text-t-tertiary tabular-nums'>
-              <span>
-                {t('settings.voiceMicLevelLabel', 'peak')} {level}%
-              </span>
-              <span>
-                {t('settings.voiceMicRmsLabel', 'avg')} {rms}%
-              </span>
-              <span>
-                {t('settings.voiceMicHeldLabel', 'held')} {peak}%
-              </span>
-            </div>
-          )}
-        </div>
+        <p className={`text-12px m-0 ${statusColorClass}`}>{statusText}</p>
       </div>
 
-      {state === 'error' && !errorMsg && (
-        <span className='text-12px text-[rgb(var(--danger-6))] flex items-center gap-6px'>
-          <MicOff size={12} /> {t('settings.voiceMicError', 'Microphone error')}
-        </span>
-      )}
+      <style>{`
+        .mic-meter-bar {
+          transition: width 0.08s linear, background-color 0.2s ease;
+        }
+      `}</style>
     </div>
   );
 };
