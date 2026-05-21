@@ -35,6 +35,7 @@ import {
   useMcpOAuth,
 } from '@/renderer/hooks/mcp';
 import classNames from 'classnames';
+import { useNavigate } from 'react-router-dom';
 import { useSettingsViewMode } from '../settingsViewContext';
 import MicrophoneCheck from '@/renderer/pages/settings/VoiceSettings/MicrophoneCheck';
 
@@ -331,6 +332,17 @@ export const SpeechToTextSettingsSection: React.FC<{
   onChange: (updater: (current: SpeechToTextConfig) => SpeechToTextConfig) => void;
 }> = ({ config, onChange }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const handleOpenProvidersPage = useCallback(() => {
+    try {
+      navigate('/settings/providers');
+    } catch {
+      // Settings modal context may not have a router — fall back to hash route.
+      if (typeof window !== 'undefined') {
+        window.location.hash = '#/settings/providers';
+      }
+    }
+  }, [navigate]);
   const renderSpeechToTextFieldLabel = useCallback(
     (labelKey: string, requirement: 'required' | 'optional') => (
       <span className='inline-flex items-center gap-6px'>
@@ -415,11 +427,26 @@ export const SpeechToTextSettingsSection: React.FC<{
         {config.provider === 'openai' ? (
           <>
             <Form.Item label={renderSpeechToTextFieldLabel('settings.speechToTextApiKey', 'required')}>
-              <Input.Password
-                value={config.openai?.apiKey}
-                visibilityToggle
-                onChange={(value) => handleOpenAIChange('apiKey', value)}
-              />
+              <div className='rounded-12px bg-[var(--color-fill-2)] p-12px flex items-center justify-between gap-12px'>
+                <div>
+                  <div className='text-13px font-medium text-t-primary'>
+                    {t('settings.voiceProviderKeyDeferTitle', 'Configure your OpenAI key in Providers')}
+                  </div>
+                  <div className='text-12px text-t-secondary'>
+                    {t(
+                      'settings.voiceProviderKeyDeferBody',
+                      'Provider keys live in one place so every feature can use them.'
+                    )}
+                  </div>
+                </div>
+                <Button
+                  size='small'
+                  className='!rounded-[100px] !px-16px !h-32px'
+                  onClick={handleOpenProvidersPage}
+                >
+                  {t('settings.voiceProviderKeyDeferCTA', 'Open Providers →')}
+                </Button>
+              </div>
             </Form.Item>
             <Form.Item label={renderSpeechToTextFieldLabel('settings.speechToTextBaseUrl', 'optional')}>
               <Input value={config.openai?.baseUrl} onChange={(value) => handleOpenAIChange('baseUrl', value)} />
