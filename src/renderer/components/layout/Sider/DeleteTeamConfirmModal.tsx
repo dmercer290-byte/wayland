@@ -62,7 +62,7 @@ const DeleteTeamConfirmModal: React.FC<Props> = ({
             onClick={onConfirm}
             disabled={!enabled || loading}
             loading={loading}
-            className='!rounded-[100px] !h-32px !px-16px min-w-80px'
+            className='min-w-80px'
             data-testid='delete-team-confirm-cta'
           >
             {t('team.sider.deleteConfirmCta', { defaultValue: 'Delete team' })}

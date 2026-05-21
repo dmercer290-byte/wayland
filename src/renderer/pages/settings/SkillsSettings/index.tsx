@@ -210,7 +210,7 @@ const SkillsSettings: React.FC = () => {
           type='primary'
           icon={<Sparkles size={14} />}
           onClick={() => setBuildModalVisible(true)}
-          className='!rounded-[100px] !h-32px !px-16px'
+          className=''
         >
           {t('actions.build')}
         </Button>

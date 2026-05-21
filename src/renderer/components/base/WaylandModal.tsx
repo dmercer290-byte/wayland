@@ -296,7 +296,7 @@ const WaylandModal: React.FC<WaylandModalProps> = ({
               type='primary'
               onClick={props.onOk}
               loading={props.confirmLoading}
-              className='!rounded-[100px] !h-32px !px-16px min-w-80px'
+              className='min-w-80px'
             >
               {okLabel}
             </Button>

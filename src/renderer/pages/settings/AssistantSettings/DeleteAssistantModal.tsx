@@ -32,7 +32,7 @@ const DeleteAssistantModal: React.FC<DeleteAssistantModalProps> = ({
       onOk={onConfirm}
       okButtonProps={{
         status: 'danger',
-        className: '!rounded-[100px] !h-32px !px-16px',
+        className: '',
       }}
       cancelButtonProps={{ style: { borderRadius: 8 }, className: 'px-16px' }}
       wrapClassName='delete-assistant-modal'

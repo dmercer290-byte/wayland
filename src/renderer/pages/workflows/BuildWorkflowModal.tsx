@@ -327,7 +327,7 @@ const BuildWorkflowModal: React.FC<BuildWorkflowModalProps> = ({ visible, onClos
             <Button
               type='primary'
               onClick={handleDoneAfterSave}
-              className='!rounded-[100px] !h-32px !px-16px'
+              className=''
             >
               {t('builder.actions.done', 'Done')}
             </Button>
@@ -337,7 +337,7 @@ const BuildWorkflowModal: React.FC<BuildWorkflowModalProps> = ({ visible, onClos
               loading={saving}
               disabled={!canSave}
               onClick={() => void handleSave()}
-              className='!rounded-[100px] !h-32px !px-16px'
+              className=''
             >
               {saving
                 ? t('builder.actions.saving', 'Saving…')

@@ -54,7 +54,7 @@ const PromoteToStandingModal: React.FC<Props> = ({ visible, teamName, onConfirm,
             onClick={onConfirm}
             disabled={!bothChecked || loading}
             loading={loading}
-            className='!rounded-[100px] !h-32px !px-16px min-w-80px'
+            className='min-w-80px'
             data-testid='promote-to-standing-confirm'
           >
             {t('teams.standing.confirmButton', { defaultValue: 'Promote to Standing' })}

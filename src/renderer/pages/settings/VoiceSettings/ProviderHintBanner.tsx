@@ -103,7 +103,7 @@ const ProviderHintBanner: React.FC<{
       <Button
         type='primary'
         size='small'
-        className='!rounded-[100px] !px-16px !h-32px'
+        className=''
         onClick={handleSwitch}
       >
         {cta}

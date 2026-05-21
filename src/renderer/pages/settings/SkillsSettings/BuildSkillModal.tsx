@@ -277,7 +277,7 @@ const BuildSkillModal: React.FC<BuildSkillModalProps> = ({ visible, onClose, onS
             <Button
               type='primary'
               onClick={handleDoneAfterSave}
-              className='!rounded-[100px] !h-32px !px-16px'
+              className=''
             >
               {t('builder.actions.done')}
             </Button>
@@ -287,7 +287,7 @@ const BuildSkillModal: React.FC<BuildSkillModalProps> = ({ visible, onClose, onS
               loading={saving}
               disabled={!canSave}
               onClick={() => void handleSave()}
-              className='!rounded-[100px] !h-32px !px-16px'
+              className=''
             >
               {saving ? t('builder.actions.saving') : t('builder.actions.save')}
             </Button>

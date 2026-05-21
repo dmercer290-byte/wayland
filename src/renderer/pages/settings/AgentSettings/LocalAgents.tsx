@@ -133,7 +133,7 @@ const LocalAgents: React.FC = () => {
               type='primary'
               size='small'
               icon={<Plus size={14} />}
-              className='!rounded-[100px] !h-32px !px-16px md:!min-w-144px'
+              className='md:!min-w-144px'
               onClick={() => setHubModalVisible(true)}
             >
               {t('settings.agentManagement.installFromMarket')}

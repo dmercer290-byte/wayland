@@ -38,7 +38,7 @@ const AddCustomPathModal: React.FC<AddCustomPathModalProps> = ({
       cancelText={t('common.cancel', { defaultValue: 'Cancel' })}
       okButtonProps={{
         disabled: !customPathName.trim() || !customPathValue.trim(),
-        className: '!rounded-[100px] !h-32px !px-16px',
+        className: '',
       }}
       cancelButtonProps={{ style: { borderRadius: 8 }, className: 'px-16px' }}
       style={{ width: 640 }}

@@ -152,7 +152,7 @@ const CapabilityReviewModal: React.FC<Props> = ({
             onClick={() => onTrustSelected(grants)}
             disabled={trustDisabled}
             loading={loading}
-            className='!rounded-[100px] !h-32px !px-16px min-w-160px'
+            className='min-w-160px'
             data-testid='capability-review-trust'
           >
             {trustLabel}

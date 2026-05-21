@@ -169,7 +169,7 @@ const TeamCreateModal: React.FC<Props> = ({ visible, onClose, onCreated }) => {
             type='primary'
             onClick={handleCreate}
             loading={loading}
-            className='!rounded-[100px] !h-32px !px-16px min-w-88px'
+            className='min-w-88px'
           >
             {t('team.create.confirm', { defaultValue: 'Create Team' })}
           </Button>

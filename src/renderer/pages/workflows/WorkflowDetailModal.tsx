@@ -211,7 +211,7 @@ const WorkflowDetailModal: React.FC<WorkflowDetailModalProps> = ({ entry, onClos
               type='primary'
               icon={<Rocket size={14} />}
               onClick={handleLaunch}
-              className='!rounded-[100px] !h-32px !px-16px'
+              className=''
             >
               {t('actions.launch', 'Launch now')}
             </Button>

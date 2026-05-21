@@ -222,7 +222,7 @@ const AssistantListPanel: React.FC<AssistantListPanelProps> = ({
               <Button
                 type='primary'
                 size='small'
-                className={`!rounded-[100px] ${isMobile ? '!w-full !h-36px' : '!px-16px !h-32px'}`}
+                className={`${isMobile ? '!w-full !h-36px' : '!px-16px !h-32px'}`}
                 icon={<Plus size={14} />}
                 onClick={onCreate}
                 data-testid='btn-create-assistant'

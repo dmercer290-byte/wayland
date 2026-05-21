@@ -117,7 +117,7 @@ const ScanResultsScreen: React.FC<{
         <Button
           type='primary'
           onClick={onImportAllClean}
-          className='!rounded-[100px] !h-32px !px-16px'
+          className=''
         >
           {t('skills.import.actions.importAllClean', { defaultValue: 'Import all clean' })}
         </Button>
@@ -365,7 +365,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ visible, onClose, onImported 
             loading={loading}
             disabled={!canImport}
             onClick={() => void handleImport()}
-            className='!rounded-[100px] !h-32px !px-16px'
+            className=''
           >
             {loading
               ? t('skills.import.actions.importing', { defaultValue: 'Importing…' })

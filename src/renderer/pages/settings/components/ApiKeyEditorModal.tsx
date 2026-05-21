@@ -273,7 +273,7 @@ const ApiKeyEditorModal: React.FC<ApiKeyEditorModalProps> = ({ visible, apiKeys,
           <Button
             type='primary'
             onClick={handleSave}
-            className='!rounded-[100px] !h-32px !px-16px'
+            className=''
           >
             {t('common.confirm')}
           </Button>
