@@ -16,8 +16,8 @@ const HeroConnectCard = ({ onConnected }: Props) => {
 
   return (
     <>
-      <div className='rounded-12px border border-[var(--bg-3)] bg-[var(--bg-2)] p-20px flex flex-col gap-12px'>
-        <h3 className='text-14px font-semibold text-[var(--text-primary)] m-0'>
+      <div className='rounded-12px border border-solid border-[var(--color-border-2)] bg-[var(--color-bg-2)] p-20px flex flex-col gap-12px'>
+        <h3 className='text-14px font-semibold text-[var(--color-text-1)] m-0'>
           {t('settings.providers.heroTitle')}
         </h3>
         <div className='flex gap-8px'>
