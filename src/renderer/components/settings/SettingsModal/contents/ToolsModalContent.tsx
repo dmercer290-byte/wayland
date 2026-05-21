@@ -219,6 +219,19 @@ export const TextToSpeechSettingsSection: React.FC<{
     [onChange]
   );
 
+  const handleTestVoice = useCallback(() => {
+    // Test playback uses window.speechSynthesis regardless of stored provider —
+    // gives users a "does my output device work" sanity check before they commit
+    // to downloading a local model or wiring a hosted provider key.
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(t('settings.textToSpeechTestPhrase', 'Voice check.'));
+    if (typeof config.speed === 'number' && config.speed > 0) {
+      utterance.rate = config.speed;
+    }
+    window.speechSynthesis.speak(utterance);
+  }, [config.speed, t]);
+
   return (
     <div className='px-[12px] md:px-[32px] py-[24px] bg-[var(--color-bg-2)] rd-12px border border-solid border-[var(--color-border-2)]'>
       <div className='flex items-center justify-between gap-12px mb-8px'>
@@ -238,10 +251,15 @@ export const TextToSpeechSettingsSection: React.FC<{
 
       <Form layout='horizontal' labelAlign='left' className='space-y-12px'>
         <Form.Item label={t('settings.textToSpeechProvider')}>
-          <WaylandSelect value={config.provider} onChange={handleProviderChange}>
-            <WaylandSelect.Option value='kokoro-local'>{t('settings.textToSpeechProviderKokoroLocal')}</WaylandSelect.Option>
-            <WaylandSelect.Option value='system-native'>{t('settings.textToSpeechProviderSystemNative')}</WaylandSelect.Option>
-          </WaylandSelect>
+          <div className='flex items-center gap-8px'>
+            <WaylandSelect value={config.provider} onChange={handleProviderChange} className='flex-1'>
+              <WaylandSelect.Option value='kokoro-local'>{t('settings.textToSpeechProviderKokoroLocal')}</WaylandSelect.Option>
+              <WaylandSelect.Option value='system-native'>{t('settings.textToSpeechProviderSystemNative')}</WaylandSelect.Option>
+            </WaylandSelect>
+            <Button size='small' onClick={handleTestVoice}>
+              {t('settings.textToSpeechTestVoice', 'Test voice')}
+            </Button>
+          </div>
         </Form.Item>
 
         <Form.Item label={t('settings.textToSpeechVoice')}>
