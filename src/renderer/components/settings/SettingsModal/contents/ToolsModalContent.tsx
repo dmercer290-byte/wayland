@@ -75,6 +75,7 @@ export const normalizeSpeechToTextConfig = (config?: SpeechToTextConfig): Speech
 });
 
 // Whisper model asset descriptor — model + binary are both required for local STT.
+// TODO(voice): destPath + sha256 fields are empty; VoiceAssetManager wiring needs follow-up.
 const WHISPER_MODEL_ASSETS: Record<string, VoiceAsset> = {
   base: {
     id: 'whisper-ggml-base',
@@ -138,12 +139,20 @@ const WhisperLocalDownloadControl: React.FC<{
       <Form.Item label={t('settings.speechToTextDownloadModel')}>
         <div className='flex flex-col gap-8px'>
           {downloadState === 'downloading' ? (
-            <div className='flex items-center gap-8px'>
-              <Progress percent={0} animation className='flex-1' />
-              <Button size='mini' onClick={handleCancel}>
-                {t('settings.speechToTextCancelDownload')}
-              </Button>
-            </div>
+            <>
+              <div className='flex items-center gap-8px'>
+                <Progress percent={0} animation className='flex-1' />
+                <Button size='mini' onClick={handleCancel}>
+                  {t('settings.speechToTextCancelDownload')}
+                </Button>
+              </div>
+              <span className='text-12px text-t-tertiary'>
+                {t(
+                  'settings.speechToTextDownloadProgressNotReported',
+                  'Downloading… (progress reporting coming soon)'
+                )}
+              </span>
+            </>
           ) : (
             <Button type='outline' onClick={handleDownload} size='small'>
               {t('settings.speechToTextDownloadModel')}
