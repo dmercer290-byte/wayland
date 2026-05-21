@@ -156,7 +156,11 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
   const [customCronExpr, setCustomCronExpr] = useState<string>('');
 
   const isEditMode = !!editJob;
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>('new_conversation');
+  // Default to 'existing' (ongoing conversation) — scheduled tasks built
+  // on previous runs are the dominant use case, so leading with that
+  // reduces clicks for the common path. New conversation stays one
+  // toggle away.
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>('existing');
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Workflow-source state (step #6 of the Skills/Workflows split): when
@@ -257,7 +261,7 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
       setTime('09:00');
       setWeekday('MON');
       setCustomCronExpr('');
-      setExecutionMode('new_conversation');
+      setExecutionMode('existing');
       setAdvancedOpen(false);
       setModelId(undefined);
       setConfigOptions(undefined);
@@ -403,15 +407,18 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
 
   const executionModeOptions = useMemo(
     () => [
-      {
-        value: 'new_conversation' as const,
-        label: t('cron.page.form.newConversation'),
-        description: t('cron.detail.executionModeDescriptionNew'),
-      },
+      // Ongoing-conversation first per Sean's 2026-05-21 directive —
+      // 'existing' is the default, so the radio order mirrors the
+      // default state (selected option leftmost).
       {
         value: 'existing' as const,
         label: t('cron.page.form.existingConversation'),
         description: t('cron.detail.executionModeDescriptionExisting'),
+      },
+      {
+        value: 'new_conversation' as const,
+        label: t('cron.page.form.newConversation'),
+        description: t('cron.detail.executionModeDescriptionNew'),
       },
     ],
     [t]

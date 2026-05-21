@@ -87,14 +87,25 @@ const WorkflowDetailModal: React.FC<WorkflowDetailModalProps> = ({ entry, onClos
       .finally(() => setLoading(false));
   }, [entry]);
 
-  const handleLaunch = () => {
-    // eslint-disable-next-line no-alert
-    window.alert(
-      t(
-        'launch.placeholder',
-        'Launch wiring is in flight. Soon you will pick an engine (Wayland Core / Gemini / Claude / Codex), and the workflow will load as the agent\'s first directive in a fresh chat.',
-      ),
-    );
+  const handleLaunch = async () => {
+    if (!entry) return;
+    // Pull the workflow body from the SkillLibrary; fall back to the
+    // entry's description if the body file is missing (e.g. a
+    // cli-discovered workflow whose source vanished). Then route the
+    // user to /guid with the body pre-filled as a pendingPrompt.
+    // GuidPage's reset hook reads location.state.pendingPrompt and
+    // seeds the textarea with it instead of clearing the field. The
+    // user picks engine + send from there — no separate engine picker
+    // modal needed for this first cut.
+    let prompt: string | null = null;
+    try {
+      prompt = await ipcBridge.skills.getBody.invoke({ name: entry.name });
+    } catch {
+      prompt = null;
+    }
+    const pendingPrompt = prompt && prompt.length > 0 ? prompt : entry.description;
+    onClose();
+    void navigate('/guid', { state: { pendingPrompt } });
   };
 
   const handleSchedule = () => {

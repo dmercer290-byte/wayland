@@ -92,7 +92,14 @@
 .cardFeatured {
   border-color: rgb(var(--primary-6) / 0.5);
   background: linear-gradient(180deg, var(--color-fill-1) 0%, rgb(var(--primary-6) / 0.10) 100%);
-  padding-right: 90px; /* reserve space so the pill never overlaps text */
+}
+
+/* Reserve right padding ONLY on the title row of featured cards so the
+   FEATURED pill never crashes into the title text. Description and body
+   get the full card width back (Sean's 'descriptions need to be full
+   width' fix). */
+.cardFeatured .titleRow {
+  padding-right: 90px;
 }
 
 .cardFeatured:hover {

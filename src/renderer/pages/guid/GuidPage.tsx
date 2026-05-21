@@ -397,11 +397,18 @@ const GuidPage: React.FC = () => {
 
   // Reset guid-local UI state before paint so same-route navigations do not
   // briefly show the previous draft or preset assistant layout.
+  //
+  // `pendingPrompt` carries an inbound directive (e.g. the body of a
+  // workflow the user clicked "Launch" on) so the textarea opens
+  // pre-filled. The Workflows page sets this via React Router's location
+  // state when handling the Launch button. Other entry points (typed
+  // input, intent prompts) clear the field as before.
   useLayoutEffect(() => {
-    guidInput.setInput('');
+    const state = location.state as { workspace?: string; pendingPrompt?: string } | null;
+    guidInput.setInput(state?.pendingPrompt ?? '');
     guidInput.setFiles([]);
     guidInput.setLoading(false);
-    if (!(location.state as { workspace?: string } | null)?.workspace) {
+    if (!state?.workspace) {
       guidInput.setDir('');
     }
     setIsDescriptionExpanded(false);

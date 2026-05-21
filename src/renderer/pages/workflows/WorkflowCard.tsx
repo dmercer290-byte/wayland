@@ -11,7 +11,6 @@
  * description clamped so cards stay even-height in a responsive grid.
  */
 
-import { Workflow as WorkflowIcon } from 'lucide-react';
 import React, { useCallback } from 'react';
 import type { SkillIndexEntry } from '@/common/types/skillTypes';
 import { toDisplayName } from '@renderer/pages/settings/SkillsSettings/displayName';
@@ -62,9 +61,6 @@ const WorkflowCard: React.FC<WorkflowCardProps> = ({ entry, onClick, featured = 
         </span>
       )}
       <div className={styles.header}>
-        <div className={styles.iconWrap}>
-          <WorkflowIcon size={18} />
-        </div>
         <div className={styles.body}>
           <div className={styles.titleRow}>
             <span
