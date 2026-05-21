@@ -98,8 +98,23 @@ const AssistantListPanel: React.FC<AssistantListPanelProps> = ({
   const renderSourceTag = (assistant: AssistantListItem) => {
     const source = getAssistantSource(assistant);
 
-    if (source === 'builtin' || source === 'extension') {
+    if (source === 'builtin') {
       return null;
+    }
+
+    if (source === 'extension') {
+      // Extension assistants are always-on (the toggle is disabled). Surface
+      // that explicitly so the dim toggle reads as 'managed by extension'
+      // rather than 'broken color'.
+      return (
+        <Tag
+          size='small'
+          bordered={false}
+          className='!text-11px !leading-16px !px-8px !py-1px !rounded-8px !bg-[var(--color-fill-2)] !text-t-tertiary uppercase tracking-wider'
+        >
+          {t('settings.assistantSourceExtension', { defaultValue: 'From extension' })}
+        </Tag>
+      );
     }
 
     return (
