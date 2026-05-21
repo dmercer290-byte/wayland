@@ -1,8 +1,13 @@
 /* Arco Design custom overrides - non-theme related */
 
-/* ---------- Typography (Forge Suite brand: Inter) ---------- */
+/* ---------- Typography (UI System v1: Sora display + IBM Plex Mono) ----------
+   Sora is the primary display face. Inter / system fonts stay in the fallback
+   chain so the renderer never goes unstyled when the Google Fonts CDN is
+   unreachable on first launch. IBM Plex Mono powers eyebrows, chips, code,
+   and any monospace surface. */
 :root {
-  --forge-font: 'Inter Variable', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --forge-font: 'Sora', 'Inter Variable', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --forge-mono-font: 'IBM Plex Mono', ui-monospace, SFMono-Regular, 'Menlo', 'Monaco', 'Consolas', monospace;
 }
 
 html,
@@ -13,7 +18,8 @@ body {
 }
 
 /* Arco Design uses its own CSS var for the font stack; override it so all
-   Arco components (Button, Input, Modal, etc.) inherit Inter automatically. */
+   Arco components (Button, Input, Modal, etc.) inherit the Forge font
+   automatically. */
 :root,
 body,
 .arco-design {
