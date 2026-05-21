@@ -17,7 +17,7 @@ const Card: React.FC<CardProps> = ({ title, titleIcon: Icon, statusBadge, action
   return (
     <div
       className={classNames(
-        'rounded-12px bg-[var(--color-bg-2)] border border-[var(--color-border-2)] overflow-hidden shadow-[var(--shadow-1)]',
+        'rounded-12px bg-[var(--color-bg-2)] border-2 border-solid border-[var(--color-border-2)] overflow-hidden shadow-[var(--shadow-1)]',
         className
       )}
     >
