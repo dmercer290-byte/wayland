@@ -23,12 +23,10 @@ const ImageGenSettings = React.lazy(() => import('@renderer/pages/settings/Image
 const McpSettings = React.lazy(() => import('@renderer/pages/settings/McpSettings'));
 const NotificationsSettings = React.lazy(() => import('@renderer/pages/settings/NotificationsSettings'));
 const ModelsSettings = React.lazy(() => import('@renderer/pages/settings/ModelsSettings'));
-const ProvidersSettings = React.lazy(() => import('@renderer/pages/settings/ProvidersSettings'));
 const SkillsSettings = React.lazy(() => import('@renderer/pages/settings/SkillsSettings'));
 const StorageSettings = React.lazy(() => import('@renderer/pages/settings/StorageSettings'));
 const WCoreSettings = React.lazy(() => import('@renderer/pages/settings/WCoreSettings'));
 const GeminiSettings = React.lazy(() => import('@renderer/pages/settings/GeminiSettings'));
-const ModeSettings = React.lazy(() => import('@renderer/pages/settings/ModeSettings'));
 const SystemSettings = React.lazy(() => import('@renderer/pages/settings/SystemSettings'));
 const VoiceSettings = React.lazy(() => import('@renderer/pages/settings/VoiceSettings'));
 const WebuiSettings = React.lazy(() => import('@renderer/pages/settings/WebuiSettings'));
@@ -86,12 +84,9 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
             <Route path='/settings/skills' element={withRouteFallback(SkillsSettings)} />
             {/* AI MODELS */}
             <Route path='/settings/models' element={withRouteFallback(ModelsSettings)} />
-            {/* Legacy `/settings/providers` keeps rendering the legacy
-              ProvidersSettings page so existing deep-links don't 404 while
-              Packet 3B is still pending. The sidebar entry now points at
-              `/settings/models`; the legacy route is reachable only by direct
-              URL until 3B's migration deletes it. */}
-            <Route path='/settings/providers' element={withRouteFallback(ProvidersSettings)} />
+            {/* Legacy `/settings/providers` redirects to the new Models page —
+              the old ProvidersSettings tree was deleted in Packet 3B. */}
+            <Route path='/settings/providers' element={<Navigate to='/settings/models' replace />} />
             <Route path='/settings/images' element={withRouteFallback(ImageGenSettings)} />
             <Route path='/settings/voice' element={withRouteFallback(VoiceSettings)} />
             <Route path='/settings/wcore' element={withRouteFallback(WCoreSettings)} />
@@ -150,7 +145,6 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
 
 // Reference unused legacy components so dynamic imports stay valid for tooling
 void GeminiSettings;
-void ModeSettings;
 void AgentSettings;
 
 export default PanelRoute;

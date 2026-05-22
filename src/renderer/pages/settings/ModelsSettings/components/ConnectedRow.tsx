@@ -21,7 +21,6 @@ const ERROR_KEY: Record<ConnectError, string> = {
   offline: 'errorOffline',
   unrecognized: 'errorUnrecognized',
   'no-models': 'errorNoModels',
-  'legacy-mirror-failed': 'errorLegacyMirrorFailed',
   unknown: 'errorUnknown',
 };
 

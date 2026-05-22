@@ -52,7 +52,6 @@ import { initStorageBridge } from '@process/storage/storageIpc';
 import { initNicknamesBridge } from '@process/storage/nicknamesIpc';
 import { initSyncIpc } from '@process/sync/syncIpc';
 import type { TeamSessionService } from '@process/team/TeamSessionService';
-import { initProvidersIpc } from '@process/providers/ipc/providersIpc';
 import { initModelRegistryIpc } from '@process/providers/ipc/modelRegistryIpc';
 
 export interface BridgeDependencies {
@@ -106,7 +105,6 @@ export function initAllBridges(deps: BridgeDependencies): void {
   initRemoteAgentBridge();
   initHubBridge();
   initTeamBridge(deps.teamSessionService);
-  void initProvidersIpc();
   // A DB / migration failure during registration would otherwise become an
   // unhandled rejection and the `modelRegistry` namespace would silently never
   // register — log it so the failure is at least visible.
@@ -172,7 +170,6 @@ export {
   initWeixinLoginBridge,
   initWorkspaceSnapshotBridge,
 };
-export { initProvidersIpc } from '@process/providers/ipc/providersIpc';
 export { initModelRegistryIpc } from '@process/providers/ipc/modelRegistryIpc';
 export { disposeAllSnapshots } from './workspaceSnapshotBridge';
 export { disposeAllTeamSessions } from './teamBridge';

@@ -40,10 +40,12 @@
 import { ipcBridge } from '@/common';
 import type {
   IModelRegistryCatalogView,
+  IModelRegistryChatStartPayload,
   IModelRegistryConnectResult,
   IModelRegistryCreds,
   IModelRegistryDetectedKey,
   IModelRegistryProviderView,
+  IModelRegistryResolveForChatStartResult,
   IModelRegistryTestResult,
 } from '@/common/adapter/ipcBridge';
 import { getDatabase } from '@process/services/database';
@@ -59,7 +61,7 @@ import { KeyDiscovery } from '../detection/KeyDiscovery';
 import { ModelsDevClient } from '../enrichment/ModelsDevClient';
 import type { ModelsDevRegistry } from '../enrichment/modelsDevSchema';
 import { ProviderRepository } from '../storage/ProviderRepository';
-import { createLegacyModelConfigBridge, type LegacyModelConfigBridge } from './legacyModelConfigBridge';
+import { runLegacyModelConfigMigration } from '../migration/legacyModelConfigMigration';
 import { ProcessConfig } from '@process/utils/initStorage';
 
 // ─── Provider classification ──────────────────────────────────────────────────
@@ -164,13 +166,6 @@ export type ModelRegistryDeps = {
     enumerable: boolean;
     underlyingProviderId: ProviderId;
   };
-  /**
-   * The legacy `model.config` write-through bridge — mirrored on
-   * connect / rekey / disconnect so the home-screen chat-start path
-   * (which still reads `model.config`) finds a provider connected only
-   * through the new Models page. Packet 3B deletes this entirely.
-   */
-  legacyBridge: LegacyModelConfigBridge;
 };
 
 /** The 10 `modelRegistry` handler functions, keyed by contract method name. */
@@ -185,6 +180,10 @@ export type ModelRegistryHandlers = {
   disconnect: (p: { providerId: ProviderId }) => Promise<{ ok: boolean }>;
   rekey: (p: { providerId: ProviderId; creds: IModelRegistryCreds }) => Promise<IModelRegistryConnectResult>;
   curatedForAgent: (p: { agentKey: string }) => Promise<CuratedModel[]>;
+  resolveForChatStart: (p: {
+    providerId: ProviderId;
+    modelId: string;
+  }) => Promise<IModelRegistryResolveForChatStartResult>;
 };
 
 // ─── Handler factory ──────────────────────────────────────────────────────────
@@ -363,8 +362,6 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
       // connected via auto-discovery then rekeyed with an explicit key (or
       // vice versa) does not keep a stale label.
       repo.updateRegistryProviderConnectedVia(providerId, connectedViaLabel(creds, providerId));
-      const mirrored = await mirrorToLegacy(providerId, resolved);
-      if (!mirrored) return { ok: false, error: 'legacy-mirror-failed' };
       return { ok: true };
     }
 
@@ -385,47 +382,7 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
       return { ok: false, error: 'unknown' };
     }
 
-    const mirrored = await mirrorToLegacy(providerId, resolved);
-    if (!mirrored) return { ok: false, error: 'legacy-mirror-failed' };
     return { ok: true };
-  }
-
-  /**
-   * Mirror a successful connect / rekey into the legacy `model.config` store
-   * via the injected `legacyBridge`. The model list passed to the bridge is
-   * read straight off the persisted catalog so the home picker can resolve
-   * any model the user selects, not just the curated subset.
-   *
-   * Bridge failures DO NOT roll back the registry success — the registry row
-   * keeps its `connected` state and credentials — but the failure is surfaced
-   * to the UI by flipping the row's state to `'error'` with the
-   * `'legacy-mirror-failed'` `ConnectError`. Without this signal the user
-   * would see a green provider in Models settings that never reaches the
-   * home chat-start picker. Packet 3B's migration deletes the bridge.
-   *
-   * Returns `true` on a successful mirror, `false` on failure — the caller
-   * already wrote the `connected` row, so it does NOT need to update the
-   * state on success; it only needs to flip to `error` on failure.
-   */
-  async function mirrorToLegacy(
-    providerId: ProviderId,
-    resolved: { key: string } | { fields: Record<string, string> }
-  ): Promise<boolean> {
-    try {
-      const catalog = repo.getRegistryCatalog(providerId);
-      const modelIds = catalog.map((m) => m.id);
-      await deps.legacyBridge.writeProvider(providerId, resolved, modelIds);
-      return true;
-    } catch (error) {
-      console.warn('[modelRegistryIpc] legacyBridge.writeProvider failed:', error);
-      try {
-        repo.updateRegistryProviderState(providerId, 'error', 'legacy-mirror-failed');
-      } catch {
-        // The registry update itself failing is the worst case; nothing useful
-        // we can do beyond log. Still return false so the caller surfaces it.
-      }
-      return false;
-    }
   }
 
   return {
@@ -525,14 +482,6 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
         if (stored.status !== 'ok') return { ok: false };
         const creds = toTestCreds(stored.creds);
         const built = await buildAndPersistCatalog(providerId, creds);
-        if (built.ok) {
-          // The catalog changed — mirror the new model list to the legacy
-          // store so the home picker resolves any newly-added model id.
-          // A bridge failure flips the registry row to `error` inside
-          // `mirrorToLegacy` so the Models page surfaces it.
-          const mirrored = await mirrorToLegacy(providerId, creds);
-          if (!mirrored) return { ok: false };
-        }
         return { ok: built.ok };
       } catch {
         return { ok: false };
@@ -542,16 +491,6 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
     async disconnect({ providerId }): Promise<{ ok: boolean }> {
       try {
         repo.deleteRegistryProvider(providerId);
-        // The legacy bridge mirror must follow the registry's lifecycle — a
-        // disconnected provider should not linger in `model.config`. The
-        // bridge's `removeProvider` is a no-op for rows it does not own, so
-        // a legacy `ModelModalContent`-created row with the same `platform`
-        // is left alone.
-        try {
-          await deps.legacyBridge.removeProvider(providerId);
-        } catch (error) {
-          console.warn('[modelRegistryIpc] legacyBridge.removeProvider failed:', error);
-        }
         return { ok: true };
       } catch {
         return { ok: false };
@@ -562,6 +501,27 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
       try {
         if (!repo.getRegistryProvider(providerId)) return { ok: false, error: 'unrecognized' };
         return await connectOrRekey(providerId, creds, true);
+      } catch {
+        return { ok: false, error: 'unknown' };
+      }
+    },
+
+    async resolveForChatStart({ providerId, modelId }): Promise<IModelRegistryResolveForChatStartResult> {
+      try {
+        const provider = repo.getRegistryProvider(providerId);
+        if (!provider) return { ok: false, error: 'not-connected' };
+        const stored = repo.getRegistryProviderCreds(providerId);
+        if (stored.status === 'undecryptable') return { ok: false, error: 'undecryptable' };
+        if (stored.status !== 'ok') return { ok: false, error: 'not-connected' };
+
+        // Build the chat-start payload. The main-process dispatch
+        // (`wcore/envBuilder.ts`, `GeminiAgentManager`, ACP managers) reads
+        // these fields verbatim — `platform` chooses the dispatcher arm,
+        // `apiKey` + `baseUrl` feed the spawn config, and (for Bedrock) the
+        // `bedrockConfig` block carries the cloud creds.
+        const payload = buildChatStartPayload(providerId, modelId, stored.creds);
+        if (!payload) return { ok: false, error: 'unsupported' };
+        return { ok: true, provider: payload };
       } catch {
         return { ok: false, error: 'unknown' };
       }
@@ -641,6 +601,176 @@ function toTestCreds(stored: Record<string, unknown>): { key: string } | { field
   return { fields: {} };
 }
 
+// ─── Chat-start mapping ───────────────────────────────────────────────────────
+
+/**
+ * Map a new-registry `ProviderId` to the legacy `IProvider.platform` string
+ * the main-process dispatch (`wcore/envBuilder.ts` `mapProvider()`,
+ * `GeminiAgentManager`, ACP managers) recognizes. Mirrors what the deleted
+ * Wave 3A `legacyModelConfigBridge` did — kept here so chat-start can keep
+ * speaking the dispatcher's protocol without revising every consumer.
+ */
+const CHAT_START_PLATFORM: Partial<Record<ProviderId, string>> = {
+  anthropic: 'anthropic',
+  openai: 'openai',
+  'google-gemini': 'gemini',
+  'aws-bedrock': 'bedrock',
+  vertex: 'gemini-vertex-ai',
+  // The OpenAI-compatible long tail — all dispatched as the `openai` protocol
+  // via their stored `baseUrl`. `mapProvider()` falls through to OpenAI for an
+  // unknown platform string, so a plain `openai-compatible` label is honest
+  // and reaches the right protocol.
+  openrouter: 'openai-compatible',
+  groq: 'openai-compatible',
+  xai: 'openai-compatible',
+  mistral: 'openai-compatible',
+  cohere: 'openai-compatible',
+  perplexity: 'openai-compatible',
+  together: 'openai-compatible',
+  fireworks: 'openai-compatible',
+  cerebras: 'openai-compatible',
+  replicate: 'openai-compatible',
+  huggingface: 'openai-compatible',
+  nvidia: 'openai-compatible',
+  anyscale: 'openai-compatible',
+  deepseek: 'openai-compatible',
+  moonshot: 'openai-compatible',
+  qwen: 'openai-compatible',
+  baichuan: 'openai-compatible',
+  lingyiwanwu: 'openai-compatible',
+  'zhipu-glm': 'openai-compatible',
+  minimax: 'openai-compatible',
+  stability: 'openai-compatible',
+  deepgram: 'openai-compatible',
+  assemblyai: 'openai-compatible',
+  elevenlabs: 'openai-compatible',
+  'openai-compatible': 'openai-compatible',
+  // Azure intentionally absent — the legacy dispatch has no Azure arm; a
+  // future Azure chat-start will need its own dispatcher work.
+};
+
+/** Canonical base URL per provider. A user-saved custom URL overrides this. */
+const CHAT_START_BASE_URL: Partial<Record<ProviderId, string>> = {
+  anthropic: 'https://api.anthropic.com',
+  openai: 'https://api.openai.com/v1',
+  'google-gemini': 'https://generativelanguage.googleapis.com',
+  openrouter: 'https://openrouter.ai/api/v1',
+  groq: 'https://api.groq.com/openai/v1',
+  xai: 'https://api.x.ai/v1',
+  mistral: 'https://api.mistral.ai/v1',
+  cohere: 'https://api.cohere.com/v1',
+  perplexity: 'https://api.perplexity.ai',
+  together: 'https://api.together.xyz/v1',
+  fireworks: 'https://api.fireworks.ai/inference/v1',
+  cerebras: 'https://api.cerebras.ai/v1',
+  replicate: 'https://api.replicate.com/v1',
+  huggingface: 'https://huggingface.co',
+  nvidia: 'https://integrate.api.nvidia.com/v1',
+  anyscale: 'https://api.endpoints.anyscale.com/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+  moonshot: 'https://api.moonshot.cn/v1',
+  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  baichuan: 'https://api.baichuan-ai.com/v1',
+  lingyiwanwu: 'https://api.lingyiwanwu.com/v1',
+  'zhipu-glm': 'https://open.bigmodel.cn/api/paas/v4',
+  minimax: 'https://api.minimax.chat/v1',
+  stability: 'https://api.stability.ai/v1',
+  deepgram: 'https://api.deepgram.com/v1',
+  assemblyai: 'https://api.assemblyai.com/v2',
+  elevenlabs: 'https://api.elevenlabs.io/v1',
+};
+
+/** Short human label per provider — shown in the home-picker button text. */
+const CHAT_START_NAME: Partial<Record<ProviderId, string>> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  'google-gemini': 'Google Gemini',
+  'aws-bedrock': 'AWS Bedrock',
+  vertex: 'Google Vertex',
+  openrouter: 'OpenRouter',
+  groq: 'Groq',
+  xai: 'xAI',
+  mistral: 'Mistral',
+  cohere: 'Cohere',
+  perplexity: 'Perplexity',
+  together: 'Together AI',
+  fireworks: 'Fireworks AI',
+  cerebras: 'Cerebras',
+  replicate: 'Replicate',
+  huggingface: 'Hugging Face',
+  nvidia: 'NVIDIA',
+  anyscale: 'Anyscale',
+  deepseek: 'DeepSeek',
+  moonshot: 'Moonshot',
+  qwen: 'Qwen',
+  baichuan: 'Baichuan',
+  lingyiwanwu: 'Lingyi Wanwu',
+  'zhipu-glm': 'Zhipu GLM',
+  minimax: 'MiniMax',
+  stability: 'Stability AI',
+  deepgram: 'Deepgram',
+  assemblyai: 'AssemblyAI',
+  elevenlabs: 'ElevenLabs',
+  'openai-compatible': 'OpenAI Compatible',
+};
+
+/**
+ * Build the chat-start payload for a curated model resolution. Returns `null`
+ * for unsupported providers (no dispatcher arm) — the caller surfaces that as
+ * `'unsupported'`.
+ */
+function buildChatStartPayload(
+  providerId: ProviderId,
+  modelId: string,
+  creds: Record<string, unknown>
+): IModelRegistryChatStartPayload | null {
+  const platform = CHAT_START_PLATFORM[providerId];
+  if (!platform) return null;
+
+  const payload: IModelRegistryChatStartPayload = {
+    id: providerId,
+    providerId,
+    name: CHAT_START_NAME[providerId] ?? providerId,
+    platform,
+    modelId,
+    baseUrl: '',
+    apiKey: '',
+  };
+
+  // Cloud providers carry their creds in `fields`; api-key providers carry a
+  // `key` (and optionally a user-overridden `baseUrl`).
+  if (providerId === 'aws-bedrock') {
+    const fields = creds.fields;
+    if (typeof fields === 'object' && fields !== null && !Array.isArray(fields)) {
+      const f = fields as Record<string, unknown>;
+      const accessKeyId = typeof f.accessKeyId === 'string' ? f.accessKeyId : '';
+      const secretAccessKey = typeof f.secretAccessKey === 'string' ? f.secretAccessKey : '';
+      const region = typeof f.region === 'string' ? f.region : '';
+      if (accessKeyId && secretAccessKey && region) {
+        payload.bedrockConfig = { authMethod: 'accessKey', accessKeyId, secretAccessKey, region };
+      }
+    }
+    return payload;
+  }
+
+  if (providerId === 'vertex' || providerId === 'azure') {
+    // No legacy dispatcher arm for Azure; Vertex's legacy arm read credentials
+    // from outside the IProvider row (gcloud ADC). The chat-start payload is
+    // returned in case the caller has its own handling, but the credential
+    // fields are deliberately not exposed.
+    return payload;
+  }
+
+  // Standard API-key provider.
+  const apiKey = typeof creds.key === 'string' ? (creds.key as string) : '';
+  if (!apiKey) return null;
+
+  const customBaseUrl = typeof creds.baseUrl === 'string' ? (creds.baseUrl as string) : '';
+  payload.apiKey = apiKey;
+  payload.baseUrl = customBaseUrl || CHAT_START_BASE_URL[providerId] || '';
+  return payload;
+}
+
 // ─── IPC registration ─────────────────────────────────────────────────────────
 
 let _repo: ProviderRepository | null = null;
@@ -656,14 +786,6 @@ async function buildProductionDeps(): Promise<ModelRegistryDeps> {
   const connectionTester = new ConnectionTester();
   const modelsDevClient = new ModelsDevClient();
 
-  const legacyBridge = createLegacyModelConfigBridge({
-    // `ProcessConfig.get`'s return type is `unknown`; the bridge re-validates.
-    get: (key): Promise<unknown> => ProcessConfig.get(key) as Promise<unknown>,
-    set: async (key, value): Promise<void> => {
-      await ProcessConfig.set(key, value);
-    },
-  });
-
   return {
     repo: _repo,
     keyDiscovery: {
@@ -678,8 +800,27 @@ async function buildProductionDeps(): Promise<ModelRegistryDeps> {
     },
     makeApiSource: (providerId, apiKey) => new ApiProviderSource(providerId, apiKey),
     makeCliSource: (agentKey) => new CliAgentSource(agentKey),
-    legacyBridge,
   };
+}
+
+/**
+ * One-time legacy-config → model-registry migration (Packet 3B). Runs once,
+ * guarded by a `ProcessConfig` flag. On any subsequent boot the migration
+ * is a no-op. Failures are caught and logged inside the migration — they
+ * never block IPC registration.
+ */
+async function runStartupMigration(repo: ProviderRepository): Promise<void> {
+  await runLegacyModelConfigMigration({
+    store: {
+      get: (key) => ProcessConfig.get(key) as Promise<unknown>,
+      set: async (key, value) => {
+        // `ProcessConfig.set` is typed against the full `IConfigStorageRefer`
+        // refer; the migration's narrow union of keys is a strict subset.
+        await ProcessConfig.set(key as never, value as never);
+      },
+    },
+    repo,
+  });
 }
 
 /**
@@ -689,6 +830,18 @@ async function buildProductionDeps(): Promise<ModelRegistryDeps> {
  */
 export async function initModelRegistryIpc(): Promise<void> {
   const deps = await buildProductionDeps();
+  // Run the one-time legacy-config migration BEFORE registering the IPC
+  // handlers so the very first `modelRegistry.list()` call returns migrated
+  // providers (not an empty list followed by a later populated one).
+  if (_repo) {
+    try {
+      await runStartupMigration(_repo);
+    } catch (error) {
+      // The migration is itself defensive — this catch is the belt-and-braces
+      // outer guard so a thrown migration cannot abort IPC registration.
+      console.warn('[modelRegistry] Legacy-config migration failed:', error);
+    }
+  }
   const h = createModelRegistryHandlers(deps);
 
   ipcBridge.modelRegistry.detectKeys.provider(() => h.detectKeys());
@@ -701,6 +854,7 @@ export async function initModelRegistryIpc(): Promise<void> {
   ipcBridge.modelRegistry.disconnect.provider((payload) => h.disconnect(payload));
   ipcBridge.modelRegistry.rekey.provider((payload) => h.rekey(payload));
   ipcBridge.modelRegistry.curatedForAgent.provider((payload) => h.curatedForAgent(payload));
+  ipcBridge.modelRegistry.resolveForChatStart.provider((payload) => h.resolveForChatStart(payload));
 }
 
 /** The model-registry repository instance, available after `initModelRegistryIpc`. */

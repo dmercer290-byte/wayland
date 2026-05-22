@@ -1025,7 +1025,6 @@
       "errorCloud": "已识别 {{provider}} — 该提供商需要多个字段。请打开“浏览”输入完整凭据。",
       "errorAmbiguous": "无法判断此密钥属于哪个提供商。请打开“浏览”并选择你的提供商。",
       "errorNoModels": "{{provider}} 已连接但未返回任何模型。请在“管理”中尝试刷新。",
-      "errorLegacyMirrorFailed": "已连接，但 {{provider}} 未能保存到聊天启动。请打开管理并尝试刷新。",
       "errorUnknown": "无法连接到 {{provider}}，请重试。"
     },
     "detected": {
@@ -1046,7 +1045,6 @@
       "errorOffline": "无法连接提供商",
       "errorUnrecognized": "密钥无法识别",
       "errorNoModels": "未返回模型",
-      "errorLegacyMirrorFailed": "未能保存到聊天启动",
       "errorUnknown": "连接问题",
       "via": {
         "apiKey": "API 密钥",
@@ -1104,7 +1102,6 @@
       "errorOffline": "无法连接 {{provider}}——你似乎处于离线状态。请检查网络后重试。",
       "errorUnrecognized": "无法为 {{provider}} 识别该密钥。",
       "errorNoModels": "{{provider}} 接受了密钥但未返回任何模型。请尝试刷新。",
-      "errorLegacyMirrorFailed": "{{provider}} 已更新，但未能保存到聊天启动。请尝试刷新。",
       "errorUnknown": "无法更新 {{provider}}，请重试。"
     },
     "browse": {
@@ -1132,7 +1129,6 @@
       "errorOffline": "无法连接 {{provider}}——你似乎处于离线状态。请检查网络连接后重试。",
       "errorUnrecognized": "该密钥未被 {{provider}} 识别。请检查密钥后重试。",
       "errorNoModels": "{{provider}} 已连接，但未返回任何模型。请在“管理”中尝试刷新。",
-      "errorLegacyMirrorFailed": "已连接，但 {{provider}} 未能保存到聊天启动。请打开管理并尝试刷新。",
       "errorUnknown": "无法连接到 {{provider}}。请重试。"
     },
     "cloud": {
@@ -1178,7 +1174,6 @@
       "errorOffline": "无法连接 {{provider}}——你似乎处于离线状态。请检查网络连接后重试。",
       "errorUnrecognized": "这些凭据不完整或未被 {{provider}} 接受。请检查每个字段。",
       "errorNoModels": "{{provider}} 已连接，但未返回任何模型。请在“管理”中尝试刷新。",
-      "errorLegacyMirrorFailed": "已连接，但 {{provider}} 未能保存到聊天启动。请打开管理并尝试刷新。",
       "errorUnknown": "无法连接到 {{provider}}。请重试。"
     },
     "homePicker": {

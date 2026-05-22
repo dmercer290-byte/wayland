@@ -1026,7 +1026,6 @@
       "errorCloud": "已辨識 {{provider}} — 該提供商需要多個欄位。請開啟「瀏覽」輸入完整憑證。",
       "errorAmbiguous": "無法判斷此金鑰屬於哪個提供商。請開啟「瀏覽」並選擇你的提供商。",
       "errorNoModels": "{{provider}} 已連接但未回傳任何模型。請在「管理」中嘗試重新整理。",
-      "errorLegacyMirrorFailed": "已連線，但 {{provider}} 未能儲存至聊天啟動。請開啟管理並嘗試重新整理。",
       "errorUnknown": "無法連接到 {{provider}}，請重試。"
     },
     "detected": {
@@ -1047,7 +1046,6 @@
       "errorOffline": "無法連接提供商",
       "errorUnrecognized": "金鑰無法辨識",
       "errorNoModels": "未回傳模型",
-      "errorLegacyMirrorFailed": "未能儲存至聊天啟動",
       "errorUnknown": "連接問題",
       "via": {
         "apiKey": "API 金鑰",
@@ -1105,7 +1103,6 @@
       "errorOffline": "無法連線 {{provider}}——你似乎處於離線狀態。請檢查網路後重試。",
       "errorUnrecognized": "無法為 {{provider}} 辨識該金鑰。",
       "errorNoModels": "{{provider}} 接受了金鑰但未傳回任何模型。請嘗試重新整理。",
-      "errorLegacyMirrorFailed": "{{provider}} 已更新，但未能儲存至聊天啟動。請嘗試重新整理。",
       "errorUnknown": "無法更新 {{provider}}，請重試。"
     },
     "browse": {
@@ -1133,7 +1130,6 @@
       "errorOffline": "無法連接 {{provider}}——你似乎處於離線狀態。請檢查網路連接後重試。",
       "errorUnrecognized": "該金鑰未被 {{provider}} 識別。請檢查金鑰後重試。",
       "errorNoModels": "{{provider}} 已連接，但未傳回任何模型。請在「管理」中嘗試重新整理。",
-      "errorLegacyMirrorFailed": "已連線，但 {{provider}} 未能儲存至聊天啟動。請開啟管理並嘗試重新整理。",
       "errorUnknown": "無法連接到 {{provider}}。請重試。"
     },
     "cloud": {
@@ -1179,7 +1175,6 @@
       "errorOffline": "無法連接 {{provider}}——你似乎處於離線狀態。請檢查網路連接後重試。",
       "errorUnrecognized": "這些憑證不完整或未被 {{provider}} 接受。請檢查每個欄位。",
       "errorNoModels": "{{provider}} 已連接，但未傳回任何模型。請在「管理」中嘗試重新整理。",
-      "errorLegacyMirrorFailed": "已連線，但 {{provider}} 未能儲存至聊天啟動。請開啟管理並嘗試重新整理。",
       "errorUnknown": "無法連接到 {{provider}}。請重試。"
     },
     "homePicker": {

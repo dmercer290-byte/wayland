@@ -1026,7 +1026,6 @@
       "errorCloud": "{{provider}} を認識しました — このプロバイダーは複数のフィールドが必要です。「参照」を開いて完全な認証情報を入力してください。",
       "errorAmbiguous": "どのプロバイダーのキーか特定できませんでした。「参照」を開いてプロバイダーを選択してください。",
       "errorNoModels": "{{provider}} に接続しましたが、モデルが返されませんでした。「管理」から更新してみてください。",
-      "errorLegacyMirrorFailed": "接続しましたが、{{provider}} をチャット開始用に保存できませんでした。「管理」から「更新」をお試しください。",
       "errorUnknown": "{{provider}} に接続できませんでした。再試行してください。"
     },
     "detected": {
@@ -1047,7 +1046,6 @@
       "errorOffline": "プロバイダーに接続できません",
       "errorUnrecognized": "キーが認識されません",
       "errorNoModels": "モデルが返されませんでした",
-      "errorLegacyMirrorFailed": "チャット開始用に保存できませんでした",
       "errorUnknown": "接続の問題",
       "via": {
         "apiKey": "API キー",
@@ -1105,7 +1103,6 @@
       "errorOffline": "{{provider}} に到達できませんでした——オフラインのようです。接続を確認して再試行してください。",
       "errorUnrecognized": "そのキーは {{provider}} として認識されませんでした。",
       "errorNoModels": "{{provider}} はキーを受け入れましたがモデルを返しませんでした。更新してみてください。",
-      "errorLegacyMirrorFailed": "{{provider}} は更新されましたが、チャット開始用に保存できませんでした。「更新」をお試しください。",
       "errorUnknown": "{{provider}} を更新できませんでした。再試行してください。"
     },
     "browse": {
@@ -1133,7 +1130,6 @@
       "errorOffline": "{{provider}} に接続できません。オフラインのようです。接続を確認して再試行してください。",
       "errorUnrecognized": "そのキーは {{provider}} で認識されませんでした。キーを確認して再試行してください。",
       "errorNoModels": "{{provider}} に接続しましたが、モデルが返されませんでした。「管理」から更新してみてください。",
-      "errorLegacyMirrorFailed": "接続しましたが、{{provider}} をチャット開始用に保存できませんでした。「管理」から「更新」をお試しください。",
       "errorUnknown": "{{provider}} に接続できませんでした。再試行してください。"
     },
     "cloud": {
@@ -1179,7 +1175,6 @@
       "errorOffline": "{{provider}} に接続できません。オフラインのようです。接続を確認して再試行してください。",
       "errorUnrecognized": "これらの認証情報は不完全であるか、{{provider}} で受け入れられませんでした。すべての項目を確認してください。",
       "errorNoModels": "{{provider}} に接続しましたが、モデルが返されませんでした。「管理」から更新してみてください。",
-      "errorLegacyMirrorFailed": "接続しましたが、{{provider}} をチャット開始用に保存できませんでした。「管理」から「更新」をお試しください。",
       "errorUnknown": "{{provider}} に接続できませんでした。再試行してください。"
     },
     "homePicker": {

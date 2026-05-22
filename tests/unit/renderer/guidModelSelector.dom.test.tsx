@@ -100,6 +100,17 @@ vi.mock('@/renderer/hooks/useModelRegistry', () => ({
   useModelRegistry: () => ({ curatedForAgent: mockCuratedForAgent }),
 }));
 
+// `ipcBridge.modelRegistry.resolveForChatStart` — the chat-start refactor
+// (Packet 3B) replaced the legacy `modelList` lookup with this IPC call.
+const { mockResolveForChatStart } = vi.hoisted(() => ({ mockResolveForChatStart: vi.fn() }));
+vi.mock('@/common', () => ({
+  ipcBridge: {
+    modelRegistry: {
+      resolveForChatStart: { invoke: mockResolveForChatStart },
+    },
+  },
+}));
+
 // Import after mocks are registered.
 import GuidModelSelector from '@/renderer/pages/guid/components/GuidModelSelector';
 
@@ -162,6 +173,7 @@ const baseProps = {
 beforeEach(() => {
   mockCuratedForAgent.mockReset();
   mockNavigate.mockReset();
+  mockResolveForChatStart.mockReset();
   baseProps.setCurrentModel.mockClear();
 });
 
@@ -252,15 +264,14 @@ describe('GuidModelSelector home picker', () => {
     expect(await screen.findByText('settings.modelsPage.homePicker.empty')).toBeInTheDocument();
   });
 
-  it('navigates to the new /settings/models route when a curated model has no matching provider', async () => {
-    // The chat-start bridge (Packet 3A) mirrors registry connects into the
-    // legacy `model.config` so this case should not normally hit. But if it
-    // does — e.g. the bridge is mid-write or `getModelConfig` has not yet
-    // refreshed — the picker must route the user to the NEW Models page
-    // (not the legacy `/settings/model` route the picker used to use).
+  it('navigates to the new /settings/models route when the resolver reports the provider is not connected', async () => {
+    // The chat-start refactor (Packet 3B) replaces the legacy `modelList`
+    // lookup with `modelRegistry.resolveForChatStart`. If the resolver returns
+    // `not-connected`, the picker routes the user to the Models page.
     mockCuratedForAgent.mockResolvedValue([
       curated({ id: 'unknown-model', providerId: 'mistral', displayName: 'Unknown', family: 'X' }),
     ]);
+    mockResolveForChatStart.mockResolvedValue({ ok: false, error: 'not-connected' });
     const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
     const setCurrentModel = vi.fn().mockResolvedValue(undefined);
 
@@ -273,48 +284,120 @@ describe('GuidModelSelector home picker', () => {
     expect(setCurrentModel).not.toHaveBeenCalled();
   });
 
-  it('resolves the right provider when two configured providers expose the same model id', async () => {
+  it('falls back to the first curated model when the pinned one is no longer curated (Packet 3B graceful fallback)', async () => {
+    // A chat pinned to an older model id (e.g. one that fell out of the
+    // catalog after the migration) must not silently keep dispatching against
+    // a model the user can no longer pick. The picker auto-routes to
+    // `curated[0]` via the regular resolve+pick flow.
+    mockCuratedForAgent.mockResolvedValue([
+      curated({
+        id: 'claude-sonnet-4-7',
+        providerId: 'anthropic',
+        displayName: 'Claude Sonnet 4.7',
+        family: 'Claude Sonnet',
+      }),
+    ]);
+    mockResolveForChatStart.mockResolvedValue({
+      ok: true,
+      provider: {
+        id: 'anthropic',
+        providerId: 'anthropic',
+        name: 'Anthropic',
+        platform: 'anthropic',
+        modelId: 'claude-sonnet-4-7',
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'sk-ant',
+      },
+    });
+    const setCurrentModel = vi.fn().mockResolvedValue(undefined);
+    // Pin a model id that is NOT in the curated set.
+    const droppedCurrent = {
+      id: 'anthropic',
+      platform: 'anthropic',
+      name: 'Anthropic',
+      baseUrl: '',
+      apiKey: '',
+      useModel: 'claude-1-deprecated',
+    } as unknown as typeof baseProps.currentModel;
+
+    render(
+      <GuidModelSelector
+        {...baseProps}
+        agentKey='claude'
+        currentModel={droppedCurrent}
+        setCurrentModel={setCurrentModel}
+      />
+    );
+
+    // Effect fires once after curated resolves; it should call resolveForChatStart
+    // with the FALLBACK model (curated[0]), not the pinned one.
+    await waitFor(() => expect(mockResolveForChatStart).toHaveBeenCalled());
+    expect(mockResolveForChatStart).toHaveBeenCalledWith({
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet-4-7',
+    });
+    await waitFor(() => expect(setCurrentModel).toHaveBeenCalledTimes(1));
+    const arg = setCurrentModel.mock.calls[0][0];
+    expect(arg.useModel).toBe('claude-sonnet-4-7');
+  });
+
+  it('does not fire the graceful fallback when the pinned model is still curated', async () => {
+    mockCuratedForAgent.mockResolvedValue([
+      curated({ id: 'claude-opus', providerId: 'anthropic', displayName: 'Claude Opus 4.7', family: 'Claude Opus' }),
+    ]);
+    const setCurrentModel = vi.fn().mockResolvedValue(undefined);
+    const pinned = {
+      id: 'anthropic',
+      platform: 'anthropic',
+      name: 'Anthropic',
+      baseUrl: '',
+      apiKey: '',
+      useModel: 'claude-opus',
+    } as unknown as typeof baseProps.currentModel;
+
+    render(
+      <GuidModelSelector {...baseProps} agentKey='claude' currentModel={pinned} setCurrentModel={setCurrentModel} />
+    );
+
+    // Wait for the curated set to settle, then assert no resolve was triggered.
+    await screen.findByText('Claude Opus 4.7');
+    expect(mockResolveForChatStart).not.toHaveBeenCalled();
+    expect(setCurrentModel).not.toHaveBeenCalled();
+  });
+
+  it('passes the resolved chat-start payload through to setCurrentModel', async () => {
+    // The resolver hands back the credentials + platform + baseUrl the
+    // chat-start dispatch needs. The picker writes them straight into
+    // `currentModel` via `setCurrentModel`.
     mockCuratedForAgent.mockResolvedValue([
       curated({ id: 'gpt-5', providerId: 'openai', displayName: 'GPT-5.5', family: 'GPT-5' }),
     ]);
-    // Two configured providers both list `gpt-5` (a `new-api` gateway and the
-    // real OpenAI provider). The curated row's `providerId` is `'openai'`,
-    // matching the second row's `platform` — the picker must pick that one,
-    // not the gateway whose `platform` is `'new-api'`.
+    mockResolveForChatStart.mockResolvedValue({
+      ok: true,
+      provider: {
+        id: 'openai',
+        providerId: 'openai',
+        name: 'OpenAI',
+        platform: 'openai',
+        modelId: 'gpt-5',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-resolved',
+      },
+    });
     const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
     const setCurrentModel = vi.fn().mockResolvedValue(undefined);
-    const modelList = [
-      // Wrong provider — shares the model id via a gateway.
-      {
-        id: 'uuid-gateway',
-        platform: 'new-api',
-        name: 'Gateway',
-        baseUrl: 'https://gateway.example',
-        apiKey: '',
-        model: ['gpt-5'],
-      },
-      // Correct provider — `platform === providerId`.
-      {
-        id: 'uuid-openai',
-        platform: 'openai',
-        name: 'OpenAI',
-        baseUrl: 'https://api.openai.com',
-        apiKey: '',
-        model: ['gpt-5'],
-      },
-    ] as unknown as typeof baseProps.modelList;
 
-    render(
-      <GuidModelSelector {...baseProps} agentKey='codex' modelList={modelList} setCurrentModel={setCurrentModel} />
-    );
+    render(<GuidModelSelector {...baseProps} agentKey='codex' modelList={[]} setCurrentModel={setCurrentModel} />);
 
     const row = await screen.findByText('GPT-5.5');
     fireEventClick(row);
 
     await waitFor(() => expect(setCurrentModel).toHaveBeenCalledTimes(1));
+    expect(mockResolveForChatStart).toHaveBeenCalledWith({ providerId: 'openai', modelId: 'gpt-5' });
     const arg = setCurrentModel.mock.calls[0][0];
     expect(arg.platform).toBe('openai');
-    expect(arg.id).toBe('uuid-openai');
+    expect(arg.apiKey).toBe('sk-resolved');
     expect(arg.useModel).toBe('gpt-5');
+    expect(arg.baseUrl).toBe('https://api.openai.com/v1');
   });
 });

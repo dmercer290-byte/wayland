@@ -1382,63 +1382,6 @@ export const hub = {
   // State changed event for extension (install/uninstall status changes)
   onStateChanged: buildEmitter<{ name: string; status: HubExtensionStatus; error?: string }>('hub.state-changed'),
 };
-// Provider catalog API
-export type IProviderErrorKind = 'network' | 'unauthorized' | 'forbidden' | 'rate-limit' | 'unknown';
-
-export type IProviderError = {
-  kind: IProviderErrorKind;
-  message: string;
-};
-
-export type IConnectedProviderView = {
-  id: string;
-  providerId: string;
-  displayName: string | null;
-  status: 'connected' | 'error' | 'refreshing';
-  lastRefreshedAt: number | null;
-  models: Array<{
-    id: string;
-    displayName: string;
-    tier: string;
-    capabilities: string[];
-    enabled: boolean;
-    deprecated: boolean;
-    deprecatedAt?: number;
-    contextWindow?: number;
-  }>;
-};
-
-export type IDefaultModelView = {
-  scope: 'chat' | 'coding' | 'vision' | 'image' | 'audio';
-  catalogId: string;
-  modelId: string;
-};
-
-export const providers = {
-  list: buildProvider<IBridgeResponse<{ providers: IConnectedProviderView[]; defaults: IDefaultModelView[] }>, void>(
-    'providers.list'
-  ),
-  connect: buildProvider<
-    IBridgeResponse<{ provider: IConnectedProviderView }>,
-    { key: string; additionalFields?: Record<string, string> }
-  >('providers.connect'),
-  refresh: buildProvider<IBridgeResponse<{ provider: IConnectedProviderView }>, { catalogId: string }>(
-    'providers.refresh'
-  ),
-  disconnect: buildProvider<IBridgeResponse, { catalogId: string }>('providers.disconnect'),
-  toggleModel: buildProvider<IBridgeResponse, { catalogId: string; modelId: string; enabled: boolean }>(
-    'providers.toggleModel'
-  ),
-  setDisplayName: buildProvider<IBridgeResponse, { catalogId: string; displayName: string }>(
-    'providers.setDisplayName'
-  ),
-  setDefault: buildProvider<
-    IBridgeResponse,
-    { scope: 'chat' | 'coding' | 'vision' | 'image' | 'audio'; catalogId: string; modelId: string }
-  >('providers.setDefault'),
-  catalogUpdated: buildEmitter<{ catalogId: string }>('providers.catalogUpdated'),
-};
-
 // --- Models & Providers redesign (Wave 0 contract) ------------------------
 // New two-tier model registry. Distinct from the legacy `providers` namespace
 // above (which is removed in a later wave) — uses `modelRegistry.*` channel
@@ -1484,6 +1427,51 @@ export type IModelRegistryCatalogView = {
  */
 export type IModelRegistryCreds = { key: string } | { fields: Record<string, string> } | { useDiscovered: true };
 
+/**
+ * The chat-start dispatch payload for a curated/catalog model. Built main-side
+ * from the model registry so the home picker no longer needs to look the
+ * provider up in the legacy `model.config`. Carries the credential material
+ * the conversation-create path passes to wcore / Gemini / ACP main-process
+ * managers (`apiKey` / `baseUrl` / cloud `bedrockConfig`).
+ *
+ * Renderer note: the IPC surface returning this DOES include the decrypted
+ * `apiKey` — the legacy `mode.getModelConfig` shape exposes it the same way,
+ * and the chat-start dispatch needs to pass it forward to spawn the backend.
+ * The plaintext never crosses process boundaries except into this payload.
+ */
+export type IModelRegistryChatStartPayload = {
+  /** A canonical, stable id for this provider (always equal to `providerId`). */
+  id: string;
+  providerId: ProviderId;
+  /** Short human label, e.g. `'OpenAI'`. */
+  name: string;
+  /**
+   * Legacy `IProvider.platform` string the main-process dispatch expects (e.g.
+   * `'openai'`, `'anthropic'`, `'gemini'`, `'bedrock'`). Severs the chat-start
+   * dependency on the legacy `model.config` lookup without changing the wcore
+   * envBuilder / Gemini-manager signatures.
+   */
+  platform: string;
+  /** The model id the user picked — written verbatim into `useModel`. */
+  modelId: string;
+  /** API base URL — empty string when the provider uses its canonical default. */
+  baseUrl: string;
+  /** Decrypted API key (empty string for cloud providers). */
+  apiKey: string;
+  /** AWS Bedrock-specific block — present only when `providerId === 'aws-bedrock'`. */
+  bedrockConfig?: {
+    authMethod: 'accessKey';
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+  };
+};
+
+/** Result of resolving a curated/catalog model for chat-start. */
+export type IModelRegistryResolveForChatStartResult =
+  | { ok: true; provider: IModelRegistryChatStartPayload }
+  | { ok: false; error: 'not-connected' | 'undecryptable' | 'unsupported' | 'unknown' };
+
 export const modelRegistry = {
   // Auto-discover provider keys from the environment / credential stores.
   detectKeys: buildProvider<IModelRegistryDetectedKey[], void>('modelRegistry.detectKeys'),
@@ -1511,6 +1499,16 @@ export const modelRegistry = {
   ),
   // Curated model list for a given CLI agent / backend key.
   curatedForAgent: buildProvider<CuratedModel[], { agentKey: string }>('modelRegistry.curatedForAgent'),
+  /**
+   * Resolve a curated/catalog model into the chat-start payload (decrypted
+   * key / baseUrl / platform). Used by the home model picker after the user
+   * selects a model — replaces the legacy `model.config` row lookup the
+   * Wave 3A bridge mirror existed to support.
+   */
+  resolveForChatStart: buildProvider<
+    IModelRegistryResolveForChatStartResult,
+    { providerId: ProviderId; modelId: string }
+  >('modelRegistry.resolveForChatStart'),
 };
 
 // Team Mode API

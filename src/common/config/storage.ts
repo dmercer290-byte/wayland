@@ -134,6 +134,13 @@ export interface IConfigStorageRefer {
   'migration.assistantsSplitCustom'?: boolean;
   /** Migration flag: Electron desktop config has been imported to server config */
   'migration.electronConfigImported'?: boolean;
+  /**
+   * Migration flag: legacy `model.config` providers have been one-time migrated
+   * into the new `model_registry_*` SQLite tables (Packet 3B). Set after a
+   * successful run by `runLegacyModelConfigMigration`; subsequent boots skip
+   * the translation entirely.
+   */
+  'migration.legacyModelConfigToRegistry'?: boolean;
   // 关闭窗口时最小化到系统托盘 / Minimize to system tray when closing window
   'system.closeToTray'?: boolean;
   // First-run flag: set once after applying smart defaults (close-to-tray on, start-on-boot on).

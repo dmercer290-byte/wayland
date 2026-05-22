@@ -5,6 +5,7 @@
  */
 
 import { Brain, ChevronDown, Plus } from 'lucide-react';
+import { ipcBridge } from '@/common';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import type { CuratedModel } from '@process/providers/types';
 import { useModelRegistry } from '@/renderer/hooks/useModelRegistry';
@@ -148,32 +149,83 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     });
   }, [curated, defaultModelLabel, selectedCuratedKey]);
 
-  // Pick a curated model: map it back to a configured provider so the
-  // chat-start flow keeps receiving a fully-formed `TProviderWithModel`.
+  // Pick a curated model: resolve its credentials through the modelRegistry
+  // IPC (Packet 3B) so the chat-start flow no longer depends on the legacy
+  // `model.config` row. The resolver hands back the platform / apiKey /
+  // baseUrl / bedrockConfig the main-process dispatch needs verbatim.
   const handlePickCurated = React.useCallback(
-    (model: CuratedModel) => {
-      // The curated model's `providerId` is the canonical provider id (e.g.
-      // `'anthropic'`); the legacy `IProvider` stores that on `platform`,
-      // with `id` being a per-row UUID. Match on platform first so two
-      // configured providers exposing the same model id (e.g. `new-api` and
-      // `openai-compatible` gateways) resolve to the correct one. Fall back
-      // to a model-id-only match for legacy rows that pre-date the curated
-      // contract.
-      const provider =
-        modelList.find((p) => p.platform === model.providerId && p.model?.includes(model.id)) ||
-        modelList.find((p) => p.model?.includes(model.id));
-      if (!provider) {
-        // The curated model isn't in a connected provider yet — route the
-        // user to the Models page to connect it.
+    async (model: CuratedModel) => {
+      const result = await ipcBridge.modelRegistry.resolveForChatStart
+        .invoke({
+          providerId: model.providerId,
+          modelId: model.id,
+        })
+        .catch((error) => {
+          console.error('Failed to resolve curated model for chat-start:', error);
+          return { ok: false as const, error: 'unknown' as const };
+        });
+
+      if (!result.ok) {
+        // The curated model isn't actually connected — route the user to
+        // the Models page to connect it. This covers `not-connected`,
+        // `undecryptable`, `unsupported`, `unknown` alike.
         navigate('/settings/models');
         return;
       }
-      setCurrentModel({ ...provider, useModel: model.id }).catch((error) => {
+
+      const provider = result.provider;
+      // Build the `TProviderWithModel` the chat-start pipeline expects. We
+      // synthesize a `capabilities` array (text) — the legacy modelList path
+      // exposed `provider.capabilities`, but the registry doesn't carry
+      // explicit IProvider-shaped capabilities; chat-start consumers only
+      // read the fields below. A previous-curated lookup in `modelList`
+      // remains as a last-resort fallback for richer fields (e.g. an
+      // existing `modelProtocols` block on a `new-api` row), but the
+      // resolved registry data wins for credentials.
+      const legacyMatch =
+        modelList.find((p) => p.platform === provider.platform && p.model?.includes(model.id)) ||
+        modelList.find((p) => p.model?.includes(model.id));
+      const next: TProviderWithModel = {
+        ...legacyMatch,
+        id: provider.id,
+        platform: provider.platform,
+        name: provider.name,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        useModel: provider.modelId,
+        ...(provider.bedrockConfig ? { bedrockConfig: provider.bedrockConfig } : {}),
+      } as TProviderWithModel;
+
+      setCurrentModel(next).catch((error) => {
         console.error('Failed to set current model:', error);
       });
     },
     [modelList, navigate, setCurrentModel]
   );
+
+  // ── Graceful fallback for chats pinned to a dropped model ────────────────
+  // When the curated set has loaded for the current agent and the currently-
+  // pinned model is no longer in it (e.g. an older model id that fell out of
+  // the catalog after the Packet 3B migration), fall back to the first
+  // curated model. Without this the picker would silently keep dispatching
+  // chat-start against a model the user can no longer pick. Skipping
+  // conditions: not in provider-agent mode (only relevant to gemini/wcore),
+  // no curated yet (still loading), curated empty (no recommendation), or
+  // no pinned selection at all.
+  const fallbackFiredRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!isGeminiMode) return;
+    if (!curated || curated.length === 0) return;
+    if (!selectedCuratedKey) return;
+    const stillAvailable = curated.some((m) => m.id === selectedCuratedKey);
+    if (stillAvailable) return;
+    // Guard against re-firing on every render. Keyed by the pair so a
+    // new agent or new pinned-model retries the fallback decision once.
+    const guardKey = `${agentKey}:${selectedCuratedKey}`;
+    if (fallbackFiredRef.current === guardKey) return;
+    fallbackFiredRef.current = guardKey;
+    void handlePickCurated(curated[0]);
+  }, [agentKey, curated, isGeminiMode, selectedCuratedKey, handlePickCurated]);
 
   // ── ACP model state (CLI agents) ─────────────────────────────────────────
   const acpSelectedLabel = React.useMemo(() => {
@@ -249,7 +301,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
                         {group.models.map((model) => {
                           const tier = costToPriceTier(model.costInPerM, model.costOutPerM);
                           return (
-                            <Menu.Item key={model.id} onClick={() => handlePickCurated(model)}>
+                            <Menu.Item key={model.id} onClick={() => void handlePickCurated(model)}>
                               <div className='flex items-center gap-8px w-full'>
                                 <span className='flex-1 min-w-0 truncate'>{model.displayName}</span>
                                 {tier && (

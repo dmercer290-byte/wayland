@@ -174,8 +174,6 @@ type Fakes = {
   getRegistry: ReturnType<typeof vi.fn>;
   apiListModels: ReturnType<typeof vi.fn>;
   cliListModels: ReturnType<typeof vi.fn>;
-  legacyWrite: ReturnType<typeof vi.fn>;
-  legacyRemove: ReturnType<typeof vi.fn>;
 };
 
 function makeFakes(over: Partial<{ apiModels: unknown; testResult: unknown }> = {}): Fakes {
@@ -187,11 +185,6 @@ function makeFakes(over: Partial<{ apiModels: unknown; testResult: unknown }> = 
   const getRegistry = vi.fn().mockResolvedValue({});
   const apiListModels = vi.fn().mockResolvedValue(over.apiModels ?? [{ id: 'gpt-4o', providerId: 'openai' }]);
   const cliListModels = vi.fn().mockResolvedValue([{ id: 'gpt-5-codex', providerId: 'openai' }]);
-  // The legacy `model.config` bridge is mocked so the tests can assert the
-  // chat-start mirror fires on connect / rekey / disconnect without standing
-  // up a real `ProcessConfig`. Default both methods to no-op resolves.
-  const legacyWrite = vi.fn().mockResolvedValue(undefined);
-  const legacyRemove = vi.fn().mockResolvedValue(undefined);
 
   const deps: ModelRegistryDeps = {
     repo: repo as unknown as ModelRegistryDeps['repo'],
@@ -206,10 +199,6 @@ function makeFakes(over: Partial<{ apiModels: unknown; testResult: unknown }> = 
       underlyingProviderId: agentKey === 'codex' ? 'openai' : agentKey === 'claude' ? 'anthropic' : 'google-gemini',
       listModels: cliListModels,
     }),
-    legacyBridge: {
-      writeProvider: legacyWrite,
-      removeProvider: legacyRemove,
-    },
   };
 
   return {
@@ -221,8 +210,6 @@ function makeFakes(over: Partial<{ apiModels: unknown; testResult: unknown }> = 
     getRegistry,
     apiListModels,
     cliListModels,
-    legacyWrite,
-    legacyRemove,
   };
 }
 
@@ -699,107 +686,95 @@ describe('modelRegistry IPC — rekey', () => {
   });
 });
 
-describe('modelRegistry IPC — legacy `model.config` bridge (Packet 3A)', () => {
-  it('mirrors a successful connect to the legacy bridge with the catalog ids', async () => {
-    // A user who connects a provider only through the new Models page must
-    // still find that provider in the home-screen picker's chat-start flow —
-    // which reads `model.config`. The bridge is the transitional scaffold;
-    // a successful connect calls it with the catalog ids straight off the
-    // repository so the picker resolves any model id.
-    const { deps, legacyWrite } = makeFakes();
-    const h = createModelRegistryHandlers(deps);
-
-    const result = await h.connect({ providerId: 'openai', creds: { key: 'sk-test' } });
-
-    expect(result).toEqual({ ok: true });
-    expect(legacyWrite).toHaveBeenCalledWith('openai', { key: 'sk-test' }, ['gpt-4o']);
-  });
-
-  it('does not call the bridge when the connect fails', async () => {
-    const { deps, legacyWrite } = makeFakes({ testResult: { ok: false, error: 'unauthorized' } });
-    const h = createModelRegistryHandlers(deps);
-
-    await h.connect({ providerId: 'openai', creds: { key: 'sk-bad' } });
-
-    expect(legacyWrite).not.toHaveBeenCalled();
-  });
-
-  it('removes the legacy mirror on disconnect', async () => {
-    const { deps, repo, legacyRemove } = makeFakes();
-    // Seed a connected provider directly so the test focuses on disconnect.
+describe('modelRegistry IPC — resolveForChatStart', () => {
+  it('returns the chat-start payload for a connected api-key provider', async () => {
+    const { deps, repo } = makeFakes();
     repo.upsertRegistryProvider({
       providerId: 'openai',
       connectedVia: 'api-key',
       state: 'connected',
-      creds: { key: 'sk-test' },
+      creds: { key: 'sk-resolve' },
     });
     const h = createModelRegistryHandlers(deps);
 
-    const result = await h.disconnect({ providerId: 'openai' });
+    const result = await h.resolveForChatStart({ providerId: 'openai', modelId: 'gpt-4o' });
 
-    expect(result).toEqual({ ok: true });
-    expect(legacyRemove).toHaveBeenCalledWith('openai');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.provider.providerId).toBe('openai');
+      expect(result.provider.platform).toBe('openai');
+      expect(result.provider.modelId).toBe('gpt-4o');
+      expect(result.provider.apiKey).toBe('sk-resolve');
+      expect(result.provider.baseUrl).toBe('https://api.openai.com/v1');
+    }
   });
 
-  it('a successful rekey re-mirrors with the new key', async () => {
-    const { deps, repo, legacyWrite } = makeFakes();
+  it('preserves a user-saved custom baseUrl over the canonical one', async () => {
+    const { deps, repo } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'openai-compatible',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'sk-self', baseUrl: 'https://my-host.example.com/v1' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'openai-compatible', modelId: 'llama3' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.provider.baseUrl).toBe('https://my-host.example.com/v1');
+  });
+
+  it('returns the bedrockConfig block for an aws-bedrock provider', async () => {
+    const { deps, repo } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'aws-bedrock',
+      connectedVia: 'cloud-credentials',
+      state: 'connected',
+      creds: { fields: { accessKeyId: 'AKIA', secretAccessKey: 'sk', region: 'us-east-1' } },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({
+      providerId: 'aws-bedrock',
+      modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.provider.platform).toBe('bedrock');
+      expect(result.provider.bedrockConfig).toEqual({
+        authMethod: 'accessKey',
+        accessKeyId: 'AKIA',
+        secretAccessKey: 'sk',
+        region: 'us-east-1',
+      });
+    }
+  });
+
+  it('returns `not-connected` for a provider that does not exist', async () => {
+    const { deps } = makeFakes();
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'openai', modelId: 'gpt-4o' });
+
+    expect(result).toEqual({ ok: false, error: 'not-connected' });
+  });
+
+  it('returns `undecryptable` for a provider whose creds cannot be decrypted', async () => {
+    const { deps, repo } = makeFakes();
     repo.upsertRegistryProvider({
       providerId: 'openai',
       connectedVia: 'api-key',
       state: 'connected',
-      creds: { key: 'sk-old' },
+      creds: { key: 'sk-x' },
     });
+    repo.undecryptableProviders.add('openai');
     const h = createModelRegistryHandlers(deps);
 
-    const result = await h.rekey({ providerId: 'openai', creds: { key: 'sk-new' } });
+    const result = await h.resolveForChatStart({ providerId: 'openai', modelId: 'gpt-4o' });
 
-    expect(result).toEqual({ ok: true });
-    expect(legacyWrite).toHaveBeenLastCalledWith('openai', { key: 'sk-new' }, ['gpt-4o']);
-  });
-
-  it('a bridge failure flips the registry row to error with `legacy-mirror-failed`', async () => {
-    // The bridge mirror is best-effort, but a failure must still be visible
-    // to the user — otherwise they would see a connected provider in Models
-    // settings that never appears in the home chat-start picker. The
-    // contract: credentials remain saved (the registry row keeps its creds),
-    // but the row's STATE flips to `error` with the new `legacy-mirror-failed`
-    // discriminator so the Models page renders "Action needed — Fix".
-    const { deps, repo, legacyWrite } = makeFakes();
-    legacyWrite.mockRejectedValue(new Error('disk full'));
-    const h = createModelRegistryHandlers(deps);
-
-    const result = await h.connect({ providerId: 'openai', creds: { key: 'sk-test' } });
-
-    expect(result).toEqual({ ok: false, error: 'legacy-mirror-failed' });
-    const row = repo.getRegistryProvider('openai');
-    expect(row?.state).toBe('error');
-    expect(row?.error).toBe('legacy-mirror-failed');
-    // The credentials themselves must NOT be rolled back — the user's key
-    // is still saved, the connection itself worked, only the bridge failed.
-    expect(repo.getRegistryProviderCreds('openai')).toEqual({
-      status: 'ok',
-      creds: { key: 'sk-test' },
-    });
-  });
-
-  it('a refresh that successfully rebuilds the catalog re-mirrors to the bridge', async () => {
-    const { deps, repo, legacyWrite, apiListModels } = makeFakes();
-    repo.upsertRegistryProvider({
-      providerId: 'openai',
-      connectedVia: 'api-key',
-      state: 'connected',
-      creds: { key: 'sk-test' },
-    });
-    apiListModels.mockResolvedValue([
-      { id: 'gpt-4o', providerId: 'openai' },
-      { id: 'gpt-5', providerId: 'openai' },
-    ]);
-    const h = createModelRegistryHandlers(deps);
-
-    const result = await h.refresh({ providerId: 'openai' });
-
-    expect(result).toEqual({ ok: true });
-    expect(legacyWrite).toHaveBeenLastCalledWith('openai', { key: 'sk-test' }, ['gpt-4o', 'gpt-5']);
+    expect(result).toEqual({ ok: false, error: 'undecryptable' });
   });
 });
 

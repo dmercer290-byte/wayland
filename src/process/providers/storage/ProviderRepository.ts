@@ -18,11 +18,13 @@ import type {
  * identical on every install and ships in the binary, so anyone with the
  * SQLite file can decrypt the ciphertext — it is NOT secure.
  *
- * Retained only for the legacy `provider_catalogs.api_key_encrypted` column,
- * still consumed by `ModelRefreshScheduler` and `providersIpc`. The model
- * registry (`model_registry_providers.creds_encrypted`) uses OS-keychain
- * `safeStorage` instead — see `encryptRegistryCreds` / `decryptRegistryCreds`.
- * Do NOT use these for new code.
+ * Retained only for the legacy `provider_catalogs.api_key_encrypted` column.
+ * The Wave 3B deletion removed both its main-process consumers
+ * (`ModelRefreshScheduler` + `providersIpc`); the helpers are kept until a
+ * follow-up DB migration drops the `provider_catalogs` table itself.
+ * The model registry (`model_registry_providers.creds_encrypted`) uses
+ * OS-keychain `safeStorage` instead — see `encryptRegistryCreds` /
+ * `decryptRegistryCreds`. Do NOT use these for new code.
  */
 const ALGORITHM = 'aes-256-gcm';
 const KEY_MATERIAL = 'wayland-provider-key-v1'; // deterministic per-app salt
