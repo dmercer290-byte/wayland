@@ -420,6 +420,12 @@ export const skills = {
 export const voiceAsset = {
   download: buildProvider<DownloadResult, VoiceAsset>('voice-asset.download'),
   cancel: buildProvider<{ cancelled: boolean }, { assetId: string }>('voice-asset.cancel'),
+  // Resolve the install state for a known asset. The renderer uses this to
+  // suppress the Download button when the model is already on disk (no more
+  // "Download Model" alongside an already-installed model).
+  exists: buildProvider<{ installed: boolean; destPath: string | null }, { id: string }>(
+    'voice-asset.exists'
+  ),
 };
 
 export const fileWatch = {

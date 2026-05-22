@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ChevronDown, HelpCircle, Plus } from 'lucide-react';
+import { CheckCircle2, ChevronDown, HelpCircle, Plus, RotateCcw } from 'lucide-react';
 import {
   ConfigStorage,
   type IConfigStorageRefer,
@@ -103,7 +103,28 @@ const WhisperLocalDownloadControl: React.FC<{
   const { t } = useTranslation();
   const [downloadState, setDownloadState] = useState<DownloadState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const [installed, setInstalled] = useState<boolean | null>(null);
   const cancelledRef = React.useRef(false);
+
+  // Probe install state on mount + every model switch so the UI shows
+  // "Installed" instead of a Download button when the file already exists
+  // on disk. Krug / Sutherland: don't make the user wonder.
+  useEffect(() => {
+    let cancelled = false;
+    const asset = WHISPER_MODEL_ASSETS[model];
+    if (!asset) return;
+    void voiceAsset.exists
+      .invoke({ id: asset.id })
+      .then((r) => {
+        if (!cancelled) setInstalled(Boolean(r?.installed));
+      })
+      .catch(() => {
+        if (!cancelled) setInstalled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [model, downloadState]);
 
   const handleDownload = useCallback(async () => {
     const asset = WHISPER_MODEL_ASSETS[model];
@@ -156,16 +177,29 @@ const WhisperLocalDownloadControl: React.FC<{
                 )}
               </span>
             </>
+          ) : installed ? (
+            <div className='flex items-center justify-between gap-8px h-32px px-12px rd-8px bg-[var(--color-fill-2)]'>
+              <span className='flex items-center gap-8px text-12px text-[var(--success)]'>
+                <CheckCircle2 size={14} />
+                {t('settings.speechToTextModelInstalled', { defaultValue: 'Installed' })}
+              </span>
+              <Button
+                type='text'
+                size='mini'
+                icon={<RotateCcw size={12} />}
+                onClick={handleDownload}
+                className='text-12px text-t-tertiary'
+              >
+                {t('settings.speechToTextRedownload', { defaultValue: 'Re-download' })}
+              </Button>
+            </div>
           ) : (
             <Button type='outline' onClick={handleDownload} size='small'>
               {t('settings.speechToTextDownloadModel')}
             </Button>
           )}
-          {downloadState === 'success' && (
-            <span className='text-12px text-[rgb(var(--success-6))]'>{t('settings.speechToTextDownloadSuccess')}</span>
-          )}
           {downloadState === 'error' && (
-            <span className='text-12px text-[rgb(var(--danger-6))]'>
+            <span className='text-12px text-[var(--danger)]'>
               {t('settings.speechToTextDownloadError')}: {errorMsg}
             </span>
           )}
@@ -177,6 +211,17 @@ const WhisperLocalDownloadControl: React.FC<{
 
 export const TTS_CONFIG_CHANGED_EVENT = 'wayland:tts-config-changed';
 
+// Hoisted out of the component body so React doesn't see a new object
+// identity every render — the previous in-body literal forced every
+// useCallback dependent on KOKORO_ASSET to re-create, which in turn
+// thrashed the install probe's effect.
+const KOKORO_ASSET: VoiceAsset = {
+  id: 'kokoro-onnx-model',
+  url: 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx',
+  destPath: '',
+  sha256: '',
+};
+
 export const TextToSpeechSettingsSection: React.FC<{
   config: TextToSpeechConfig;
   onChange: (updater: (current: TextToSpeechConfig) => TextToSpeechConfig) => void;
@@ -184,14 +229,25 @@ export const TextToSpeechSettingsSection: React.FC<{
   const { t } = useTranslation();
   const [downloadState, setDownloadState] = useState<DownloadState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  const [installed, setInstalled] = useState<boolean | null>(null);
   const cancelledRef = React.useRef(false);
 
-  const KOKORO_ASSET: VoiceAsset = {
-    id: 'kokoro-onnx-model',
-    url: 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx',
-    destPath: '',
-    sha256: '',
-  };
+  // Same install probe as Whisper — flip the UI from "Download Model" to
+  // "Installed" when the on-disk file already exists.
+  useEffect(() => {
+    let cancelled = false;
+    void voiceAsset.exists
+      .invoke({ id: KOKORO_ASSET.id })
+      .then((r) => {
+        if (!cancelled) setInstalled(Boolean(r?.installed));
+      })
+      .catch(() => {
+        if (!cancelled) setInstalled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [downloadState]);
 
   const handleDownloadKokoro = useCallback(async () => {
     cancelledRef.current = false;
@@ -307,18 +363,29 @@ export const TextToSpeechSettingsSection: React.FC<{
                     {t('settings.textToSpeechCancelDownload')}
                   </Button>
                 </div>
+              ) : installed ? (
+                <div className='flex items-center justify-between gap-8px h-32px px-12px rd-8px bg-[var(--color-fill-2)]'>
+                  <span className='flex items-center gap-8px text-12px text-[var(--success)]'>
+                    <CheckCircle2 size={14} />
+                    {t('settings.textToSpeechModelInstalled', { defaultValue: 'Installed' })}
+                  </span>
+                  <Button
+                    type='text'
+                    size='mini'
+                    icon={<RotateCcw size={12} />}
+                    onClick={handleDownloadKokoro}
+                    className='text-12px text-t-tertiary'
+                  >
+                    {t('settings.textToSpeechRedownload', { defaultValue: 'Re-download' })}
+                  </Button>
+                </div>
               ) : (
                 <Button type='outline' onClick={handleDownloadKokoro} size='small'>
                   {t('settings.textToSpeechDownloadModel')}
                 </Button>
               )}
-              {downloadState === 'success' && (
-                <span className='text-12px text-[rgb(var(--success-6))]'>
-                  {t('settings.textToSpeechDownloadSuccess')}
-                </span>
-              )}
               {downloadState === 'error' && (
-                <span className='text-12px text-[rgb(var(--danger-6))]'>
+                <span className='text-12px text-[var(--danger)]'>
                   {t('settings.textToSpeechDownloadError')}: {errorMsg}
                 </span>
               )}

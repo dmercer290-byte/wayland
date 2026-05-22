@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { existsSync } from 'node:fs';
 import { ipcBridge } from '@/common';
 import { VoiceAssetManager } from '@process/services/voice/VoiceAssetManager';
 import { resolveVoiceAsset } from '@process/services/voice/voiceAssetRegistry';
@@ -20,4 +21,12 @@ export function initVoiceAssetBridge(): void {
   ipcBridge.voiceAsset.cancel.provider(async ({ assetId }) => ({
     cancelled: VoiceAssetManager.cancel(assetId),
   }));
+  ipcBridge.voiceAsset.exists.provider(async ({ id }) => {
+    // Build a minimal descriptor; resolveVoiceAsset returns the canonical
+    // destPath from the registry. If id is unknown the resolved path will
+    // be empty and existsSync('') returns false — same outcome.
+    const resolved = resolveVoiceAsset({ id, url: '', destPath: '', sha256: '' });
+    if (!resolved.destPath) return { installed: false, destPath: null };
+    return { installed: existsSync(resolved.destPath), destPath: resolved.destPath };
+  });
 }

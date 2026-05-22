@@ -67,7 +67,7 @@ const MicrophoneCheck: React.FC = () => {
     };
   }, [refreshDevices]);
 
-  const cleanup = useCallback((): void => {
+  const cleanup = useCallback((options: { resetBar?: boolean } = {}): void => {
     if (rafRef.current != null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -85,7 +85,10 @@ const MicrophoneCheck: React.FC = () => {
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
-    if (barRef.current) {
+    // Default: hold the bar at the peak so the user can see the level that
+    // triggered the grade. Only reset to 0 when the next test starts or the
+    // component unmounts. Callers that want to wipe the bar pass resetBar=true.
+    if (options.resetBar && barRef.current) {
       barRef.current.style.width = '0%';
     }
   }, []);
@@ -109,7 +112,7 @@ const MicrophoneCheck: React.FC = () => {
     if (state === 'listening') {
       finishWithGrade();
     } else {
-      cleanup();
+      cleanup({ resetBar: true });
       setState('idle');
       setGrade(null);
     }
@@ -239,15 +242,20 @@ const MicrophoneCheck: React.FC = () => {
                   : t('settings.voiceMicGradeHot', 'Level is very high. Try moving back or reducing input gain.')
             : t('settings.voiceMicIdleHint', 'Speak to test your microphone…');
 
+  // Theme exposes --success/--warning/--danger as hex values (not RGB
+  // triples), so callers use them directly via var() instead of rgb(var()).
+  // The -6 suffix variants don't exist on :root and used to resolve to an
+  // empty string — that's what made the "Level is very high" copy render
+  // as black-on-black for Sean.
   const statusColorClass: string =
     state === 'graded' && grade === 'good'
-      ? 'text-[rgb(var(--success-6))]'
+      ? 'text-[var(--success)]'
       : state === 'graded' && (grade === 'too-quiet' || grade === 'too-hot')
-        ? 'text-[rgb(var(--warning-6))]'
+        ? 'text-[var(--warning)]'
         : state === 'graded' && grade === 'no-signal'
-          ? 'text-[rgb(var(--danger-6))]'
+          ? 'text-[var(--danger)]'
           : state === 'error'
-            ? 'text-[rgb(var(--danger-6))]'
+            ? 'text-[var(--danger)]'
             : 'text-t-secondary';
 
   // While listening the bar runs orange — Sean's note: a grey bar reads
@@ -258,11 +266,11 @@ const MicrophoneCheck: React.FC = () => {
     state === 'listening'
       ? 'bg-[rgb(var(--primary-6))]'
       : state === 'graded' && grade === 'good'
-        ? 'bg-[rgb(var(--success-6))]'
+        ? 'bg-[var(--success)]'
         : state === 'graded' && (grade === 'too-quiet' || grade === 'too-hot')
-          ? 'bg-[rgb(var(--warning-6))]'
+          ? 'bg-[var(--warning)]'
           : state === 'graded' && grade === 'no-signal'
-            ? 'bg-[rgb(var(--danger-6))]'
+            ? 'bg-[var(--danger)]'
             : 'bg-[var(--color-text-4)]';
 
   return (
