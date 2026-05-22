@@ -363,7 +363,8 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
       // connected via auto-discovery then rekeyed with an explicit key (or
       // vice versa) does not keep a stale label.
       repo.updateRegistryProviderConnectedVia(providerId, connectedViaLabel(creds, providerId));
-      await mirrorToLegacy(providerId, resolved);
+      const mirrored = await mirrorToLegacy(providerId, resolved);
+      if (!mirrored) return { ok: false, error: 'legacy-mirror-failed' };
       return { ok: true };
     }
 
@@ -384,7 +385,8 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
       return { ok: false, error: 'unknown' };
     }
 
-    await mirrorToLegacy(providerId, resolved);
+    const mirrored = await mirrorToLegacy(providerId, resolved);
+    if (!mirrored) return { ok: false, error: 'legacy-mirror-failed' };
     return { ok: true };
   }
 
@@ -392,22 +394,37 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
    * Mirror a successful connect / rekey into the legacy `model.config` store
    * via the injected `legacyBridge`. The model list passed to the bridge is
    * read straight off the persisted catalog so the home picker can resolve
-   * any model the user selects, not just the curated subset. Bridge failures
-   * are swallowed: a successful registry connect must not be marked as failed
-   * just because the legacy mirror could not be written.
+   * any model the user selects, not just the curated subset.
+   *
+   * Bridge failures DO NOT roll back the registry success — the registry row
+   * keeps its `connected` state and credentials — but the failure is surfaced
+   * to the UI by flipping the row's state to `'error'` with the
+   * `'legacy-mirror-failed'` `ConnectError`. Without this signal the user
+   * would see a green provider in Models settings that never reaches the
+   * home chat-start picker. Packet 3B's migration deletes the bridge.
+   *
+   * Returns `true` on a successful mirror, `false` on failure — the caller
+   * already wrote the `connected` row, so it does NOT need to update the
+   * state on success; it only needs to flip to `error` on failure.
    */
   async function mirrorToLegacy(
     providerId: ProviderId,
     resolved: { key: string } | { fields: Record<string, string> }
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const catalog = repo.getRegistryCatalog(providerId);
       const modelIds = catalog.map((m) => m.id);
       await deps.legacyBridge.writeProvider(providerId, resolved, modelIds);
+      return true;
     } catch (error) {
-      // The bridge is a best-effort transitional scaffold (Packet 3A).
-      // A failure here does not invalidate the registry's connect.
       console.warn('[modelRegistryIpc] legacyBridge.writeProvider failed:', error);
+      try {
+        repo.updateRegistryProviderState(providerId, 'error', 'legacy-mirror-failed');
+      } catch {
+        // The registry update itself failing is the worst case; nothing useful
+        // we can do beyond log. Still return false so the caller surfaces it.
+      }
+      return false;
     }
   }
 
@@ -511,7 +528,10 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
         if (built.ok) {
           // The catalog changed — mirror the new model list to the legacy
           // store so the home picker resolves any newly-added model id.
-          await mirrorToLegacy(providerId, creds);
+          // A bridge failure flips the registry row to `error` inside
+          // `mirrorToLegacy` so the Models page surfaces it.
+          const mirrored = await mirrorToLegacy(providerId, creds);
+          if (!mirrored) return { ok: false };
         }
         return { ok: built.ok };
       } catch {

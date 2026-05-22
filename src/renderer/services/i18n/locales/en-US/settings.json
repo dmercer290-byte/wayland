@@ -1690,6 +1690,7 @@
       "errorCloud": "Recognized {{provider}} — this provider needs more than one field. Open Browse to enter the full credentials.",
       "errorAmbiguous": "Couldn't tell which provider this key is for. Open Browse and pick the provider.",
       "errorNoModels": "{{provider}} connected but returned no models. Try refreshing it from Manage.",
+      "errorLegacyMirrorFailed": "Connected, but {{provider}} couldn't be saved to chat-start. Open Manage and try Refresh.",
       "errorUnknown": "Couldn't connect to {{provider}}. Please try again."
     },
     "detected": {
@@ -1710,6 +1711,7 @@
       "errorOffline": "can't reach provider",
       "errorUnrecognized": "key not recognized",
       "errorNoModels": "no models returned",
+      "errorLegacyMirrorFailed": "couldn't save to chat-start",
       "errorUnknown": "connection problem",
       "via": {
         "apiKey": "API key",
@@ -1767,6 +1769,7 @@
       "errorOffline": "Couldn't reach {{provider}} — you appear to be offline. Check your connection and retry.",
       "errorUnrecognized": "That key was not recognized for {{provider}}.",
       "errorNoModels": "{{provider}} accepted the key but returned no models. Try refreshing.",
+      "errorLegacyMirrorFailed": "{{provider}} updated, but couldn't be saved to chat-start. Try Refresh.",
       "errorUnknown": "Couldn't update {{provider}}. Please try again."
     },
     "browse": {
@@ -1794,6 +1797,7 @@
       "errorOffline": "Couldn't reach {{provider}} — you appear to be offline. Check your connection and retry.",
       "errorUnrecognized": "That key was not recognized for {{provider}}. Check the key and try again.",
       "errorNoModels": "{{provider}} connected but returned no models. Try refreshing it from Manage.",
+      "errorLegacyMirrorFailed": "Connected, but {{provider}} couldn't be saved to chat-start. Open Manage and try Refresh.",
       "errorUnknown": "Couldn't connect to {{provider}}. Please try again."
     },
     "cloud": {
@@ -1839,6 +1843,7 @@
       "errorOffline": "Couldn't reach {{provider}} — you appear to be offline. Check your connection and retry.",
       "errorUnrecognized": "Those credentials are incomplete or were not accepted for {{provider}}. Check every field.",
       "errorNoModels": "{{provider}} connected but returned no models. Try refreshing it from Manage.",
+      "errorLegacyMirrorFailed": "Connected, but {{provider}} couldn't be saved to chat-start. Open Manage and try Refresh.",
       "errorUnknown": "Couldn't connect to {{provider}}. Please try again."
     },
     "homePicker": {

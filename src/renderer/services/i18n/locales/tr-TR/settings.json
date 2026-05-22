@@ -1024,6 +1024,7 @@
       "errorCloud": "{{provider}} tanındı — bu sağlayıcı birden fazla alan gerektiriyor. Tam kimlik bilgilerini girmek için Gözat'ı açın.",
       "errorAmbiguous": "Bu anahtarın hangi sağlayıcıya ait olduğu belirlenemedi. Gözat'ı açın ve sağlayıcınızı seçin.",
       "errorNoModels": "{{provider}} bağlandı ancak hiç model döndürmedi. Yönet'ten yenilemeyi deneyin.",
+      "errorLegacyMirrorFailed": "Bağlandı, ancak {{provider}} sohbet başlatma için kaydedilemedi. Yönet'i açıp Yenile'yi deneyin.",
       "errorUnknown": "{{provider}} adresine bağlanılamadı. Lütfen tekrar deneyin."
     },
     "detected": {
@@ -1044,6 +1045,7 @@
       "errorOffline": "sağlayıcıya ulaşılamıyor",
       "errorUnrecognized": "anahtar tanınmadı",
       "errorNoModels": "model döndürülmedi",
+      "errorLegacyMirrorFailed": "sohbet başlatma için kaydedilemedi",
       "errorUnknown": "bağlantı sorunu",
       "via": {
         "apiKey": "API anahtarı",
@@ -1101,6 +1103,7 @@
       "errorOffline": "{{provider}} sağlayıcısına ulaşılamadı — çevrimdışı görünüyorsunuz. Bağlantınızı kontrol edip tekrar deneyin.",
       "errorUnrecognized": "Bu anahtar {{provider}} için tanınmadı.",
       "errorNoModels": "{{provider}} anahtarı kabul etti ancak hiç model döndürmedi. Yenilemeyi deneyin.",
+      "errorLegacyMirrorFailed": "{{provider}} güncellendi ancak sohbet başlatma için kaydedilemedi. Yenile'yi deneyin.",
       "errorUnknown": "{{provider}} güncellenemedi. Lütfen tekrar deneyin."
     },
     "browse": {
@@ -1128,6 +1131,7 @@
       "errorOffline": "{{provider}} erişilemedi — çevrimdışı görünüyorsunuz. Bağlantınızı kontrol edip tekrar deneyin.",
       "errorUnrecognized": "O anahtar {{provider}} için tanınmadı. Anahtarı kontrol edip tekrar deneyin.",
       "errorNoModels": "{{provider}} bağlandı ancak hiç model döndürmedi. Yönet ekranından yenilemeyi deneyin.",
+      "errorLegacyMirrorFailed": "Bağlandı, ancak {{provider}} sohbet başlatma için kaydedilemedi. Yönet'i açıp Yenile'yi deneyin.",
       "errorUnknown": "{{provider}} bağlanılamadı. Lütfen tekrar deneyin."
     },
     "cloud": {
@@ -1173,6 +1177,7 @@
       "errorOffline": "{{provider}} erişilemedi — çevrimdışı görünüyorsunuz. Bağlantınızı kontrol edip tekrar deneyin.",
       "errorUnrecognized": "Bu kimlik bilgileri eksik veya {{provider}} tarafından kabul edilmedi. Her alanı kontrol edin.",
       "errorNoModels": "{{provider}} bağlandı ancak hiç model döndürmedi. Yönet ekranından yenilemeyi deneyin.",
+      "errorLegacyMirrorFailed": "Bağlandı, ancak {{provider}} sohbet başlatma için kaydedilemedi. Yönet'i açıp Yenile'yi deneyin.",
       "errorUnknown": "{{provider}} bağlanılamadı. Lütfen tekrar deneyin."
     },
     "homePicker": {

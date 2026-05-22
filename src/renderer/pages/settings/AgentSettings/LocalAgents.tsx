@@ -187,7 +187,7 @@ const LocalAgents: React.FC = () => {
             type='detected'
             agent={geminiAgent}
             settingsDisabled={false}
-            onSettings={() => navigate('/settings/gemini')}
+            onSettings={() => navigate('/settings/models')}
             variant='grid'
           />
         )}

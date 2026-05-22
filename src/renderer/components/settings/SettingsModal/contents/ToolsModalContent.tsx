@@ -16,7 +16,20 @@ import type { TextToSpeechConfig, TextToSpeechProvider } from '@/common/types/tt
 import { DEFAULT_TTS_CONFIG, normalizeTextToSpeechConfig } from '@/common/types/ttsTypes';
 import { acpConversation, voiceAsset } from '@/common/adapter/ipcBridge';
 import type { VoiceAsset } from '@/common/types/voiceAsset';
-import { Divider, Form, Tooltip, Message, Button, Dropdown, Menu, Modal, Switch, Input, Slider, Progress } from '@arco-design/web-react';
+import {
+  Divider,
+  Form,
+  Tooltip,
+  Message,
+  Button,
+  Dropdown,
+  Menu,
+  Modal,
+  Switch,
+  Input,
+  Slider,
+  Progress,
+} from '@arco-design/web-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useConfigModelListWithImage from '@/renderer/hooks/agent/useConfigModelListWithImage';
@@ -171,10 +184,7 @@ const WhisperLocalDownloadControl: React.FC<{
                 </Button>
               </div>
               <span className='text-12px text-t-tertiary'>
-                {t(
-                  'settings.speechToTextDownloadProgressNotReported',
-                  'Downloading… (progress reporting coming soon)'
-                )}
+                {t('settings.speechToTextDownloadProgressNotReported', 'Downloading… (progress reporting coming soon)')}
               </span>
             </>
           ) : installed ? (
@@ -311,8 +321,12 @@ export const TextToSpeechSettingsSection: React.FC<{
         <Form.Item label={t('settings.textToSpeechProvider')}>
           <div className='flex items-center gap-8px'>
             <WaylandSelect value={config.provider} onChange={handleProviderChange} className='flex-1'>
-              <WaylandSelect.Option value='kokoro-local'>{t('settings.textToSpeechProviderKokoroLocal')}</WaylandSelect.Option>
-              <WaylandSelect.Option value='system-native'>{t('settings.textToSpeechProviderSystemNative')}</WaylandSelect.Option>
+              <WaylandSelect.Option value='kokoro-local'>
+                {t('settings.textToSpeechProviderKokoroLocal')}
+              </WaylandSelect.Option>
+              <WaylandSelect.Option value='system-native'>
+                {t('settings.textToSpeechProviderSystemNative')}
+              </WaylandSelect.Option>
             </WaylandSelect>
             <Button size='small' onClick={handleTestVoice}>
               {t('settings.textToSpeechTestVoice', 'Test voice')}
@@ -321,10 +335,7 @@ export const TextToSpeechSettingsSection: React.FC<{
         </Form.Item>
 
         <Form.Item label={t('settings.textToSpeechVoice')}>
-          <Input
-            value={config.voice}
-            onChange={(value) => onChange((current) => ({ ...current, voice: value }))}
-          />
+          <Input value={config.voice} onChange={(value) => onChange((current) => ({ ...current, voice: value }))} />
         </Form.Item>
 
         <Form.Item label={t('settings.textToSpeechSpeed')}>
@@ -405,11 +416,11 @@ export const SpeechToTextSettingsSection: React.FC<{
   const navigate = useNavigate();
   const handleOpenProvidersPage = useCallback(() => {
     try {
-      navigate('/settings/providers');
+      navigate('/settings/models');
     } catch {
       // Settings modal context may not have a router — fall back to hash route.
       if (typeof window !== 'undefined') {
-        window.location.hash = '#/settings/providers';
+        window.location.hash = '#/settings/models';
       }
     }
   }, [navigate]);
@@ -486,7 +497,9 @@ export const SpeechToTextSettingsSection: React.FC<{
           <WaylandSelect value={config.provider} onChange={handleProviderChange}>
             <WaylandSelect.Option value='openai'>{t('settings.speechToTextProviderOpenAI')}</WaylandSelect.Option>
             <WaylandSelect.Option value='deepgram'>{t('settings.speechToTextProviderDeepgram')}</WaylandSelect.Option>
-            <WaylandSelect.Option value='whisper-local'>{t('settings.speechToTextProviderWhisperLocal')}</WaylandSelect.Option>
+            <WaylandSelect.Option value='whisper-local'>
+              {t('settings.speechToTextProviderWhisperLocal')}
+            </WaylandSelect.Option>
           </WaylandSelect>
         </Form.Item>
 
@@ -509,11 +522,7 @@ export const SpeechToTextSettingsSection: React.FC<{
                     )}
                   </div>
                 </div>
-                <Button
-                  size='small'
-                  className=''
-                  onClick={handleOpenProvidersPage}
-                >
+                <Button size='small' className='' onClick={handleOpenProvidersPage}>
                   {t('settings.voiceProviderKeyDeferCTA', 'Open Providers →')}
                 </Button>
               </div>

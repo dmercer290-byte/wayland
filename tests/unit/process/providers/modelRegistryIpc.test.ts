@@ -757,17 +757,29 @@ describe('modelRegistry IPC — legacy `model.config` bridge (Packet 3A)', () =>
     expect(legacyWrite).toHaveBeenLastCalledWith('openai', { key: 'sk-new' }, ['gpt-4o']);
   });
 
-  it('the bridge throwing does not break the connect — registry stays connected', async () => {
-    // The bridge is best-effort scaffolding; a failure must not be allowed to
-    // invalidate the registry's connect (which already succeeded).
+  it('a bridge failure flips the registry row to error with `legacy-mirror-failed`', async () => {
+    // The bridge mirror is best-effort, but a failure must still be visible
+    // to the user — otherwise they would see a connected provider in Models
+    // settings that never appears in the home chat-start picker. The
+    // contract: credentials remain saved (the registry row keeps its creds),
+    // but the row's STATE flips to `error` with the new `legacy-mirror-failed`
+    // discriminator so the Models page renders "Action needed — Fix".
     const { deps, repo, legacyWrite } = makeFakes();
     legacyWrite.mockRejectedValue(new Error('disk full'));
     const h = createModelRegistryHandlers(deps);
 
     const result = await h.connect({ providerId: 'openai', creds: { key: 'sk-test' } });
 
-    expect(result).toEqual({ ok: true });
-    expect(repo.getRegistryProvider('openai')?.state).toBe('connected');
+    expect(result).toEqual({ ok: false, error: 'legacy-mirror-failed' });
+    const row = repo.getRegistryProvider('openai');
+    expect(row?.state).toBe('error');
+    expect(row?.error).toBe('legacy-mirror-failed');
+    // The credentials themselves must NOT be rolled back — the user's key
+    // is still saved, the connection itself worked, only the bridge failed.
+    expect(repo.getRegistryProviderCreds('openai')).toEqual({
+      status: 'ok',
+      creds: { key: 'sk-test' },
+    });
   });
 
   it('a refresh that successfully rebuilds the catalog re-mirrors to the bridge', async () => {

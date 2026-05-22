@@ -21,17 +21,27 @@
  * temporary scaffold — Packet 3B's migration flips chat-start to read from
  * `modelRegistry` directly and deletes this file along with the legacy store.
  *
- * **Scope:** API-key providers and cloud providers (Bedrock writes a real
- * `bedrockConfig`; Vertex / Azure write a best-effort row with `platform` set
- * to a value chat-start downstream can recognize, but a real Vertex / Azure
- * dispatch still needs work outside this bridge — those are rare cases that
- * 3B's migration owns).
+ * **Scope:** API-key providers only. Cloud providers (`aws-bedrock`, `vertex`,
+ * `azure`) are intentionally SKIPPED — the legacy chat-start path needs more
+ * than a best-effort row for those (real `bedrockConfig` w/ profile auth,
+ * Vertex service-account JSON, Azure resource endpoint). Mirroring a half-
+ * built row would surface the cloud provider in the home picker only to crash
+ * chat-start on click. Packet 3B's migration is the real seat of cloud support.
  *
  * **Security:** the bridge runs entirely in the main process. The decrypted
  * API key only leaves the registry's encrypted store inside this main-process
  * boundary; it is written to `ProcessConfig` exactly as the legacy
  * `ModelModalContent` flow has always done (plaintext in user-data JSON). No
  * key material crosses the IPC boundary into the renderer.
+ *
+ * **Concurrency:** the bridge's `writeProvider`/`removeProvider` ops are
+ * read-modify-write against `ProcessConfig`. A Promise-chain mutex (`withLock`)
+ * serializes the bridge's own ops so two registry connects in quick succession
+ * cannot lose each other's writes. The mutex does NOT cover the legacy
+ * `mode.saveModelConfig` writer in `modelBridge.ts` — that is a separate code
+ * path with its own access to `ProcessConfig`. A bridge write that races
+ * against a legacy save can still lose; 3B's migration removes the legacy
+ * writer entirely and resolves the residual race.
  */
 
 import { uuid } from '@/common/utils';
@@ -76,6 +86,15 @@ export type LegacyModelConfigBridge = {
 // ─── Provider-id → legacy platform mapping ────────────────────────────────────
 
 /**
+ * Cloud providers the bridge will NOT mirror. Bedrock / Vertex / Azure carry
+ * credential shapes (profile auth, service-account JSON, resource endpoint)
+ * that the bridge cannot honestly write into a legacy `IProvider` row. The
+ * home picker therefore does not surface them in 3A — by design. 3B's
+ * migration owns full cloud support through chat-start.
+ */
+const SKIPPED_CLOUD_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(['aws-bedrock', 'vertex', 'azure']);
+
+/**
  * Map a new-registry `ProviderId` to the legacy `IProvider.platform` string
  * the chat-start dispatch (`wcore/envBuilder.ts` `mapProvider()`) recognizes.
  *
@@ -86,16 +105,14 @@ export type LegacyModelConfigBridge = {
  * chat-start treats it as OpenAI-protocol and uses the persisted `baseUrl`.
  *
  * `gemini` is reserved for the Gemini API path that goes through the OpenAI-
- * compatible endpoint (`/v1beta/openai`). Vertex / Bedrock get their own
- * platform string so `mapProvider()` routes them correctly.
+ * compatible endpoint (`/v1beta/openai`). Cloud providers
+ * (`aws-bedrock`, `vertex`, `azure`) are intentionally absent — the bridge
+ * skips them entirely; see `SKIPPED_CLOUD_PROVIDERS` above.
  */
-const PROVIDER_ID_TO_PLATFORM: Record<ProviderId, string> = {
+const PROVIDER_ID_TO_PLATFORM: Partial<Record<ProviderId, string>> = {
   anthropic: 'anthropic',
   openai: 'openai',
   'google-gemini': 'gemini',
-  'aws-bedrock': 'bedrock',
-  vertex: 'gemini-vertex-ai',
-  azure: 'azure',
   // The OpenAI-compatible long tail — all dispatched as the `openai` protocol
   // via their stored `baseUrl`. `mapProvider()` falls through to OpenAI for an
   // unknown platform string, so these reach the right protocol either way; we
@@ -165,15 +182,13 @@ const PROVIDER_ID_TO_BASE_URL: Partial<Record<ProviderId, string>> = {
 
 /**
  * Short human-readable name shown in any legacy UI that lists `model.config`
- * rows. Kept compact — the new Models page is the canonical surface.
+ * rows. Kept compact — the new Models page is the canonical surface. Cloud
+ * providers are omitted: the bridge skips them entirely.
  */
-const PROVIDER_ID_TO_NAME: Record<ProviderId, string> = {
+const PROVIDER_ID_TO_NAME: Partial<Record<ProviderId, string>> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   'google-gemini': 'Google Gemini',
-  'aws-bedrock': 'AWS Bedrock',
-  vertex: 'Google Vertex',
-  azure: 'Azure OpenAI',
   openrouter: 'OpenRouter',
   groq: 'Groq',
   xai: 'xAI',
@@ -202,34 +217,6 @@ const PROVIDER_ID_TO_NAME: Record<ProviderId, string> = {
 };
 
 /**
- * Build the `IProvider` row for a Bedrock connect. The legacy chat-start path
- * reads credentials out of `bedrockConfig`, not `apiKey`. Only the access-key
- * auth method is supported here — IAM profile auth requires a richer flow
- * that 3B's full migration will handle.
- */
-function buildBedrockRow(
-  providerId: ProviderId,
-  existing: IProvider | undefined,
-  fields: Record<string, string>,
-  modelIds: string[]
-): IProvider {
-  return {
-    id: existing?.id ?? uuid(),
-    platform: PROVIDER_ID_TO_PLATFORM[providerId],
-    name: PROVIDER_ID_TO_NAME[providerId],
-    baseUrl: '',
-    apiKey: '',
-    model: modelIds,
-    bedrockConfig: {
-      authMethod: 'accessKey',
-      region: fields.region ?? '',
-      accessKeyId: fields.accessKeyId,
-      secretAccessKey: fields.secretAccessKey,
-    },
-  };
-}
-
-/**
  * Build the `IProvider` row for a standard key-based provider. The `baseUrl`
  * defaults to the canonical endpoint for the provider id; the registry never
  * stores a custom base url (Wave 0 contract — `key` is the only field), so
@@ -243,8 +230,11 @@ function buildApiKeyRow(
 ): IProvider {
   return {
     id: existing?.id ?? uuid(),
-    platform: PROVIDER_ID_TO_PLATFORM[providerId],
-    name: PROVIDER_ID_TO_NAME[providerId],
+    // Both maps are typed `Partial<…>`, but the bridge gates every code path
+    // on `PROVIDER_ID_TO_PLATFORM[providerId]` before calling this function,
+    // so the lookup is guaranteed non-undefined here.
+    platform: PROVIDER_ID_TO_PLATFORM[providerId]!,
+    name: PROVIDER_ID_TO_NAME[providerId] ?? providerId,
     baseUrl: PROVIDER_ID_TO_BASE_URL[providerId] ?? '',
     apiKey: key,
     model: modelIds,
@@ -262,12 +252,25 @@ const BRIDGE_TAG_KEY = '__waylandModelRegistryBridge';
 const BRIDGE_TAG_VALUE = 'v1';
 
 /**
- * Stamp the bridge tag onto an `IProvider` row. The cast goes through
- * `unknown` because the tag is not part of the `IProvider` type — 3B will
- * remove the tag along with the bridge.
+ * Internal narrowing of `IProvider` carrying the bridge tag. The tag is not
+ * part of `IProvider` proper — 3B's migration removes it along with the
+ * bridge — but hoisting the type documents the cast in one place and lets TS
+ * catch a future regression that strips the tag from a write path.
  */
-function stamp(row: IProvider): IProvider {
-  return { ...row, [BRIDGE_TAG_KEY]: BRIDGE_TAG_VALUE } as unknown as IProvider;
+type TaggedProvider = IProvider & { readonly [BRIDGE_TAG_KEY]?: typeof BRIDGE_TAG_VALUE };
+
+/** True when an `IProvider` row carries the bridge tag. */
+function isTagged(p: IProvider): p is TaggedProvider & { [BRIDGE_TAG_KEY]: typeof BRIDGE_TAG_VALUE } {
+  return (p as TaggedProvider)[BRIDGE_TAG_KEY] === BRIDGE_TAG_VALUE;
+}
+
+/**
+ * Stamp the bridge tag onto an `IProvider` row. Goes through `TaggedProvider`
+ * (a real type) instead of a `Record<string, unknown>` cast so the tag's
+ * shape is documented at every call site.
+ */
+function stamp(row: IProvider): TaggedProvider {
+  return { ...row, [BRIDGE_TAG_KEY]: BRIDGE_TAG_VALUE };
 }
 
 /**
@@ -281,66 +284,68 @@ export function createLegacyModelConfigBridge(store: LegacyConfigStore): LegacyM
     return Array.isArray(data) ? (data as IProvider[]) : [];
   }
 
+  // Promise-chain mutex: serializes the bridge's own read-modify-write ops so
+  // two registry connects in quick succession cannot lose each other's
+  // writes. The mutex does NOT cover the legacy `mode.saveModelConfig` writer
+  // — see the module docstring for the limitation. `next.then(() => {}, () => {})`
+  // resets the chain to a resolved Promise on both branches so one failed op
+  // cannot block every subsequent op.
+  let writeQueue: Promise<void> = Promise.resolve();
+  function withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const next = writeQueue.then(fn, fn);
+    writeQueue = next.then(
+      () => {},
+      () => {}
+    );
+    return next;
+  }
+
   return {
     async writeProvider(providerId, creds, modelIds) {
       // The bridge never fabricates a row for a provider it can't honestly
       // describe — an unknown id is a defensive skip rather than a write.
-      if (!PROVIDER_ID_TO_PLATFORM[providerId]) return;
-
-      const list = await readConfig();
-      // Match an existing mirrored row by the bridge tag — the bridge only
-      // ever owns one row per provider id. An untagged row with the same
-      // `platform` is the user's legacy `ModelModalContent` row, NOT the
-      // bridge's; leave it alone and add a new tagged row beside it. (3B's
-      // one-time migration will reconcile the two.)
+      // Cloud providers are also skipped (Bedrock / Vertex / Azure) — the
+      // legacy chat-start path needs more than a best-effort row for those.
+      if (SKIPPED_CLOUD_PROVIDERS.has(providerId)) return;
       const platform = PROVIDER_ID_TO_PLATFORM[providerId];
-      const existing = list.find(
-        (p) => p.platform === platform && (p as unknown as Record<string, unknown>)[BRIDGE_TAG_KEY] === BRIDGE_TAG_VALUE
-      );
+      if (!platform) return;
+      // Standard providers always require a `key` payload. A `fields` payload
+      // (which only cloud providers ever send) is a contract violation here.
+      if (!('key' in creds)) return;
+      const key = creds.key;
 
-      let row: IProvider;
-      if (providerId === 'aws-bedrock') {
-        if (!('fields' in creds)) return; // bedrock requires a fields payload
-        row = buildBedrockRow(providerId, existing, creds.fields, modelIds);
-      } else if (providerId === 'vertex' || providerId === 'azure') {
-        // Vertex / Azure mirror — `apiKey` and `baseUrl` are left empty; 3B's
-        // migration owns the full credential shape. The row exists primarily
-        // so the home picker resolves to it and surfaces a chat-start error
-        // instead of silently dropping the click.
-        if (!('fields' in creds)) return;
-        row = {
-          id: existing?.id ?? uuid(),
-          platform: PROVIDER_ID_TO_PLATFORM[providerId],
-          name: PROVIDER_ID_TO_NAME[providerId],
-          baseUrl: creds.fields.endpoint ?? '',
-          apiKey: creds.fields.apiKey ?? '',
-          model: modelIds,
-        };
-      } else {
-        if (!('key' in creds)) return; // standard providers require a key
-        row = buildApiKeyRow(providerId, existing, creds.key, modelIds);
-      }
+      return withLock(async () => {
+        const list = await readConfig();
+        // Match an existing mirrored row by the bridge tag — the bridge only
+        // ever owns one row per provider id. An untagged row with the same
+        // `platform` is the user's legacy `ModelModalContent` row, NOT the
+        // bridge's; leave it alone and add a new tagged row beside it. (3B's
+        // one-time migration will reconcile the two.)
+        const existing = list.find((p) => p.platform === platform && isTagged(p));
 
-      const stamped = stamp(row);
-      const next = existing ? list.map((p) => (p.id === existing.id ? stamped : p)) : [...list, stamped];
-      await store.set('model.config', next);
+        const row = buildApiKeyRow(providerId, existing, key, modelIds);
+        const stamped = stamp(row);
+        const next = existing ? list.map((p) => (p.id === existing.id ? stamped : p)) : [...list, stamped];
+        await store.set('model.config', next);
+      });
     },
 
     async removeProvider(providerId) {
+      if (SKIPPED_CLOUD_PROVIDERS.has(providerId)) return;
       const platform = PROVIDER_ID_TO_PLATFORM[providerId];
       if (!platform) return;
-      const list = await readConfig();
-      // Remove ONLY rows the bridge owns (stamped with our tag) for this
-      // platform. A row created by the legacy `ModelModalContent` flow shares
-      // the same `platform` value but is NOT owned by us — leaving it alone
-      // honors the "registry and legacy coexist" rule for Wave 3A.
-      const next = list.filter((p) => {
-        const tagged = (p as unknown as Record<string, unknown>)[BRIDGE_TAG_KEY] === BRIDGE_TAG_VALUE;
-        return !(p.platform === platform && tagged);
+
+      return withLock(async () => {
+        const list = await readConfig();
+        // Remove ONLY rows the bridge owns (stamped with our tag) for this
+        // platform. A row created by the legacy `ModelModalContent` flow shares
+        // the same `platform` value but is NOT owned by us — leaving it alone
+        // honors the "registry and legacy coexist" rule for Wave 3A.
+        const next = list.filter((p) => !(p.platform === platform && isTagged(p)));
+        if (next.length !== list.length) {
+          await store.set('model.config', next);
+        }
       });
-      if (next.length !== list.length) {
-        await store.set('model.config', next);
-      }
     },
   };
 }

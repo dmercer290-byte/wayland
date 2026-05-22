@@ -92,4 +92,19 @@ export type CuratedModel = CatalogModel & {
 export type ProviderConnState = 'connected' | 'testing' | 'error';
 
 /** Classified failure reason from a connect / test-connection attempt. */
-export type ConnectError = 'unauthorized' | 'no-credit' | 'offline' | 'unrecognized' | 'no-models' | 'unknown';
+export type ConnectError =
+  | 'unauthorized'
+  | 'no-credit'
+  | 'offline'
+  | 'unrecognized'
+  | 'no-models'
+  /**
+   * The registry connect / refresh / rekey succeeded, but writing the
+   * transitional legacy `model.config` bridge mirror failed (e.g. disk full,
+   * config file locked). Surfaced as a persistent "Action needed" row on the
+   * Models page — without it the user would see a green provider in Models
+   * settings that never reaches the home chat-start picker. Packet 3B deletes
+   * the bridge along with this discriminator.
+   */
+  | 'legacy-mirror-failed'
+  | 'unknown';

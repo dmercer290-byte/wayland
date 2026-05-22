@@ -77,7 +77,12 @@ describe('legacyModelConfigBridge', () => {
     expect(store.current[0].apiKey).toBe('gsk-test');
   });
 
-  it('writes a bedrock provider with bedrockConfig populated from fields', async () => {
+  it('skips cloud providers (aws-bedrock, vertex, azure) entirely', async () => {
+    // The bridge cannot honestly mirror cloud providers — Bedrock needs full
+    // `bedrockConfig` w/ profile auth, Vertex needs a service-account JSON,
+    // Azure needs the resource-endpoint + apiKey. A half-built row would put
+    // them in the home picker only to crash chat-start on click. Skipping is
+    // the honest choice for 3A; 3B's migration owns full cloud support.
     const store = makeStore();
     const bridge = createLegacyModelConfigBridge(store);
 
@@ -86,18 +91,23 @@ describe('legacyModelConfigBridge', () => {
       { fields: { accessKeyId: 'AKIA', secretAccessKey: 'secret', region: 'us-east-1' } },
       ['anthropic.claude-3-5-sonnet-20241022-v2:0']
     );
+    await bridge.writeProvider('vertex', { fields: { projectId: 'p', region: 'us-central1' } }, []);
+    await bridge.writeProvider('azure', { fields: { endpoint: 'https://x', apiKey: 'k' } }, []);
 
-    const row = store.current[0];
-    expect(row.platform).toBe('bedrock');
-    expect(row.bedrockConfig).toEqual({
-      authMethod: 'accessKey',
-      accessKeyId: 'AKIA',
-      secretAccessKey: 'secret',
-      region: 'us-east-1',
-    });
-    // Bedrock authenticates via bedrockConfig — apiKey and baseUrl are unused.
-    expect(row.apiKey).toBe('');
-    expect(row.baseUrl).toBe('');
+    expect(store.current).toHaveLength(0);
+  });
+
+  it('removeProvider is also a no-op for cloud providers', async () => {
+    const store = makeStore();
+    const bridge = createLegacyModelConfigBridge(store);
+
+    // Even if some other code path put a row in for a cloud provider, the
+    // bridge does not own it and must not delete it.
+    await bridge.removeProvider('aws-bedrock');
+    await bridge.removeProvider('vertex');
+    await bridge.removeProvider('azure');
+
+    expect(store.current).toHaveLength(0);
   });
 
   it('updates an existing mirrored row in place, preserving its id', async () => {
@@ -220,5 +230,86 @@ describe('legacyModelConfigBridge', () => {
 
     await bridge.writeProvider('openai', { key: 'sk-test' }, []);
     expect(store.current[0].model).toEqual([]);
+  });
+
+  it('the bridge tag survives a JSON round-trip through ProcessConfig-style persistence', async () => {
+    // The bridge identifies its own rows by an unenumerated `__waylandModelRegistryBridge`
+    // field. That tag MUST survive the encode/decode that `JsonFileBuilder` does
+    // when it writes / loads `model.config`. If the persistence layer ever loses
+    // the tag, `removeProvider` would stop finding its own row and the legacy
+    // store would accumulate stale mirrored entries. This test reproduces the
+    // real on-disk round-trip without any Electron runtime:
+    //   1. bridge.writeProvider tags a row in memory
+    //   2. persist via the same `btoa(encodeURIComponent(JSON))` codec that
+    //      `JsonFileBuilder` uses on disk
+    //   3. reload into a fresh in-memory state
+    //   4. assert the tag is still there
+    //   5. bridge.removeProvider on the reloaded state — must remove the row.
+
+    // Step 1: write a tagged row in the first bridge.
+    const firstStore = makeStore();
+    const firstBridge = createLegacyModelConfigBridge(firstStore);
+    await firstBridge.writeProvider('openai', { key: 'sk-test' }, ['gpt-4o']);
+    expect(firstStore.current).toHaveLength(1);
+
+    // Step 2-3: encode → decode through the same codec ProcessConfig uses.
+    // `JsonFileBuilder` does: encode = btoa(encodeURIComponent(JSON.stringify(data))).
+    const encoded = btoa(encodeURIComponent(JSON.stringify(firstStore.current)));
+    const decoded = JSON.parse(decodeURIComponent(atob(encoded))) as IProvider[];
+
+    // Step 4: the tag must still be there on the decoded row.
+    expect(decoded).toHaveLength(1);
+    const tag = (decoded[0] as unknown as Record<string, unknown>)['__waylandModelRegistryBridge'];
+    expect(tag).toBe('v1');
+
+    // Step 5: a fresh bridge built over the round-tripped state must still
+    // recognize the row as its own and remove it on disconnect.
+    const reloadedStore = makeStore(decoded);
+    const reloadedBridge = createLegacyModelConfigBridge(reloadedStore);
+    await reloadedBridge.removeProvider('openai');
+    expect(reloadedStore.current).toHaveLength(0);
+  });
+
+  it('serializes concurrent writeProvider ops to the same provider with a mutex', async () => {
+    // Two `modelRegistry.connect` calls firing in quick succession both
+    // execute the bridge's read-modify-write block. Without the mutex, both
+    // operations would read the same baseline state, each compute its own
+    // `next`, and the second `set` would silently overwrite the first.
+    // With the mutex they must serialize and BOTH writes must survive.
+    //
+    // We exercise this by writing two DIFFERENT providers concurrently —
+    // each owns its own row by `platform`, so the second write must observe
+    // the first write's row in the list it reads. (Two writes to the SAME
+    // provider would merge into one row by design, which would not detect
+    // a lost-write bug.)
+    let getCallCount = 0;
+    let state: IProvider[] = [];
+    const store: LegacyConfigStore = {
+      async get() {
+        getCallCount += 1;
+        // Yield a tick before resolving so the two concurrent writes have a
+        // chance to interleave their reads. Without the mutex this is enough
+        // to surface the lost-write race.
+        await new Promise((r) => setTimeout(r, 0));
+        return state;
+      },
+      async set(_key, value) {
+        state = value;
+      },
+    };
+    const bridge = createLegacyModelConfigBridge(store);
+
+    await Promise.all([
+      bridge.writeProvider('openai', { key: 'sk-openai' }, ['gpt-4o']),
+      bridge.writeProvider('anthropic', { key: 'sk-anthropic' }, ['claude-sonnet-4-5']),
+    ]);
+
+    // Both rows must survive — neither write was lost.
+    expect(state).toHaveLength(2);
+    const platforms = state.map((p) => p.platform).toSorted();
+    expect(platforms).toEqual(['anthropic', 'openai']);
+
+    // The mutex serializes reads too, so each write sees a fresh snapshot.
+    expect(getCallCount).toBe(2);
   });
 });

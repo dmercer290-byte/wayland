@@ -43,6 +43,7 @@ const ERROR_KEY: Record<PanelErrorCode, string> = {
   cloud: 'errorCloud',
   ambiguous: 'errorAmbiguous',
   'no-models': 'errorNoModels',
+  'legacy-mirror-failed': 'errorLegacyMirrorFailed',
   unknown: 'errorUnknown',
 };
 
