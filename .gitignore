@@ -214,3 +214,6 @@ graphify-out/
 .blackboard/
 .planning/
 design-mockups/
+
+# Quarantine for deleted skills/assistants — never tracked
+.archive/

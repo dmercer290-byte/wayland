@@ -893,59 +893,6 @@ export const ASSISTANT_PRESETS: AssistantPreset[] = [
     },
   },
   {
-    id: 'social-job-publisher',
-    avatar: 'lucide:Megaphone',
-    presetAgentType: 'gemini',
-    category: 'write',
-    resourceDir: 'src/process/resources/assistant/social-job-publisher',
-    ruleFiles: {
-      'en-US': 'social-job-publisher.md',
-      'zh-CN': 'social-job-publisher.zh-CN.md',
-    },
-    skillFiles: {
-      'en-US': 'social-job-publisher-skills.md',
-      'zh-CN': 'social-job-publisher-skills.zh-CN.md',
-      'ru-RU': 'social-job-publisher-skills.ru-RU.md',
-    },
-    defaultEnabledSkills: ['xiaohongshu-recruiter', 'x-recruiter'],
-    nameI18n: {
-      'en-US': 'Social Job Publisher',
-      'zh-CN': '社交招聘发布助手',
-      'ru-RU': 'Публикатор вакансий в соцсетях',
-      'uk-UA': 'Публікатор вакансій',
-    },
-    descriptionI18n: {
-      'en-US': 'Expand hiring requests into a full JD, images, and publish to social platforms via connectors.',
-      'zh-CN': '扩写招聘需求为完整 JD 与图片，并通过 connector 发布到社交平台。',
-      'ru-RU':
-        'Разворачивает запрос на найм в полноценное описание вакансии и изображения, а затем публикует это в соцсетях через коннекторы.',
-      'uk-UA':
-        'Розгортає запит на найм у повноцінний опис вакансії та зображення, а потім публікує це в соцмережах через конектори.',
-    },
-    promptsI18n: {
-      'en-US': [
-        'Create a comprehensive job post for Senior Full-Stack Engineer',
-        'Draft an engaging hiring tweet for social media',
-        'Create a multi-platform job posting (LinkedIn, X, Redbook)',
-      ],
-      'zh-CN': [
-        '创建一份高级全栈工程师的完整招聘启事',
-        '起草一条适合社交媒体的招聘推文',
-        '创建多平台职位发布（LinkedIn、X、小红书）',
-      ],
-      'ru-RU': [
-        'Создай развёрнутую вакансию на позицию Senior Full-Stack Engineer',
-        'Составь привлекательный твит о найме для соцсетей',
-        'Создай публикацию вакансии для нескольких платформ (LinkedIn, X, Xiaohongshu)',
-      ],
-      'uk-UA': [
-        'Створити повний опис вакансії Senior Full-Stack інженера',
-        'Написати цікавий пост про найм для соцмереж',
-        'Створити пост про вакансію для кількох платформ (LinkedIn, X)',
-      ],
-    },
-  },
-  {
     id: 'moltbook',
     avatar: 'lucide:Users',
     presetAgentType: 'gemini',

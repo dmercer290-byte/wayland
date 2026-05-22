@@ -97,7 +97,7 @@ export const INTENTS: Record<IntentKey, IntentDef> = {
       {
         title: 'Publish across job boards',
         promptText: 'Draft a job posting and tailor it for LinkedIn, Indeed, and a careers page.',
-        targetAssistantId: 'social-job-publisher',
+        targetAssistantId: 'copy',
       },
     ],
   },
