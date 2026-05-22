@@ -995,6 +995,60 @@
   "providersPage": {
     "title": "プロバイダー"
   },
+  "modelsPage": {
+    "title": "モデル",
+    "subtitle": "キーまたは Google サインインでプロバイダーを接続すると、モデルが自動的に表示されます。",
+    "crumbAiModels": "AI モデル",
+    "connectedLabel": "接続済み",
+    "loadError": "接続済みプロバイダーを読み込めませんでした。しばらくしてから再試行してください。",
+    "connect": {
+      "title": "プロバイダーを接続",
+      "keyLabel": "API キーを貼り付け",
+      "keyPlaceholder": "任意のプロバイダーのキーを貼り付け…",
+      "connect": "接続",
+      "hintDefault": "Wayland がプロバイダーを自動的に認識します——選択は不要です。",
+      "hintAmbiguous": "OpenAI 形式のキーのようです——接続してプロバイダーを確認します。",
+      "recognized": "認識:",
+      "cloudHint": "このプロバイダーには「参照」からの認証フォームが必要です。",
+      "unrecognizedPrefix": "認識できないキー形式です——",
+      "unrecognizedBrowse": "「参照」からプロバイダーを選択してください",
+      "or": "または",
+      "google": "Google で続行",
+      "googleSuccess": "{{account}} として Google にサインインしました。",
+      "googleFailed": "Google サインインに失敗しました。再試行してください。",
+      "browse": "30 以上のプロバイダーをすべて参照 →",
+      "thatProvider": "そのプロバイダー",
+      "errorUnauthorized": "その {{provider}} キーは拒否されました——未承認です。キーを確認して再試行してください。",
+      "errorNoCredit": "接続しましたが、その {{provider}} キーには利用可能なクレジットがありません。モデルを実行するには請求を追加してください。",
+      "errorOffline": "{{provider}} に接続できませんでした——オフラインのようです。接続を確認して再試行してください。",
+      "errorUnrecognized": "そのキーは認識されませんでした。「参照」を開いてプロバイダーを選択してください。",
+      "errorNoModels": "{{provider}} に接続しましたが、モデルが返されませんでした。「管理」から更新してみてください。",
+      "errorUnknown": "{{provider}} に接続できませんでした。再試行してください。"
+    },
+    "detected": {
+      "found": "このマシンで {{provider}} API キーが見つかりました。使用しますか？",
+      "use": "使用する",
+      "ignore": "無視"
+    },
+    "row": {
+      "connected": "接続済み",
+      "testing": "テスト中…",
+      "manage": "管理",
+      "fix": "修正",
+      "modelCount": "{{count}} モデル",
+      "noModelsHint": "モデルなし——「管理」から更新",
+      "actionNeeded": "対応が必要——{{reason}}",
+      "errorUnauthorized": "キーが拒否されました",
+      "errorNoCredit": "利用可能なクレジットなし",
+      "errorOffline": "プロバイダーに接続できません",
+      "errorUnrecognized": "キーが認識されません",
+      "errorNoModels": "モデルが返されませんでした",
+      "errorUnknown": "接続の問題"
+    },
+    "empty": {
+      "note": "まだプロバイダーが接続されていません。上で 1 つ接続してください——最速のスタートは <1>Google で続行</1> です。"
+    }
+  },
   "mcpPage": {
     "title": "MCPサーバー"
   },

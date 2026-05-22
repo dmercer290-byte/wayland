@@ -993,6 +993,60 @@
   "providersPage": {
     "title": "Sağlayıcılar"
   },
+  "modelsPage": {
+    "title": "Modeller",
+    "subtitle": "Bir anahtar veya Google girişiyle bir sağlayıcı bağlayın; modelleriniz otomatik olarak görünür.",
+    "crumbAiModels": "Yapay Zeka Modelleri",
+    "connectedLabel": "Bağlı",
+    "loadError": "Bağlı sağlayıcılar yüklenemedi. Birazdan tekrar deneyin.",
+    "connect": {
+      "title": "Sağlayıcı bağla",
+      "keyLabel": "Bir API anahtarı yapıştır",
+      "keyPlaceholder": "Herhangi bir sağlayıcının anahtarını yapıştırın…",
+      "connect": "Bağlan",
+      "hintDefault": "Wayland sağlayıcıyı kendisi tanır — birini seçmenize gerek yok.",
+      "hintAmbiguous": "OpenAI biçiminde bir anahtar gibi görünüyor — sağlayıcıyı doğrulamak için bağlanın.",
+      "recognized": "Tanındı:",
+      "cloudHint": "bu sağlayıcı Gözat'tan bir kimlik bilgisi formu gerektirir.",
+      "unrecognizedPrefix": "Tanınmayan anahtar biçimi —",
+      "unrecognizedBrowse": "sağlayıcınızı Gözat'tan seçin",
+      "or": "veya",
+      "google": "Google ile devam et",
+      "googleSuccess": "{{account}} olarak Google'a giriş yapıldı.",
+      "googleFailed": "Google girişi başarısız oldu. Lütfen tekrar deneyin.",
+      "browse": "30+ sağlayıcının tümüne gözat →",
+      "thatProvider": "o sağlayıcı",
+      "errorUnauthorized": "{{provider}} anahtarı reddedildi — yetkisiz. Anahtarı kontrol edip tekrar deneyin.",
+      "errorNoCredit": "Bağlandı, ancak {{provider}} anahtarının kullanılabilir kredisi yok. Model çalıştırmak için faturalandırma ekleyin.",
+      "errorOffline": "{{provider}} adresine ulaşılamadı — çevrimdışı görünüyorsunuz. Bağlantınızı kontrol edip tekrar deneyin.",
+      "errorUnrecognized": "Anahtar tanınmadı. Gözat'ı açın ve sağlayıcınızı seçin.",
+      "errorNoModels": "{{provider}} bağlandı ancak hiç model döndürmedi. Yönet'ten yenilemeyi deneyin.",
+      "errorUnknown": "{{provider}} adresine bağlanılamadı. Lütfen tekrar deneyin."
+    },
+    "detected": {
+      "found": "Bu makinede bir {{provider}} API anahtarı bulundu. Kullanılsın mı?",
+      "use": "Kullan",
+      "ignore": "Yok say"
+    },
+    "row": {
+      "connected": "Bağlı",
+      "testing": "Test ediliyor…",
+      "manage": "Yönet",
+      "fix": "Düzelt",
+      "modelCount": "{{count}} model",
+      "noModelsHint": "Model yok — Yönet'ten yenileyin",
+      "actionNeeded": "İşlem gerekiyor — {{reason}}",
+      "errorUnauthorized": "anahtar reddedildi",
+      "errorNoCredit": "kullanılabilir kredi yok",
+      "errorOffline": "sağlayıcıya ulaşılamıyor",
+      "errorUnrecognized": "anahtar tanınmadı",
+      "errorNoModels": "model döndürülmedi",
+      "errorUnknown": "bağlantı sorunu"
+    },
+    "empty": {
+      "note": "Henüz bağlı sağlayıcı yok. Yukarıdan bir tane bağlayın — en hızlı başlangıç <1>Google ile devam et</1>."
+    }
+  },
   "mcpPage": {
     "title": "MCP Sunucuları"
   },

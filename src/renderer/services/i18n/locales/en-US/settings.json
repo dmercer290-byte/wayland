@@ -1659,6 +1659,60 @@
     "subtitle": "Connect AI model providers. Paste a key to auto-detect the provider and fetch its model catalog.",
     "emptyHint": "No providers connected yet. Paste a key above to get started."
   },
+  "modelsPage": {
+    "title": "Models",
+    "subtitle": "Connect a provider with a key or a Google sign-in. Your models appear automatically.",
+    "crumbAiModels": "AI Models",
+    "connectedLabel": "Connected",
+    "loadError": "Couldn't load your connected providers. Try again in a moment.",
+    "connect": {
+      "title": "Connect a provider",
+      "keyLabel": "Paste an API key",
+      "keyPlaceholder": "Paste a key from any provider…",
+      "connect": "Connect",
+      "hintDefault": "Wayland recognizes the provider on its own — no need to pick one.",
+      "hintAmbiguous": "Looks like an OpenAI-style key — connect to confirm the provider.",
+      "recognized": "Recognized:",
+      "cloudHint": "this provider needs a credential form from Browse.",
+      "unrecognizedPrefix": "Not a recognized key format —",
+      "unrecognizedBrowse": "pick your provider from Browse",
+      "or": "or",
+      "google": "Continue with Google",
+      "googleSuccess": "Signed in to Google as {{account}}.",
+      "googleFailed": "Google sign-in failed. Please try again.",
+      "browse": "Browse all 30+ providers →",
+      "thatProvider": "that provider",
+      "errorUnauthorized": "That {{provider}} key was rejected — unauthorized. Check the key and try again.",
+      "errorNoCredit": "Connected, but that {{provider}} key has no usable credit. Add billing to run models.",
+      "errorOffline": "Couldn't reach {{provider}} — you appear to be offline. Check your connection and retry.",
+      "errorUnrecognized": "That key was not recognized. Open Browse and pick your provider.",
+      "errorNoModels": "{{provider}} connected but returned no models. Try refreshing it from Manage.",
+      "errorUnknown": "Couldn't connect to {{provider}}. Please try again."
+    },
+    "detected": {
+      "found": "Found a {{provider}} API key on this machine. Use it?",
+      "use": "Use it",
+      "ignore": "Ignore"
+    },
+    "row": {
+      "connected": "Connected",
+      "testing": "Testing…",
+      "manage": "Manage",
+      "fix": "Fix",
+      "modelCount": "{{count}} models",
+      "noModelsHint": "No models — refresh from Manage",
+      "actionNeeded": "Action needed — {{reason}}",
+      "errorUnauthorized": "key rejected",
+      "errorNoCredit": "no usable credit",
+      "errorOffline": "can't reach provider",
+      "errorUnrecognized": "key not recognized",
+      "errorNoModels": "no models returned",
+      "errorUnknown": "connection problem"
+    },
+    "empty": {
+      "note": "No providers connected yet. Connect one above — the fastest start is <1>Continue with Google</1>."
+    }
+  },
   "mcpPage": {
     "title": "MCP Servers",
     "subtitle": "Connect Wayland to external tool servers via Model Context Protocol. Add, configure, and sync MCP servers across your agents."

@@ -1,0 +1,211 @@
+import React, { useCallback, useMemo, useState } from 'react';
+import { Button, Input } from '@arco-design/web-react';
+import { Caution } from '@icon-park/react';
+import { useTranslation } from 'react-i18next';
+import type { IModelRegistryConnectResult, IModelRegistryDetectedKey } from '@/common/adapter/ipcBridge';
+import type { ConnectError, ProviderId } from '@process/providers/types';
+import { providerMeta, recognizeKey } from '../providerCatalog';
+import DetectedStrip from './DetectedStrip';
+import GoogleButton from './GoogleButton';
+import styles from '../ModelsSettings.module.css';
+
+type Props = {
+  /** Auto-discovered keys to surface for explicit Use / Ignore. */
+  detectedKeys: IModelRegistryDetectedKey[];
+  /** Connect a pasted key for an explicitly recognized provider. */
+  onConnectKey: (providerId: ProviderId, key: string) => Promise<IModelRegistryConnectResult>;
+  /** Connect an auto-discovered key (resolved main-side). */
+  onUseDetected: (detectedKey: IModelRegistryDetectedKey) => Promise<IModelRegistryConnectResult>;
+  /** Dismiss an auto-discovered key. */
+  onIgnoreDetected: (detectedKey: IModelRegistryDetectedKey) => void;
+  /** Open the Browse-all-providers modal (Packet 2C). */
+  onBrowse: () => void;
+};
+
+/** Map a `ConnectError` code to the inline-error i18n key suffix. */
+const ERROR_KEY: Record<ConnectError, string> = {
+  unauthorized: 'errorUnauthorized',
+  'no-credit': 'errorNoCredit',
+  offline: 'errorOffline',
+  unrecognized: 'errorUnrecognized',
+  'no-models': 'errorNoModels',
+  unknown: 'errorUnknown',
+};
+
+/**
+ * The connect-a-provider hero (prototype `#screen-models` `.connect`).
+ *
+ * Connect flow (spec §4.3): paste key → live recognition → Connect → a real
+ * test call main-side → connected row. Every failure branch renders as inline
+ * panel state — unrecognized format, unauthorized, offline, no-credit,
+ * no-models — never a silent wrong guess and never a false green.
+ */
+const ConnectPanel: React.FC<Props> = ({ detectedKeys, onConnectKey, onUseDetected, onIgnoreDetected, onBrowse }) => {
+  const { t } = useTranslation();
+  const [keyValue, setKeyValue] = useState('');
+  const [connecting, setConnecting] = useState(false);
+  const [usingDetected, setUsingDetected] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState<string | null>(null);
+  const [errorProvider, setErrorProvider] = useState<string | null>(null);
+
+  const recognition = useMemo(() => recognizeKey(keyValue), [keyValue]);
+
+  /** Live recognition hint shown under the key input. */
+  const hint = useMemo<React.ReactNode>(() => {
+    if (!keyValue.trim()) {
+      return t('settings.modelsPage.connect.hintDefault');
+    }
+    if (recognition.kind === 'recognized') {
+      return (
+        <>
+          {t('settings.modelsPage.connect.recognized')} <b>{providerMeta(recognition.provider).displayName}</b>
+        </>
+      );
+    }
+    if (recognition.kind === 'cloud') {
+      return (
+        <>
+          {t('settings.modelsPage.connect.recognized')} <b>{providerMeta(recognition.provider).displayName}</b>
+          {' — '}
+          {t('settings.modelsPage.connect.cloudHint')}
+        </>
+      );
+    }
+    if (recognition.kind === 'ambiguous') {
+      return t('settings.modelsPage.connect.hintAmbiguous');
+    }
+    // unknown
+    return (
+      <>
+        {t('settings.modelsPage.connect.unrecognizedPrefix')}{' '}
+        <b>{t('settings.modelsPage.connect.unrecognizedBrowse')}</b>
+      </>
+    );
+  }, [keyValue, recognition, t]);
+
+  const onInput = useCallback((value: string) => {
+    setKeyValue(value);
+    setErrorKey(null);
+    setErrorProvider(null);
+  }, []);
+
+  const showError = useCallback((code: ConnectError, providerName?: string) => {
+    setErrorKey(ERROR_KEY[code]);
+    setErrorProvider(providerName ?? null);
+  }, []);
+
+  const handleConnect = useCallback(async () => {
+    const key = keyValue.trim();
+    if (!key) return;
+
+    // Unrecognized / cloud / ambiguous formats never connect as a bare key —
+    // the user is sent to Browse to pick the provider explicitly (spec §4.3).
+    if (recognition.kind === 'unknown') {
+      showError('unrecognized');
+      return;
+    }
+    if (recognition.kind === 'cloud') {
+      showError('unrecognized', providerMeta(recognition.provider).displayName);
+      return;
+    }
+    if (recognition.kind === 'ambiguous') {
+      showError('unrecognized');
+      return;
+    }
+
+    setConnecting(true);
+    setErrorKey(null);
+    setErrorProvider(null);
+    const providerName = providerMeta(recognition.provider).displayName;
+    try {
+      const res = await onConnectKey(recognition.provider, key);
+      if (res.ok) {
+        setKeyValue('');
+      } else {
+        showError(res.error ?? 'unknown', providerName);
+      }
+    } catch {
+      showError('unknown', providerName);
+    } finally {
+      setConnecting(false);
+    }
+  }, [keyValue, recognition, onConnectKey, showError]);
+
+  const handleUseDetected = useCallback(
+    async (detectedKey: IModelRegistryDetectedKey) => {
+      setUsingDetected(detectedKey.providerId);
+      try {
+        const res = await onUseDetected(detectedKey);
+        if (!res.ok) {
+          showError(res.error ?? 'unknown', providerMeta(detectedKey.providerId).displayName);
+        }
+      } catch {
+        showError('unknown', providerMeta(detectedKey.providerId).displayName);
+      } finally {
+        setUsingDetected(null);
+      }
+    },
+    [onUseDetected, showError]
+  );
+
+  const errorText = errorKey
+    ? t(`settings.modelsPage.connect.${errorKey}`, {
+        provider: errorProvider ?? t('settings.modelsPage.connect.thatProvider'),
+      })
+    : null;
+
+  return (
+    <div className={styles.connectPanel}>
+      <h3 className={styles.connectTitle}>{t('settings.modelsPage.connect.title')}</h3>
+
+      {detectedKeys.map((dk) => (
+        <DetectedStrip
+          key={`${dk.providerId}:${dk.source}`}
+          detectedKey={dk}
+          onUse={handleUseDetected}
+          onIgnore={onIgnoreDetected}
+          busy={usingDetected === dk.providerId}
+        />
+      ))}
+
+      <div className={styles.keyLabel}>{t('settings.modelsPage.connect.keyLabel')}</div>
+      <div className={styles.keyRow}>
+        <Input.Password
+          value={keyValue}
+          onChange={onInput}
+          onPressEnter={() => void handleConnect()}
+          placeholder={t('settings.modelsPage.connect.keyPlaceholder')}
+          className='flex-1'
+          disabled={connecting}
+        />
+        <Button type='primary' loading={connecting} disabled={!keyValue.trim()} onClick={() => void handleConnect()}>
+          {t('settings.modelsPage.connect.connect')}
+        </Button>
+      </div>
+      <div className={styles.keyHint}>{hint}</div>
+
+      {errorText && (
+        <div className={styles.connectError} role='alert'>
+          <Caution theme='outline' size={14} fill='currentColor' />
+          <span>{errorText}</span>
+        </div>
+      )}
+
+      <div className={styles.orDivider}>
+        <span>{t('settings.modelsPage.connect.or')}</span>
+      </div>
+
+      <div className={styles.googleBtn}>
+        <GoogleButton />
+      </div>
+
+      <div className={styles.browseLink}>
+        <Button type='text' size='small' onClick={onBrowse}>
+          {t('settings.modelsPage.connect.browse')}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+export default ConnectPanel;

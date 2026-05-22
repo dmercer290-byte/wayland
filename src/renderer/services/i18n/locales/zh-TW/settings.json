@@ -995,6 +995,60 @@
   "providersPage": {
     "title": "模型提供商"
   },
+  "modelsPage": {
+    "title": "模型",
+    "subtitle": "用金鑰或 Google 登入連接提供商，你的模型會自動出現。",
+    "crumbAiModels": "AI 模型",
+    "connectedLabel": "已連接",
+    "loadError": "無法載入已連接的提供商，請稍後重試。",
+    "connect": {
+      "title": "連接提供商",
+      "keyLabel": "貼上 API 金鑰",
+      "keyPlaceholder": "貼上任何提供商的金鑰…",
+      "connect": "連接",
+      "hintDefault": "Wayland 會自動辨識提供商——無需手動選擇。",
+      "hintAmbiguous": "看起來是 OpenAI 風格的金鑰——連接後確認提供商。",
+      "recognized": "已辨識：",
+      "cloudHint": "此提供商需要在「瀏覽」中填寫憑證表單。",
+      "unrecognizedPrefix": "無法辨識的金鑰格式——",
+      "unrecognizedBrowse": "請在「瀏覽」中選擇你的提供商",
+      "or": "或",
+      "google": "使用 Google 繼續",
+      "googleSuccess": "已以 {{account}} 登入 Google。",
+      "googleFailed": "Google 登入失敗，請重試。",
+      "browse": "瀏覽全部 30+ 提供商 →",
+      "thatProvider": "該提供商",
+      "errorUnauthorized": "該 {{provider}} 金鑰被拒絕——未授權。請檢查金鑰後重試。",
+      "errorNoCredit": "已連接，但該 {{provider}} 金鑰沒有可用額度。請新增帳單以執行模型。",
+      "errorOffline": "無法連接到 {{provider}}——你似乎已離線。請檢查網路後重試。",
+      "errorUnrecognized": "無法辨識該金鑰。請開啟「瀏覽」並選擇你的提供商。",
+      "errorNoModels": "{{provider}} 已連接但未回傳任何模型。請在「管理」中嘗試重新整理。",
+      "errorUnknown": "無法連接到 {{provider}}，請重試。"
+    },
+    "detected": {
+      "found": "在本機上發現一個 {{provider}} API 金鑰。使用它嗎？",
+      "use": "使用",
+      "ignore": "忽略"
+    },
+    "row": {
+      "connected": "已連接",
+      "testing": "測試中…",
+      "manage": "管理",
+      "fix": "修復",
+      "modelCount": "{{count}} 個模型",
+      "noModelsHint": "無模型——請在「管理」中重新整理",
+      "actionNeeded": "需要處理——{{reason}}",
+      "errorUnauthorized": "金鑰被拒絕",
+      "errorNoCredit": "無可用額度",
+      "errorOffline": "無法連接提供商",
+      "errorUnrecognized": "金鑰無法辨識",
+      "errorNoModels": "未回傳模型",
+      "errorUnknown": "連接問題"
+    },
+    "empty": {
+      "note": "還沒有連接任何提供商。在上方連接一個——最快的開始方式是 <1>使用 Google 繼續</1>。"
+    }
+  },
   "mcpPage": {
     "title": "MCP 伺服器"
   },

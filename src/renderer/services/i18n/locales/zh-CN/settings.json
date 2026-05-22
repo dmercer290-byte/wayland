@@ -994,6 +994,60 @@
   "providersPage": {
     "title": "模型提供商"
   },
+  "modelsPage": {
+    "title": "模型",
+    "subtitle": "用密钥或 Google 登录连接提供商，你的模型会自动出现。",
+    "crumbAiModels": "AI 模型",
+    "connectedLabel": "已连接",
+    "loadError": "无法加载已连接的提供商，请稍后重试。",
+    "connect": {
+      "title": "连接提供商",
+      "keyLabel": "粘贴 API 密钥",
+      "keyPlaceholder": "粘贴任意提供商的密钥…",
+      "connect": "连接",
+      "hintDefault": "Wayland 会自动识别提供商——无需手动选择。",
+      "hintAmbiguous": "看起来是 OpenAI 风格的密钥——连接后确认提供商。",
+      "recognized": "已识别：",
+      "cloudHint": "该提供商需要在“浏览”中填写凭据表单。",
+      "unrecognizedPrefix": "无法识别的密钥格式——",
+      "unrecognizedBrowse": "请在“浏览”中选择你的提供商",
+      "or": "或",
+      "google": "使用 Google 继续",
+      "googleSuccess": "已以 {{account}} 登录 Google。",
+      "googleFailed": "Google 登录失败，请重试。",
+      "browse": "浏览全部 30+ 提供商 →",
+      "thatProvider": "该提供商",
+      "errorUnauthorized": "该 {{provider}} 密钥被拒绝——未授权。请检查密钥后重试。",
+      "errorNoCredit": "已连接，但该 {{provider}} 密钥没有可用额度。请添加账单以运行模型。",
+      "errorOffline": "无法连接到 {{provider}}——你似乎已离线。请检查网络后重试。",
+      "errorUnrecognized": "无法识别该密钥。请打开“浏览”并选择你的提供商。",
+      "errorNoModels": "{{provider}} 已连接但未返回任何模型。请在“管理”中尝试刷新。",
+      "errorUnknown": "无法连接到 {{provider}}，请重试。"
+    },
+    "detected": {
+      "found": "在本机上发现一个 {{provider}} API 密钥。使用它吗？",
+      "use": "使用",
+      "ignore": "忽略"
+    },
+    "row": {
+      "connected": "已连接",
+      "testing": "测试中…",
+      "manage": "管理",
+      "fix": "修复",
+      "modelCount": "{{count}} 个模型",
+      "noModelsHint": "无模型——请在“管理”中刷新",
+      "actionNeeded": "需要处理——{{reason}}",
+      "errorUnauthorized": "密钥被拒绝",
+      "errorNoCredit": "无可用额度",
+      "errorOffline": "无法连接提供商",
+      "errorUnrecognized": "密钥无法识别",
+      "errorNoModels": "未返回模型",
+      "errorUnknown": "连接问题"
+    },
+    "empty": {
+      "note": "还没有连接任何提供商。在上方连接一个——最快的开始方式是 <1>使用 Google 继续</1>。"
+    }
+  },
   "mcpPage": {
     "title": "MCP 服务器"
   },

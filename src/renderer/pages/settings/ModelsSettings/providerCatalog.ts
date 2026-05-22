@@ -1,0 +1,126 @@
+/**
+ * Renderer-safe provider metadata for the Models settings surface.
+ *
+ * The main-process `ProviderDetector` / `providerKeyPatterns` modules use Node
+ * APIs (`Buffer`) and cannot be imported into the renderer. This file mirrors
+ * the same key-prefix recognition rules as a pure, browser-safe function, plus
+ * the display name / avatar styling each provider needs in the UI.
+ */
+import type { ProviderId } from '@process/providers/types';
+
+/** Visual + label metadata for one provider. */
+export type ProviderMeta = {
+  id: ProviderId;
+  /** Human label. Mirrors the Browse picker list. */
+  displayName: string;
+  /** Short avatar monogram. */
+  mono: string;
+  /** Avatar background color. Provider brand colors are intentional literals. */
+  bg: string;
+  /** Avatar foreground — true = dark text on a light avatar. */
+  darkText: boolean;
+};
+
+/** Provider metadata keyed by id. Display names mirror the Browse picker. */
+export const PROVIDER_META: Record<ProviderId, ProviderMeta> = {
+  anthropic: { id: 'anthropic', displayName: 'Anthropic', mono: 'A', bg: '#d4a27f', darkText: true },
+  openai: { id: 'openai', displayName: 'OpenAI', mono: 'O', bg: '#10a37f', darkText: false },
+  'google-gemini': { id: 'google-gemini', displayName: 'Google Gemini', mono: 'G', bg: '#1a73e8', darkText: false },
+  'aws-bedrock': { id: 'aws-bedrock', displayName: 'AWS Bedrock', mono: 'aws', bg: '#ff9900', darkText: true },
+  vertex: { id: 'vertex', displayName: 'Google Vertex AI', mono: 'V', bg: '#1a73e8', darkText: false },
+  openrouter: { id: 'openrouter', displayName: 'OpenRouter', mono: 'OR', bg: '#6566f1', darkText: false },
+  groq: { id: 'groq', displayName: 'Groq', mono: 'Gq', bg: '#f55036', darkText: false },
+  xai: { id: 'xai', displayName: 'xAI Grok', mono: 'x', bg: '#1a1a1a', darkText: false },
+  mistral: { id: 'mistral', displayName: 'Mistral', mono: 'M', bg: '#fa5111', darkText: false },
+  cohere: { id: 'cohere', displayName: 'Cohere', mono: 'C', bg: '#39594d', darkText: false },
+  perplexity: { id: 'perplexity', displayName: 'Perplexity', mono: 'P', bg: '#20808d', darkText: false },
+  together: { id: 'together', displayName: 'Together AI', mono: 'T', bg: '#0f6fff', darkText: false },
+  fireworks: { id: 'fireworks', displayName: 'Fireworks AI', mono: 'F', bg: '#5019c5', darkText: false },
+  cerebras: { id: 'cerebras', displayName: 'Cerebras', mono: 'Cb', bg: '#f15a29', darkText: false },
+  replicate: { id: 'replicate', displayName: 'Replicate', mono: 'R', bg: '#1a1a1a', darkText: false },
+  huggingface: { id: 'huggingface', displayName: 'Hugging Face', mono: 'HF', bg: '#ffd21e', darkText: true },
+  nvidia: { id: 'nvidia', displayName: 'NVIDIA NIM', mono: 'N', bg: '#76b900', darkText: true },
+  anyscale: { id: 'anyscale', displayName: 'Anyscale', mono: 'As', bg: '#1444f0', darkText: false },
+  deepseek: { id: 'deepseek', displayName: 'DeepSeek', mono: 'D', bg: '#4d6bfe', darkText: false },
+  moonshot: { id: 'moonshot', displayName: 'Moonshot', mono: 'Ms', bg: '#16151a', darkText: false },
+  qwen: { id: 'qwen', displayName: 'Qwen', mono: 'Q', bg: '#615ced', darkText: false },
+  baichuan: { id: 'baichuan', displayName: 'Baichuan', mono: 'Bc', bg: '#ff6a00', darkText: false },
+  lingyiwanwu: { id: 'lingyiwanwu', displayName: 'Yi', mono: 'Yi', bg: '#003425', darkText: false },
+  'zhipu-glm': { id: 'zhipu-glm', displayName: 'Zhipu GLM', mono: 'GLM', bg: '#3859ff', darkText: false },
+  minimax: { id: 'minimax', displayName: 'MiniMax', mono: 'Mm', bg: '#e8472b', darkText: false },
+  stability: { id: 'stability', displayName: 'Stability AI', mono: 'S', bg: '#330033', darkText: false },
+  deepgram: { id: 'deepgram', displayName: 'Deepgram', mono: 'Dg', bg: '#13ef93', darkText: true },
+  assemblyai: { id: 'assemblyai', displayName: 'AssemblyAI', mono: 'Ai', bg: '#2545fd', darkText: false },
+  elevenlabs: { id: 'elevenlabs', displayName: 'ElevenLabs', mono: 'EL', bg: '#1a1a1a', darkText: false },
+  azure: { id: 'azure', displayName: 'Azure OpenAI', mono: 'Az', bg: '#0078d4', darkText: false },
+  'openai-compatible': {
+    id: 'openai-compatible',
+    displayName: 'OpenAI-compatible',
+    mono: 'API',
+    bg: '#5a3df0',
+    darkText: false,
+  },
+};
+
+/** Look up provider metadata, falling back to a generic tile for unknown ids. */
+export function providerMeta(id: ProviderId): ProviderMeta {
+  return (
+    PROVIDER_META[id] ?? {
+      id,
+      displayName: id,
+      mono: id.charAt(0).toUpperCase(),
+      bg: '#5a3df0',
+      darkText: false,
+    }
+  );
+}
+
+/** Result of recognizing a provider from a pasted API key. */
+export type KeyRecognition =
+  | { kind: 'recognized'; provider: ProviderId }
+  | { kind: 'cloud'; provider: ProviderId }
+  | { kind: 'ambiguous'; candidates: ProviderId[] }
+  | { kind: 'unknown' };
+
+/**
+ * Pure, browser-safe key recognition. Mirrors the prefix rules in the
+ * main-process `providerKeyPatterns` — kept in sync intentionally so the UI can
+ * show live recognition without an IPC round-trip on every keystroke.
+ * A bare `sk-` key is `ambiguous`; the connect call confirms it main-side.
+ */
+export function recognizeKey(raw: string): KeyRecognition {
+  const key = raw.trim();
+  if (!key) return { kind: 'unknown' };
+
+  // Unique high-confidence prefixes.
+  if (key.startsWith('sk-ant-')) return { kind: 'recognized', provider: 'anthropic' };
+  if (key.startsWith('sk-or-')) return { kind: 'recognized', provider: 'openrouter' };
+  if (key.startsWith('sk-proj-')) return { kind: 'recognized', provider: 'openai' };
+  if (key.startsWith('AIza')) return { kind: 'recognized', provider: 'google-gemini' };
+  if (key.startsWith('gsk_')) return { kind: 'recognized', provider: 'groq' };
+  if (key.startsWith('xai-')) return { kind: 'recognized', provider: 'xai' };
+  if (key.startsWith('hf_')) return { kind: 'recognized', provider: 'huggingface' };
+  if (key.startsWith('pplx-')) return { kind: 'recognized', provider: 'perplexity' };
+  if (key.startsWith('r8_')) return { kind: 'recognized', provider: 'replicate' };
+  if (key.startsWith('tgp_')) return { kind: 'recognized', provider: 'together' };
+  if (key.startsWith('fw_')) return { kind: 'recognized', provider: 'fireworks' };
+  if (key.startsWith('csk-')) return { kind: 'recognized', provider: 'cerebras' };
+  if (key.startsWith('nvapi-')) return { kind: 'recognized', provider: 'nvidia' };
+  if (key.startsWith('esecret_')) return { kind: 'recognized', provider: 'anyscale' };
+  if (key.startsWith('dg_')) return { kind: 'recognized', provider: 'deepgram' };
+  if (key.startsWith('aai_')) return { kind: 'recognized', provider: 'assemblyai' };
+  if (key.startsWith('xi-api-')) return { kind: 'recognized', provider: 'elevenlabs' };
+
+  // Multi-field cloud provider — needs the credential form, not a bare key.
+  if (key.startsWith('AKIA') || key.startsWith('ASIA')) return { kind: 'cloud', provider: 'aws-bedrock' };
+
+  // Bare `sk-` — could be several providers. Confirmed main-side on connect.
+  if (key.startsWith('sk-')) {
+    return {
+      kind: 'ambiguous',
+      candidates: ['openai', 'deepseek', 'moonshot', 'qwen', 'baichuan', 'lingyiwanwu', 'stability'],
+    };
+  }
+
+  return { kind: 'unknown' };
+}
