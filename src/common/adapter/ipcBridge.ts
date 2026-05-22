@@ -28,6 +28,13 @@ import type { SpeechToTextRequest, SpeechToTextResult } from '../types/speech';
 import type { DownloadResult, VoiceAsset } from '../types/voiceAsset';
 import type { SkillSecurityReport, SkillIndexEntry, SkillSource, SkillVerdict } from '../types/skillTypes';
 import type { ImportResult } from '../../process/services/skills/SkillImport';
+import type {
+  ProviderId,
+  CatalogModel,
+  CuratedModel,
+  ProviderConnState,
+  ConnectError,
+} from '../../process/providers/types';
 
 export type SkillStats = {
   total: number;
@@ -1430,6 +1437,80 @@ export const providers = {
     { scope: 'chat' | 'coding' | 'vision' | 'image' | 'audio'; catalogId: string; modelId: string }
   >('providers.setDefault'),
   catalogUpdated: buildEmitter<{ catalogId: string }>('providers.catalogUpdated'),
+};
+
+// --- Models & Providers redesign (Wave 0 contract) ------------------------
+// New two-tier model registry. Distinct from the legacy `providers` namespace
+// above (which is removed in a later wave) — uses `modelRegistry.*` channel
+// strings so there is no runtime collision with `providers.*`.
+
+/** Result of a connect / re-key attempt against a provider. */
+export type IModelRegistryConnectResult = {
+  ok: boolean;
+  error?: ConnectError;
+  providerId?: ProviderId;
+};
+
+/** Result of a connectivity test against an already-connected provider. */
+export type IModelRegistryTestResult = {
+  ok: boolean;
+  error?: ConnectError;
+};
+
+/** A provider key discovered from the environment / known credential stores. */
+export type IModelRegistryDetectedKey = {
+  providerId: ProviderId;
+  source: string;
+};
+
+/** Live summary row for a connected provider in the registry. */
+export type IModelRegistryProviderView = {
+  providerId: ProviderId;
+  connectedVia: string;
+  state: ProviderConnState;
+  modelCount: number;
+  error?: ConnectError;
+};
+
+/** Full catalog + curated view for a single provider. */
+export type IModelRegistryCatalogView = {
+  catalog: CatalogModel[];
+  curated: CuratedModel[];
+};
+
+/** Credentials payload for `connect` — either a bare key or per-field creds. */
+export type IModelRegistryConnectArg =
+  | { key: string }
+  | { provider: ProviderId; fields: Record<string, string> };
+
+/** Credentials payload for `rekey` — either a bare key or per-field creds. */
+export type IModelRegistryRekeyCreds = { key: string } | { fields: Record<string, string> };
+
+export const modelRegistry = {
+  // Auto-discover provider keys from the environment / credential stores.
+  detectKeys: buildProvider<IModelRegistryDetectedKey[], void>('modelRegistry.detectKeys'),
+  // Connect a provider via a bare key or per-field credentials.
+  connect: buildProvider<IModelRegistryConnectResult, IModelRegistryConnectArg>('modelRegistry.connect'),
+  // Test connectivity of an already-connected provider.
+  testConnection: buildProvider<IModelRegistryTestResult, { providerId: ProviderId }>('modelRegistry.testConnection'),
+  // List all connected providers with live state + model counts.
+  list: buildProvider<IModelRegistryProviderView[], void>('modelRegistry.list'),
+  // Get the enriched catalog + curated view for a provider.
+  getCatalog: buildProvider<IModelRegistryCatalogView, { providerId: ProviderId }>('modelRegistry.getCatalog'),
+  // Enable / disable a single model within a provider's catalog.
+  toggleModel: buildProvider<{ ok: boolean }, { providerId: ProviderId; modelId: string; enabled: boolean }>(
+    'modelRegistry.toggleModel'
+  ),
+  // Re-fetch a provider's model list + re-enrich.
+  refresh: buildProvider<{ ok: boolean }, { providerId: ProviderId }>('modelRegistry.refresh'),
+  // Disconnect a provider and drop its persisted catalog.
+  disconnect: buildProvider<{ ok: boolean }, { providerId: ProviderId }>('modelRegistry.disconnect'),
+  // Replace a connected provider's credentials.
+  rekey: buildProvider<IModelRegistryConnectResult, { providerId: ProviderId; creds: IModelRegistryRekeyCreds }>(
+    'modelRegistry.rekey'
+  ),
+  // Curated model list for a given CLI agent / backend key.
+  curatedForAgent: buildProvider<CuratedModel[], { agentKey: string }>('modelRegistry.curatedForAgent'),
 };
 
 // Team Mode API
