@@ -103,16 +103,16 @@ const ChannelsIndex: React.FC = () => {
     <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-14px pt-12px overflow-hidden'>
       {CHANNELS.filter((c) => c.tier === tier).map((channel) => {
         const Icon = channel.icon;
-        const isComingSoon = channel.status === 'soon';
         const clickable = true;
         return (
           <article
             key={channel.id}
-            className={`flex flex-col gap-12px p-18px rounded-12px bg-[var(--color-bg-2)] border-2 border-solid border-[var(--color-border-2)] shadow-[var(--shadow-1)] min-h-[150px] min-w-0 transition-all duration-160 ${
-              isComingSoon
-                ? 'hover:border-[var(--color-border-3)] hover:bg-[var(--color-bg-3)] cursor-pointer'
-                : 'hover:border-[var(--brand-soft-border)] hover:bg-[var(--color-bg-3)] hover:-translate-y-2px cursor-pointer'
-            }`}
+            // Card recipe matches AssistantCard / TeamCard / WorkflowCard: 1px
+            // border, 12px radius, --color-bg-2 surface, 12/14/10 padding,
+            // primary-6 hover border + soft ring. Channels needs slightly more
+            // vertical room than 104px because of the status pill + CTA row.
+            className={`group flex flex-col gap-8px rounded-12px bg-[var(--color-bg-2)] border border-solid border-[var(--color-border-2)] min-h-[124px] min-w-0 cursor-pointer transition-[border-color,background,box-shadow,transform] duration-160 hover:border-[rgb(var(--primary-6))] hover:bg-[var(--color-fill-1)] hover:shadow-[0_0_0_1px_rgb(var(--primary-6)/0.4)] active:scale-[0.99]`}
+            style={{ padding: '12px 14px 10px' }}
             onClick={clickable ? () => navigate(`/settings/channels/${channel.id}`) : undefined}
             role={clickable ? 'button' : undefined}
             tabIndex={clickable ? 0 : undefined}
@@ -127,15 +127,15 @@ const ChannelsIndex: React.FC = () => {
                 : undefined
             }
           >
-            <div className='flex items-center gap-12px'>
-              <span className='w-36px h-36px rounded-9px bg-[var(--color-bg-4)] border border-[var(--color-border-1)] flex items-center justify-center shrink-0 text-[var(--color-text-1)]'>
+            <div className='flex items-center gap-10px'>
+              <span className='w-32px h-32px rounded-8px bg-[var(--color-fill-2)] flex items-center justify-center shrink-0 text-[var(--color-text-1)] overflow-hidden'>
                 <Icon size={18} />
               </span>
-              <div className='text-[14.5px] font-bold text-[var(--color-text-1)] min-w-0 truncate'>
+              <div className='text-14px font-semibold text-[var(--color-text-1)] min-w-0 truncate leading-20px'>
                 {channel.displayName}
               </div>
             </div>
-            <p className='text-[12.5px] text-[var(--color-text-3)] m-0 leading-[1.5]'>{t(channel.taglineKey)}</p>
+            <p className='text-[12.5px] text-[var(--color-text-3)] m-0 leading-[18px]'>{t(channel.taglineKey)}</p>
             <div className='flex items-center justify-between gap-8px mt-auto'>
               <span
                 className={`inline-flex items-center whitespace-nowrap px-8px py-2px rounded-full text-11px font-medium ${STATUS_STYLES[channel.status]}`}
