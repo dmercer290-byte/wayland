@@ -92,10 +92,4 @@ export type CuratedModel = CatalogModel & {
 export type ProviderConnState = 'connected' | 'testing' | 'error';
 
 /** Classified failure reason from a connect / test-connection attempt. */
-export type ConnectError =
-  | 'unauthorized'
-  | 'no-credit'
-  | 'offline'
-  | 'unrecognized'
-  | 'no-models'
-  | 'unknown';
+export type ConnectError = 'unauthorized' | 'no-credit' | 'offline' | 'unrecognized' | 'no-models' | 'unknown';
