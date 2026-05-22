@@ -10,6 +10,7 @@ import type { AcpBackendConfig, AvailableAgent } from '../types';
 import React from 'react';
 import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 import { isImageAvatar } from '@/renderer/utils/avatar';
+import { getLucideIcon } from '@/renderer/utils/lucideAvatar';
 import { Dropdown, Menu } from '@arco-design/web-react';
 import styles from '../index.module.css';
 
@@ -39,8 +40,11 @@ const PresetAgentTag: React.FC<PresetAgentTagProps> = ({
   onAgentSwitch,
 }) => {
   const avatarValue = agentInfo.avatar?.trim();
-  const mappedAvatar = avatarValue ? CUSTOM_AVATAR_IMAGE_MAP[avatarValue] : undefined;
-  const resolvedAvatar = avatarValue ? resolveExtensionAssetUrl(avatarValue) : undefined;
+  const LucideIconComponent = getLucideIcon(avatarValue);
+  const mappedAvatar =
+    !LucideIconComponent && avatarValue ? CUSTOM_AVATAR_IMAGE_MAP[avatarValue] : undefined;
+  const resolvedAvatar =
+    !LucideIconComponent && avatarValue ? resolveExtensionAssetUrl(avatarValue) : undefined;
   const avatarImage = mappedAvatar || resolvedAvatar;
   const showImage = Boolean(avatarImage && isImageAvatar(avatarImage));
   const agent = customAgents.find((a) => a.id === agentInfo.customAgentId);
@@ -78,7 +82,9 @@ const PresetAgentTag: React.FC<PresetAgentTagProps> = ({
           <ChevronDown size={12} />
         </span>
       ) : null}
-      {showImage ? (
+      {LucideIconComponent ? (
+        <LucideIconComponent size={15} className='text-[var(--color-text-2)] flex-shrink-0' />
+      ) : showImage ? (
         <img src={avatarImage} alt='' width={15} height={15} style={{ objectFit: 'contain', flexShrink: 0 }} />
       ) : avatarValue ? (
         <span style={{ fontSize: 14, lineHeight: '15px', flexShrink: 0 }}>{avatarValue}</span>

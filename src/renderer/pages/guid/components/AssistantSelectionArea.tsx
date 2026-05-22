@@ -25,6 +25,7 @@ import { Message } from '@arco-design/web-react';
 import React, { useCallback, useLayoutEffect, useMemo } from 'react';
 import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 import { isImageAvatar } from '@/renderer/utils/avatar';
+import { getLucideIcon } from '@/renderer/utils/lucideAvatar';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
@@ -291,8 +292,11 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
           })
           .map((assistant) => {
             const avatarValue = assistant.avatar?.trim();
-            const mappedAvatar = avatarValue ? CUSTOM_AVATAR_IMAGE_MAP[avatarValue] : undefined;
-            const resolvedAvatar = avatarValue ? resolveExtensionAssetUrl(avatarValue) : undefined;
+            const LucideIconComponent = getLucideIcon(avatarValue);
+            const mappedAvatar =
+              !LucideIconComponent && avatarValue ? CUSTOM_AVATAR_IMAGE_MAP[avatarValue] : undefined;
+            const resolvedAvatar =
+              !LucideIconComponent && avatarValue ? resolveExtensionAssetUrl(avatarValue) : undefined;
             const avatarImage = mappedAvatar || resolvedAvatar;
             const showImage = Boolean(avatarImage && isImageAvatar(avatarImage));
             return (
@@ -306,7 +310,9 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
                 }}
                 onClick={() => onSelectAssistant(`custom:${assistant.id}`)}
               >
-                {showImage ? (
+                {LucideIconComponent ? (
+                  <LucideIconComponent size={16} className='text-[var(--color-text-2)]' />
+                ) : showImage ? (
                   <img src={avatarImage} alt='' width={16} height={16} style={{ objectFit: 'contain' }} />
                 ) : avatarValue ? (
                   <span style={{ fontSize: 16, lineHeight: '18px' }}>{avatarValue}</span>

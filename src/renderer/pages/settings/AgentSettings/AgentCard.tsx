@@ -10,6 +10,7 @@ import { Avatar, Button, Switch, Tooltip, Typography } from '@arco-design/web-re
 import { useTranslation } from 'react-i18next';
 import { resolveAgentLogo } from '@/renderer/utils/model/agentLogo';
 import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
+import { getLucideIcon } from '@/renderer/utils/lucideAvatar';
 import type { AcpBackendConfig } from '@/common/types/acpTypes';
 
 type DetectedAgent = {
@@ -114,6 +115,7 @@ const AgentCard: React.FC<AgentCardProps> = (props) => {
   }
 
   const { agent, onEdit, onDelete, onToggle } = props;
+  const LucideIconComponent = getLucideIcon(agent.avatar);
 
   return (
     <div className='flex items-center justify-between px-16px py-10px rd-8px bg-aou-1 hover:bg-aou-2'>
@@ -123,7 +125,11 @@ const AgentCard: React.FC<AgentCardProps> = (props) => {
           shape='square'
           style={{ flexShrink: 0, backgroundColor: agent.avatar ? 'var(--color-fill-2)' : 'transparent', fontSize: 18 }}
         >
-          {agent.avatar || <Bot size={20} />}
+          {LucideIconComponent ? (
+            <LucideIconComponent size={18} className='text-[var(--color-text-2)]' />
+          ) : (
+            agent.avatar || <Bot size={20} />
+          )}
         </Avatar>
         <div className='min-w-0 flex-1'>
           <Typography.Text className='font-medium text-14px'>{agent.name || 'Custom Agent'}</Typography.Text>

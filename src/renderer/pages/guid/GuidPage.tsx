@@ -11,6 +11,7 @@ import { resolveLocaleKey } from '@/common/utils';
 import { useInputFocusRing } from '@/renderer/hooks/chat/useInputFocusRing';
 import { openExternalUrl, resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 import { isImageAvatar } from '@/renderer/utils/avatar';
+import { getLucideIcon } from '@/renderer/utils/lucideAvatar';
 import { useConversationTabs } from '@/renderer/pages/conversation/hooks/ConversationTabsContext';
 import { CUSTOM_AVATAR_IMAGE_MAP } from './constants';
 import AgentPillBar from './components/AgentPillBar';
@@ -392,6 +393,10 @@ const GuidPage: React.FC = () => {
     const selectedAssistant = agentSelection.customAgents.find((item) => candidates.has(item.id));
     const avatarValue = selectedAssistant?.avatar?.trim() || agentSelection.selectedAgentInfo?.avatar?.trim();
     if (!avatarValue) return { kind: 'icon' as const };
+    const LucideIconComponent = getLucideIcon(avatarValue);
+    if (LucideIconComponent) {
+      return { kind: 'lucide' as const, Icon: LucideIconComponent };
+    }
     const mappedAvatar = CUSTOM_AVATAR_IMAGE_MAP[avatarValue];
     const resolvedAvatar = resolveExtensionAssetUrl(avatarValue);
     const avatarImage = mappedAvatar || resolvedAvatar;
@@ -638,7 +643,12 @@ const GuidPage: React.FC = () => {
                   />
                   <p className={`${styles.heroTitle} text-2xl font-semibold mb-0 text-0`}>
                     <span className={styles.heroTitleInlineIcon} aria-hidden='true'>
-                      {selectedAssistantAvatar?.kind === 'image' ? (
+                      {selectedAssistantAvatar?.kind === 'lucide' ? (
+                        (() => {
+                          const Icon = selectedAssistantAvatar.Icon;
+                          return <Icon size={26} className='text-[var(--color-text-1)]' />;
+                        })()
+                      ) : selectedAssistantAvatar?.kind === 'image' ? (
                         <img
                           src={selectedAssistantAvatar.value}
                           alt=''

@@ -7,6 +7,7 @@ import type { DetectedAgentKind } from '@/common/types/detectedAgent';
 import { getSendBoxDraftHook } from '@renderer/hooks/chat/useSendBoxDraft';
 import { getAgentLogo } from '@renderer/utils/model/agentLogo';
 import { usePresetAssistantInfo } from '@renderer/hooks/agent/usePresetAssistantInfo';
+import { getLucideIcon } from '@renderer/utils/lucideAvatar';
 
 const useAcpDraft = getSendBoxDraftHook('acp', { _type: 'acp', atPath: [], content: '', uploadFile: [] });
 const useGeminiDraft = getSendBoxDraftHook('gemini', { _type: 'gemini', atPath: [], content: '', uploadFile: [] });
@@ -115,6 +116,18 @@ const TeamChatEmptyState: React.FC<Props> = ({ conversationId }) => {
   // and backend-logo branches above it.
   const renderAvatar = () => {
     if (presetInfo) {
+      const LucideIconComponent = getLucideIcon(presetInfo.lucideIcon);
+      if (LucideIconComponent) {
+        return (
+          <span
+            data-testid='team-chat-empty-state-avatar'
+            data-variant='lucide'
+            className='w-48px h-48px rounded-8px flex items-center justify-center bg-fill-2'
+          >
+            <LucideIconComponent size={28} className='text-[var(--color-text-2)]' />
+          </span>
+        );
+      }
       if (presetInfo.isEmoji) {
         return (
           <span
