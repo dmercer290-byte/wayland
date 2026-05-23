@@ -86,6 +86,12 @@ export interface IConfigStorageRefer {
   colorScheme: string;
   /** User's preferred display name for the new-chat greeting. Empty = use the OS account name. */
   'user.displayName'?: string;
+  /**
+   * v0.4.7 — Install-scoped UUID generated on first launch. Seeds the
+   * Kickoff SuggestionEngine's per-day deterministic shuffle so fresh
+   * installs don't all collapse to the same suggestion on day 1.
+   */
+  'app.installUuid'?: string;
   /** Persisted app-wide UI zoom factor for Display settings */
   'ui.zoomFactor'?: number;
   /** 桌面模式下是否自动启用 WebUI / Auto-enable WebUI in desktop mode */

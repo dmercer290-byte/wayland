@@ -29,6 +29,10 @@ import type { DownloadResult, VoiceAsset } from '../types/voiceAsset';
 import type { SkillSecurityReport, SkillIndexEntry, SkillSource, SkillVerdict } from '../types/skillTypes';
 import type { ImportResult } from '../../process/services/skills/SkillImport';
 import type {
+  KickoffResult,
+  KickoffTelemetryEvent,
+} from '../../process/services/kickoff/types';
+import type {
   ProviderId,
   CatalogModel,
   CuratedModel,
@@ -1696,4 +1700,12 @@ export const storage = {
   ),
   importBackup: buildProvider<{ ok: boolean }, { passphrase?: string }>('storage:importBackup'),
   resetAll: buildProvider<void, void>('storage:resetAll'),
+};
+
+// v0.4.7 — Kickoff suggestion engine. Yes-bias card surfaced on new-chat
+// empty-state. Engine walks the 5-level cascade in the main process; the
+// renderer just consumes the result through this namespace.
+export const kickoff = {
+  suggest: buildProvider<KickoffResult, { assistantId: string }>('kickoff:suggest'),
+  telemetry: buildProvider<void, KickoffTelemetryEvent>('kickoff:telemetry'),
 };
