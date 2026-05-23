@@ -22,7 +22,8 @@
     "kickoff": {
       "accept": "はい、始めましょう",
       "redirect": "他のこと",
-      "dismissAria": "提案を閉じる"
+      "dismissAria": "提案を閉じる",
+      "regionAria": "提案された最初のメッセージ"
     }
   }
 }

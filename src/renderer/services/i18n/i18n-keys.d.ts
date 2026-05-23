@@ -698,6 +698,7 @@ export type I18nKey =
   | 'guid.newChat.kickoff.accept'
   | 'guid.newChat.kickoff.dismissAria'
   | 'guid.newChat.kickoff.redirect'
+  | 'guid.newChat.kickoff.regionAria'
   | 'guid.newChat.pillBar.label'
   | 'guid.newChat.pillBar.pillLabel'
   | 'guid.newChat.recents.heading'

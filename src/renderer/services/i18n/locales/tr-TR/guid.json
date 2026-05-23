@@ -22,7 +22,8 @@
     "kickoff": {
       "accept": "Tamam, başlayalım",
       "redirect": "Başka bir şey",
-      "dismissAria": "Öneriyi kapat"
+      "dismissAria": "Öneriyi kapat",
+      "regionAria": "Önerilen ilk mesaj"
     }
   }
 }

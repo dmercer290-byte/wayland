@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Button } from '@arco-design/web-react';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -37,8 +37,38 @@ export type KickoffCardProps = {
  */
 const KickoffCard: React.FC<KickoffCardProps> = ({ text, onAccept, onRedirect, onDismiss }) => {
   const { t } = useTranslation();
+
+  // v0.4.7.1 (D-M-4) — Document-level Escape listener for keyboard dismissal.
+  // Scoped to the card lifetime so the listener detaches on unmount and
+  // doesn't leak across new-chat → conversation route transitions.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onDismiss();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onDismiss]);
+
   return (
-    <div className={styles.card} data-testid='new-chat-kickoff-card'>
+    <div
+      className={styles.card}
+      data-testid='new-chat-kickoff-card'
+      // v0.4.7.1 (D-M-4) — region role + polite live region so screen readers
+      // announce the suggestion without stealing focus from the input. The
+      // aria-label is added in the i18n bundle under guid.newChat.kickoff.
+      role='region'
+      aria-live='polite'
+      aria-label={t('guid.newChat.kickoff.regionAria', { defaultValue: 'Suggested first message' })}
+    >
+      {/* v0.4.7.1 (D-L-1) — Raw <button> retained intentionally so the dismiss
+          × stays peer-weighted with the body content. Arco Button would force
+          a filled/outlined visual that competes with the primary Accept CTA.
+          Same precedent set by IntentSuggestionPanel. */}
+      {/* eslint-disable-next-line wayland/no-raw-button */}
       <button
         type='button'
         onClick={onDismiss}
@@ -53,6 +83,10 @@ const KickoffCard: React.FC<KickoffCardProps> = ({ text, onAccept, onRedirect, o
         <Button type='primary' onClick={onAccept} data-testid='new-chat-kickoff-accept'>
           {t('guid.newChat.kickoff.accept', { defaultValue: "Yes, let's start" })}
         </Button>
+        {/* v0.4.7.1 (D-L-1) — Same rationale as the dismiss button: the
+            "Something else" affordance is a peer-weighted text link, not a
+            filled CTA. Arco Button would over-emphasize it. */}
+        {/* eslint-disable-next-line wayland/no-raw-button */}
         <button
           type='button'
           onClick={onRedirect}

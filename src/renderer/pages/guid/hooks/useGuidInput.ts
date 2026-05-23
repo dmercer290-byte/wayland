@@ -8,7 +8,8 @@ import { useDragUpload } from '@/renderer/hooks/file/useDragUpload';
 import { usePasteService } from '@/renderer/hooks/file/usePasteService';
 import { allSupportedExts, type FileMetadata } from '@/renderer/services/FileService';
 import { measureCaretTop, scrollCaretToLastLine } from '../utils/caretUtils';
-import { useCallback, useEffect, useState } from 'react';
+import type { RefTextAreaType } from '@arco-design/web-react/es/Input/textarea';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type GuidInputResult = {
   input: string;
@@ -23,6 +24,13 @@ export type GuidInputResult = {
   handleFilesPasted: (pastedFiles: FileMetadata[]) => void;
   handleFilesUploaded: (uploadedPaths: string[]) => void;
   handleRemoveFile: (targetPath: string) => void;
+  /**
+   * v0.4.7.1 (RENDERER-1) — Ref attached to the Arco `Input.TextArea` so the
+   * Kickoff `Accept` flow and the IntentSuggestionPanel prompt-accept flow
+   * can actually focus the DOM textarea after prefilling. Arco exposes both
+   * `.focus()` and `.dom` on this ref.
+   */
+  textareaRef: React.RefObject<RefTextAreaType | null>;
   handleTextareaFocus: () => void;
   handleTextareaBlur: () => void;
   onPaste: ReturnType<typeof usePasteService>['onPaste'];
@@ -43,6 +51,7 @@ export const useGuidInput = ({ locationState }: UseGuidInputOptions): GuidInputR
   const [dir, setDir] = useState<string>('');
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [loading, setLoading] = useState(false);
+  const textareaRef = useRef<RefTextAreaType | null>(null);
 
   // Read workspace from location.state (passed from tabs add button)
   useEffect(() => {
@@ -110,6 +119,10 @@ export const useGuidInput = ({ locationState }: UseGuidInputOptions): GuidInputR
   const handleTextareaFocus = useCallback(() => {
     onFocus();
     setIsInputFocused(true);
+    // v0.4.7.1 (RENDERER-1) — Actually focus the underlying textarea. Prior
+    // version only flipped the state flag, so the Kickoff Accept / Intent
+    // prompt-accept callers ended up with a prefilled but un-focused field.
+    textareaRef.current?.focus();
   }, [onFocus]);
 
   const handleTextareaBlur = useCallback(() => {
@@ -129,6 +142,7 @@ export const useGuidInput = ({ locationState }: UseGuidInputOptions): GuidInputR
     handleFilesPasted,
     handleFilesUploaded,
     handleRemoveFile,
+    textareaRef,
     handleTextareaFocus,
     handleTextareaBlur,
     onPaste,

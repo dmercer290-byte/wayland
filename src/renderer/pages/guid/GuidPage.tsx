@@ -310,6 +310,10 @@ const GuidPage: React.FC = () => {
   // content, the card silently dismisses for this session — keeps the
   // surface clean for power users who just want to type.
   const lastInputLenRef = useRef(0);
+  // v0.4.7.1 (RENDERER-3) — Depend on the specific fields the effect reads,
+  // NOT the whole `kickoff` object (which is a fresh literal every render and
+  // would re-run this effect on every keystroke). The dismissByTyping
+  // callback is stable across renders via useCallback inside useKickoff.
   useEffect(() => {
     const prev = lastInputLenRef.current;
     const curr = guidInput.input.length;
@@ -317,7 +321,7 @@ const GuidPage: React.FC = () => {
     if (prev === 0 && curr > 0 && kickoff.visible) {
       kickoff.dismissByTyping();
     }
-  }, [guidInput.input, kickoff]);
+  }, [guidInput.input, kickoff.visible, kickoff.dismissByTyping]);
   const handleKickoffAccept = useCallback(() => {
     const prefill = kickoff.accept();
     if (prefill) {
@@ -818,6 +822,7 @@ const GuidPage: React.FC = () => {
             onPaste={guidInput.onPaste}
             onFocus={guidInput.handleTextareaFocus}
             onBlur={guidInput.handleTextareaBlur}
+            textareaRef={guidInput.textareaRef}
             placeholder={`${mention.selectedAgentLabel}, ${typewriterPlaceholder || t('conversation.welcome.placeholder')}`}
             isInputActive={guidInput.isInputFocused}
             isFileDragging={guidInput.isFileDragging}

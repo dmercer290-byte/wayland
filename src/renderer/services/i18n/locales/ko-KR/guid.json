@@ -22,7 +22,8 @@
     "kickoff": {
       "accept": "네, 시작해요",
       "redirect": "다른 것",
-      "dismissAria": "제안 닫기"
+      "dismissAria": "제안 닫기",
+      "regionAria": "추천 시작 메시지"
     }
   }
 }

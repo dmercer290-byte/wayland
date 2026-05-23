@@ -1,7 +1,12 @@
 .card {
+  /*
+   * v0.4.7.1 (D-L-5) — Removed `max-width: 560px` so the card matches the
+   * GuidInputCard width. The parent `.guidLayout` caps both elements;
+   * giving the card its own cap created a visual mismatch where the card
+   * was narrower than the input directly above it.
+   */
   position: relative;
   margin: 8px auto 0;
-  max-width: 560px;
   padding: 14px 18px 14px 18px;
   border-radius: 14px;
   background-color: var(--bg-elevated);

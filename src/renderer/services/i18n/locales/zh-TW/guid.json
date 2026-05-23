@@ -22,7 +22,8 @@
     "kickoff": {
       "accept": "好的，開始吧",
       "redirect": "換一個",
-      "dismissAria": "關閉建議"
+      "dismissAria": "關閉建議",
+      "regionAria": "建議的開場"
     }
   }
 }

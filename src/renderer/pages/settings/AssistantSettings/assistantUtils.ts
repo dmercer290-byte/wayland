@@ -157,6 +157,10 @@ export const normalizeExtensionAssistants = (extensionAssistants: Record<string,
         // entries missing required fields rather than passing junk through to
         // the SuggestionEngine where it would silently misfire.
         _kickoffs: normalizeKickoffs(ext.kickoffs),
+        // v0.4.7.1 (DATA-2) — Carry the opt-out sentinel from the bundle so
+        // renderer-side code can distinguish "no kickoffs authored yet" from
+        // "intentionally excluded" (agent-profile assistants).
+        _kickoffsExcluded: ext._kickoffsExcluded === true ? true : undefined,
       } as AssistantListItem;
     })
     .filter((item): item is AssistantListItem => item !== null);

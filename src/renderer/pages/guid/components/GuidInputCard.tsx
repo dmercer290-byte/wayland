@@ -10,6 +10,7 @@ import UploadProgressBar from '@/renderer/components/media/UploadProgressBar';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { useCompositionInput } from '@/renderer/hooks/chat/useCompositionInput';
 import { Input, Tooltip } from '@arco-design/web-react';
+import type { RefTextAreaType } from '@arco-design/web-react/es/Input/textarea';
 import { iconColors } from '@/renderer/styles/colors';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +25,12 @@ type GuidInputCardProps = {
   onFocus: () => void;
   onBlur: () => void;
   placeholder: string;
+  /**
+   * v0.4.7.1 (RENDERER-1) — Forwarded to the Arco `Input.TextArea` so callers
+   * (Kickoff Accept, Intent prompt-accept) can programmatically `.focus()`
+   * the underlying textarea after dropping in a prefill.
+   */
+  textareaRef?: React.RefObject<RefTextAreaType | null>;
 
   // Styling
   isInputActive: boolean;
@@ -58,6 +65,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
   onFocus,
   onBlur,
   placeholder,
+  textareaRef,
   isInputActive,
   isFileDragging,
   activeBorderColor,
@@ -109,6 +117,7 @@ const GuidInputCard: React.FC<GuidInputCardProps> = ({
     >
       {mentionSelectorBadge}
       <Input.TextArea
+        ref={textareaRef}
         autoSize={textareaAutoSize}
         placeholder={placeholder}
         spellCheck={false}

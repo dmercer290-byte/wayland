@@ -44,6 +44,15 @@ export type AssistantListItem = AcpBackendConfig & {
   _standing?: boolean;
   /** v0.4.7 — Hand-curated kickoffs surfaced by the SuggestionEngine on empty-state. */
   _kickoffs?: AssistantKickoff[];
+  /**
+   * v0.4.7.1 (DATA-2) — Sentinel set by the agent-profile merge in the main
+   * process to mark assistants that should intentionally opt out of the
+   * Kickoff cascade. The engine returns `notRendered: 'kickoffs-excluded'`
+   * for these and the renderer suppresses the `not_rendered` telemetry. Kept
+   * on the renderer type so any downstream renderer code can reason about
+   * the opt-out without re-querying the engine.
+   */
+  _kickoffsExcluded?: boolean;
 };
 
 /**

@@ -73,7 +73,8 @@
     "kickoff": {
       "accept": "Yes, let's start",
       "redirect": "Something else",
-      "dismissAria": "Dismiss suggestion"
+      "dismissAria": "Dismiss suggestion",
+      "regionAria": "Suggested first message"
     }
   }
 }
