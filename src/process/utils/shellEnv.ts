@@ -51,6 +51,52 @@ function detectAvx2(): boolean {
 }
 
 /**
+ * Resolve the project root in dev or `app.asar.unpacked` in packaged builds —
+ * the directory under which our packaged `node_modules` lives. Returns null
+ * when Electron is unavailable (unit tests / CLI mode).
+ */
+function getBundledNodeModulesRoot(): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { app } = require('electron');
+    const appPath = app.getAppPath();
+    if (app.isPackaged) {
+      // Packaged: appPath is .../app.asar; node_modules live at .../app.asar.unpacked
+      // for entries listed under `asarUnpack` in electron-builder.yml.
+      return appPath.replace('app.asar', 'app.asar.unpacked');
+    }
+    return appPath;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return PATH entries that expose bundled npm-installed CLI binaries to
+ * spawned child processes. Prepended to PATH so they shadow the user's
+ * system-wide installs, giving Claude/Codex/etc a consistent toolchain.
+ *
+ * Today's contents:
+ *   - `node_modules/.bin` — npm-style shim symlinks (works in dev; may be
+ *     absent in packaged builds because electron-builder drops symlinks).
+ *   - `node_modules/officecli/runtime` — real platform binary (works in both
+ *     dev AND packaged builds; the file is named exactly `officecli`).
+ *
+ * This is the stopgap landing point for #232. The proper cross-platform
+ * story (download the right officecli binary per host on first run) is
+ * tracked as #234.
+ */
+function getBundledNpmBinDirs(): string[] {
+  const root = getBundledNodeModulesRoot();
+  if (!root) return [];
+  const candidates = [
+    path.join(root, 'node_modules', '.bin'),
+    path.join(root, 'node_modules', 'officecli', 'runtime'),
+  ];
+  return candidates.filter((p) => existsSync(p));
+}
+
+/**
  * Get the directory containing the bundled bun binary.
  *
  * On x64 platforms, checks for AVX2 support. CPUs without AVX2 (e.g. AMD FX-8350)
@@ -438,6 +484,16 @@ export function getEnhancedEnv(customEnv?: Record<string, string>): Record<strin
   const bundledBunDir = getBundledBunDir();
   if (bundledBunDir) {
     mergedPath = `${bundledBunDir}${separator}${mergedPath}`;
+  }
+
+  // Prepend bundled npm-binary directories (officecli, future bundled CLI deps)
+  // so Claude/Codex spawned subprocesses can resolve them via `which` /
+  // `where`, even on customer machines that have never run `npm i -g officecli`.
+  // Fix for #232 — without this, Office assistants on fresh installs fall back
+  // to the python-docx code path or block on a manual `npm i -g officecli`.
+  const bundledNpmBinDirs = getBundledNpmBinDirs();
+  if (bundledNpmBinDirs.length > 0) {
+    mergedPath = `${bundledNpmBinDirs.join(separator)}${separator}${mergedPath}`;
   }
 
   return {

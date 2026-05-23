@@ -242,6 +242,13 @@ asarUnpack:
   - 'out/main/team-guide-mcp-stdio.js'
   # Skills library: read in-place at runtime — must not be packed into app.asar
   - 'resources/skills-library/**/*'
+  # officecli (Office document generator used by Word/PPT/Excel/Morph/Academic
+  # assistants). The runtime/ folder holds the real platform binary that
+  # shellEnv.ts prepends to PATH for spawned subprocesses. Without unpacking,
+  # `which officecli` from a Claude-spawned bash never finds the binary.
+  # Cross-platform packaging (downloading the correct host binary on first run)
+  # is tracked as #234.
+  - '**/node_modules/officecli/**/*'
 
 # Compression level: normal for faster builds, maximum for smallest size
 # Note: electron-builder doesn't support YAML template syntax for env vars
