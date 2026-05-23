@@ -12,14 +12,18 @@ AI-friendly CLI for .docx, .xlsx, .pptx. Single binary, no dependencies, no Offi
 If `officecli` is not installed:
 
 ```bash
-# macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/TradeCanyon/OfficeCLI/main/install.sh | bash
+# Recommended (all platforms — requires node/npm):
+npm i -g officecli
 
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/TradeCanyon/OfficeCLI/main/install.ps1 | iex
+# macOS / Linux fallback (binary installer):
+curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
+
+# Windows (PowerShell) fallback:
+irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 ```
 
 Verify with `officecli --version`. If still not found after install, open a new terminal.
+NOTE: Wayland ships officecli pre-installed in newer builds; this section only applies on legacy installs or stripped environments.
 
 ---
 

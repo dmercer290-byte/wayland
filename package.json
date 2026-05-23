@@ -173,6 +173,7 @@
     "multer": "^2.1.1",
     "nodemailer": "^6.9.16",
     "nostr-tools": "^2.23.3",
+    "officecli": "^0.2.79",
     "officeparser": "^7.0.2",
     "openai": "^5.12.2",
     "opusscript": "^0.1.1",
@@ -267,6 +268,9 @@
     "@rollup/rollup-win32-x64-msvc": "^4.46.2",
     "electron-winstaller": "^5.4.0"
   },
+  "trustedDependencies": [
+    "officecli"
+  ],
   "resolutions": {
     "@xmldom/xmldom": "^0.8.13",
     "axios": ">=1.16.0",
