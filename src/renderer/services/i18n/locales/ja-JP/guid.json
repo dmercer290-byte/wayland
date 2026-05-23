@@ -17,5 +17,12 @@
     "statusTesting": "Testing latency...",
     "statusUnreachable": "Unreachable",
     "statusAvailable": "Available"
+  },
+  "newChat": {
+    "kickoff": {
+      "accept": "はい、始めましょう",
+      "redirect": "他の候補",
+      "dismissAria": "提案を閉じる"
+    }
   }
 }

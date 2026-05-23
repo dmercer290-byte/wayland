@@ -17,5 +17,12 @@
     "statusTesting": "正在测试延迟...",
     "statusUnreachable": "不可达",
     "statusAvailable": "可用"
+  },
+  "newChat": {
+    "kickoff": {
+      "accept": "好的，开始吧",
+      "redirect": "换一个",
+      "dismissAria": "关闭建议"
+    }
   }
 }

@@ -22,11 +22,31 @@
     "greeting": {
       "withName": "{{timeLabel}}, {{name}}",
       "labels": {
-        "lateNight": ["Working late", "Burning the midnight oil", "Up late"],
-        "morning": ["Morning", "Good morning", "Rise and shine"],
-        "afternoon": ["Afternoon", "Good afternoon", "Welcome back"],
-        "evening": ["Evening", "Good evening", "Welcome back"],
-        "night": ["Evening", "Good evening", "Winding down"]
+        "lateNight": [
+          "Working late",
+          "Burning the midnight oil",
+          "Up late"
+        ],
+        "morning": [
+          "Morning",
+          "Good morning",
+          "Rise and shine"
+        ],
+        "afternoon": [
+          "Afternoon",
+          "Good afternoon",
+          "Welcome back"
+        ],
+        "evening": [
+          "Evening",
+          "Good evening",
+          "Welcome back"
+        ],
+        "night": [
+          "Evening",
+          "Good evening",
+          "Winding down"
+        ]
       }
     },
     "intent": {
@@ -49,6 +69,11 @@
       "label": "Recent conversations",
       "heading": "Jump back in"
     },
-    "voiceHint": "Click the mic to talk"
+    "voiceHint": "Click the mic to talk",
+    "kickoff": {
+      "accept": "Yes, let's start",
+      "redirect": "Something else",
+      "dismissAria": "Dismiss suggestion"
+    }
   }
 }

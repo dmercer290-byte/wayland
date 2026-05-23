@@ -17,5 +17,12 @@
     "statusTesting": "Тестирование задержки...",
     "statusUnreachable": "Недоступен",
     "statusAvailable": "Доступен"
+  },
+  "newChat": {
+    "kickoff": {
+      "accept": "Да, начнём",
+      "redirect": "Другое",
+      "dismissAria": "Скрыть предложение"
+    }
   }
 }

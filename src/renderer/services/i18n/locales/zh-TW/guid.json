@@ -17,5 +17,12 @@
     "statusTesting": "Testing latency...",
     "statusUnreachable": "Unreachable",
     "statusAvailable": "Available"
+  },
+  "newChat": {
+    "kickoff": {
+      "accept": "好的，開始吧",
+      "redirect": "換一個",
+      "dismissAria": "關閉建議"
+    }
   }
 }

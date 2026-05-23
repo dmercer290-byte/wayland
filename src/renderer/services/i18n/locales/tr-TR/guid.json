@@ -17,5 +17,12 @@
     "statusTesting": "Testing latency...",
     "statusUnreachable": "Unreachable",
     "statusAvailable": "Available"
+  },
+  "newChat": {
+    "kickoff": {
+      "accept": "Tamam, başlayalım",
+      "redirect": "Başka bir şey",
+      "dismissAria": "Öneriyi kapat"
+    }
   }
 }

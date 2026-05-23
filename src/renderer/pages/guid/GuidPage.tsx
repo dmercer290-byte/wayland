@@ -18,9 +18,11 @@ import AssistantSelectionArea from './components/AssistantSelectionArea';
 import Greeting from './components/newChatStarter/Greeting';
 import IntentPillBar from './components/newChatStarter/IntentPillBar';
 import IntentSuggestionPanel from './components/newChatStarter/IntentSuggestionPanel';
+import KickoffCard from './components/newChatStarter/KickoffCard';
 import RecentsStrip from './components/newChatStarter/RecentsStrip';
 import type { IntentKey, IntentPrompt } from './intents';
 import { useUserDisplayName } from '@/renderer/hooks/system/useUserDisplayName';
+import { useKickoff } from '@/renderer/hooks/kickoff/useKickoff';
 import { ASSISTANT_PRESETS } from '@/common/config/presets/assistantPresets';
 import AgentPillBar from './components/AgentPillBar';
 import { AgentPillBarSkeleton } from './components/GuidSkeleton';
@@ -297,6 +299,32 @@ const GuidPage: React.FC = () => {
   // --- Phase 2 chat-redesign: new-chat starter (greeting + intent pills + recents) ---
   const { resolvedName: greetingDisplayName } = useUserDisplayName();
   const [activeIntent, setActiveIntent] = useState<IntentKey | null>(null);
+
+  // v0.4.7 — Kickoff card. Only meaningful when a preset assistant is selected
+  // (per-assistant suggestions; useKickoff returns visible:false otherwise).
+  const kickoffAssistantId = agentSelection.isPresetAgent
+    ? agentSelection.selectedAgentInfo?.customAgentId
+    : undefined;
+  const kickoff = useKickoff(kickoffAssistantId);
+  // Dismiss-on-type: protect the first keystroke. Once the input has any
+  // content, the card silently dismisses for this session — keeps the
+  // surface clean for power users who just want to type.
+  const lastInputLenRef = useRef(0);
+  useEffect(() => {
+    const prev = lastInputLenRef.current;
+    const curr = guidInput.input.length;
+    lastInputLenRef.current = curr;
+    if (prev === 0 && curr > 0 && kickoff.visible) {
+      kickoff.dismissByTyping();
+    }
+  }, [guidInput.input, kickoff]);
+  const handleKickoffAccept = useCallback(() => {
+    const prefill = kickoff.accept();
+    if (prefill) {
+      guidInput.setInput(prefill);
+      guidInput.handleTextareaFocus();
+    }
+  }, [kickoff, guidInput.setInput, guidInput.handleTextareaFocus]);
 
   const handleSelectIntent = useCallback((intent: IntentKey | null) => {
     setActiveIntent(intent);
@@ -815,6 +843,19 @@ const GuidPage: React.FC = () => {
             onClearDir={() => guidInput.setDir('')}
             actionRow={actionRowNode}
           />
+
+          {/* v0.4.7 — KickoffCard mounts BELOW the input (render-then-hydrate)
+              so the primary `[Yes, let's start]` button never steals the
+              first keystroke. Only renders for preset assistants — generic
+              new-chat surfaces (no assistant yet) still use Greeting above. */}
+          {agentSelection.isPresetAgent && kickoff.visible && kickoff.currentText ? (
+            <KickoffCard
+              text={kickoff.currentText}
+              onAccept={handleKickoffAccept}
+              onRedirect={kickoff.redirect}
+              onDismiss={kickoff.dismissByInteraction}
+            />
+          ) : null}
 
           {!agentSelection.isPresetAgent ? (
             <div className={styles.newChatStarter} data-testid='new-chat-starter'>
