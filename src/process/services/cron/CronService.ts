@@ -36,6 +36,14 @@ export type CreateCronJobParams = {
   createdBy: 'user' | 'agent';
   executionMode?: 'existing' | 'new_conversation';
   agentConfig?: import('./CronStore').CronJob['metadata']['agentConfig'];
+  /**
+   * Internal escape hatch for system-managed crons that legitimately need
+   * multiple jobs on a single conversation (e.g. Standing-Company rituals
+   * fanning into the leader's team conversation). Never set from renderer-
+   * facing IPC paths — those flow through the normal `cron.addJob` handler
+   * where this field is not surfaced.
+   */
+  bypassUniqueGuard?: boolean;
 };
 
 /**
@@ -199,7 +207,7 @@ export class CronService {
   async addJob(params: CreateCronJobParams): Promise<CronJob> {
     // Check if conversation already has a cron job (one job per conversation limit)
     // Skip for new_conversation mode since each execution creates a new conversation
-    if (params.executionMode !== 'new_conversation' && params.conversationId) {
+    if (params.executionMode !== 'new_conversation' && params.conversationId && !params.bypassUniqueGuard) {
       const existingJobs = await this.repo.listByConversation(params.conversationId);
       if (existingJobs.length > 0) {
         const existingJob = existingJobs[0];

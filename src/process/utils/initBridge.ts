@@ -13,6 +13,7 @@ import { cronService } from '@process/services/cron/cronServiceSingleton';
 import { workerTaskManager } from '@process/task/workerTaskManagerSingleton';
 import { TeamSessionService, SqliteTeamRepository } from '@process/team';
 import { initTeamGuideService } from '@process/team/mcp/guide/teamGuideSingleton';
+import { CronRitualScheduler, makeExtensionRegistryRitualsResolver } from '@process/team/ritualScheduler';
 import { prewarmProviderSdks } from '@process/utils/prewarmProviders';
 
 logger.config({ print: true });
@@ -21,7 +22,16 @@ const repo = new SqliteConversationRepository();
 const conversationServiceImpl = new ConversationServiceImpl(repo);
 const channelRepo = new SqliteChannelRepository();
 const teamRepo = new SqliteTeamRepository();
-const teamSessionService = new TeamSessionService(teamRepo, workerTaskManager, conversationServiceImpl);
+// Standing-Company rituals: installs cron rows on promote / bundle-create so
+// the marketed autonomy actually fires. Resolver pulls ritual definitions
+// from the live ExtensionRegistry — same source the team-export bridge uses.
+const ritualScheduler = new CronRitualScheduler(cronService, makeExtensionRegistryRitualsResolver());
+const teamSessionService = new TeamSessionService(
+  teamRepo,
+  workerTaskManager,
+  conversationServiceImpl,
+  ritualScheduler
+);
 
 // Initialize all IPC bridges
 initAllBridges({

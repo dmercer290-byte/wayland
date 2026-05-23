@@ -10,7 +10,7 @@ import { suggestRoster } from '@process/team/suggestRoster';
 import type { TeamSessionService } from '@process/team/TeamSessionService';
 import { ExtensionRegistry } from '@process/extensions/ExtensionRegistry';
 import type { SpecialistCatalog } from '@process/team/importExport/importTeam';
-import type { RitualsResolver } from '@process/team/importExport/exportTeam';
+import { makeExtensionRegistryRitualsResolver } from '@process/team/ritualScheduler';
 
 // W5 audit HIGH-1 (2026-05-19) — IPC boundary schemas for the new W4 providers.
 // Renderer-supplied params used to flow straight through to the service layer
@@ -157,8 +157,7 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   // presence at runtime.
   ipcBridge.team.changeAgentBackend.provider(
     safeProvider(async (raw) => {
-      const { teamId, slotId, newBackend, newModel } =
-        changeAgentBackendParamSchema.parse(raw);
+      const { teamId, slotId, newBackend, newModel } = changeAgentBackendParamSchema.parse(raw);
       await teamSessionService.changeAgentBackend({ teamId, slotId, newBackend, newModel });
     })
   );
@@ -253,7 +252,7 @@ export function initTeamBridge(teamSessionService: TeamSessionService): void {
   ipcBridge.team.export.provider(
     safeProvider(async (raw) => {
       const { teamId } = exportParamSchema.parse(raw);
-      return teamSessionService.exportTeam(teamId, makeRitualsResolver());
+      return teamSessionService.exportTeam(teamId, makeExtensionRegistryRitualsResolver());
     })
   );
 
@@ -304,25 +303,6 @@ function makeSpecialistCatalog(): SpecialistCatalog {
       ids.add(stripped);
     }
     return ids;
-  };
-}
-
-/**
- * Look up the `rituals` array for a source launcher id by walking the
- * extension registry's assistant list. Returns undefined when no match.
- */
-function makeRitualsResolver(): RitualsResolver {
-  return async (sourceLauncherId: string) => {
-    const registry = ExtensionRegistry.getInstance();
-    const assistants = registry.getAssistants();
-    const norm = sourceLauncherId.startsWith('ext-') ? sourceLauncherId : `ext-${sourceLauncherId}`;
-    for (const a of assistants) {
-      const candidate = a as { id?: string; rituals?: Array<{ name: string; cadence: string }> };
-      if (candidate.id === norm || candidate.id === sourceLauncherId) {
-        return candidate.rituals;
-      }
-    }
-    return undefined;
   };
 }
 

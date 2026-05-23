@@ -26,6 +26,7 @@ import path from 'path';
 import { resolveLocaleKey } from '@/common/utils';
 import { hasGeminiOauthCreds } from './googleAuthCheck';
 import { buildTeamExport, serializeTeamExport, type RitualsResolver } from './importExport/exportTeam';
+import type { RitualScheduler } from './ritualScheduler';
 import {
   buildCapabilityGrants,
   isSandboxedAfterImport,
@@ -46,7 +47,14 @@ export class TeamSessionService {
   constructor(
     private readonly repo: ITeamRepository,
     private readonly workerTaskManager: IWorkerTaskManager,
-    private readonly conversationService: IConversationService
+    private readonly conversationService: IConversationService,
+    /**
+     * Optional injection. When provided, Standing-Company rituals declared by
+     * the source launcher fire as real cron jobs against the leader's
+     * conversation. Absent (e.g. unit tests) = ritual install is a no-op so
+     * the rest of TeamSessionService stays testable without a CronService.
+     */
+    private readonly ritualScheduler?: RitualScheduler
   ) {
     this.eventLogger = new EventLogger(repo);
   }
@@ -577,6 +585,19 @@ export class TeamSessionService {
       updatedAt: now,
     };
     await this.repo.create(team);
+    // Install launcher rituals if the source bundle declared any. The
+    // scheduler resolves rituals from the live ExtensionRegistry; bundles
+    // without rituals (the vast majority of launchers) yield a no-op.
+    if (this.ritualScheduler && team.sourceLauncherId) {
+      try {
+        await this.ritualScheduler.installRituals(team);
+      } catch (err) {
+        console.warn(
+          `[TeamSessionService] failed to install rituals for new team ${team.id}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
     // Notify the sidebar + library page so newly-created teams appear without
     // a manual refresh. Without this emit, useTeamList()'s SWR cache only
     // re-fetched on revalidation triggers, and brand-new teams were invisible
@@ -599,6 +620,19 @@ export class TeamSessionService {
     // Kill all agent processes before disposing session and deleting data.
     // This prevents orphan processes that keep running after the team is deleted.
     const team = await this.repo.findById(id);
+    if (team && this.ritualScheduler) {
+      // Tear down rituals first so cron timers stop firing before we delete
+      // the underlying conversation. Otherwise CronService.cleanupOrphanJobs
+      // only catches the dangling row on the next app start.
+      try {
+        await this.ritualScheduler.uninstallRituals(team);
+      } catch (err) {
+        console.warn(
+          `[TeamSessionService] failed to uninstall rituals during team delete ${id}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
     if (team) {
       const killResults = await Promise.allSettled(
         team.agents
@@ -943,6 +977,21 @@ export class TeamSessionService {
       },
     });
 
+    // Install the launcher's rituals as actual cron jobs targeting the
+    // leader's conversation. Without this step, the "Standing" badge is
+    // display-only and no autonomous behavior fires. Errors are swallowed
+    // so the promotion itself stays atomic.
+    if (this.ritualScheduler) {
+      try {
+        await this.ritualScheduler.installRituals(team);
+      } catch (err) {
+        console.warn(
+          `[TeamSessionService] failed to install rituals for team ${teamId}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+
     ipcBridge.team.listChanged.emit({ teamId, action: 'standing_changed' });
   }
 
@@ -967,6 +1016,19 @@ export class TeamSessionService {
         actor: 'user',
       },
     });
+
+    // Tear down the cron rows installed by promoteTeamToStanding so the
+    // leader stops being woken by a no-longer-Standing team.
+    if (this.ritualScheduler) {
+      try {
+        await this.ritualScheduler.uninstallRituals(team);
+      } catch (err) {
+        console.warn(
+          `[TeamSessionService] failed to uninstall rituals for team ${teamId}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
 
     ipcBridge.team.listChanged.emit({ teamId, action: 'standing_changed' });
   }
@@ -993,10 +1055,7 @@ export class TeamSessionService {
    * guard failure (DOS, prototype-pollution, depth, schema). Throws
    * TeamImportBusyError when the bounded parse queue is saturated.
    */
-  async previewTeamImport(
-    jsonText: string,
-    specialistCatalog: SpecialistCatalog
-  ): Promise<ImportPreviewResult> {
+  async previewTeamImport(jsonText: string, specialistCatalog: SpecialistCatalog): Promise<ImportPreviewResult> {
     return previewImport(jsonText, specialistCatalog);
   }
 
@@ -1030,10 +1089,7 @@ export class TeamSessionService {
     // gap with zero behavior change for honest callers.
     const reparse = TeamExportSchema.safeParse(rawParsed);
     if (!reparse.success) {
-      throw new TeamImportError(
-        `Invalid parsed payload: ${reparse.error.message}`,
-        'TEAM_IMPORT_VALIDATION'
-      );
+      throw new TeamImportError(`Invalid parsed payload: ${reparse.error.message}`, 'TEAM_IMPORT_VALIDATION');
     }
     const parsed = reparse.data;
 
