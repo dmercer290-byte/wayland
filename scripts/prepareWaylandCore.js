@@ -55,7 +55,7 @@ function getBinaryName(platform) {
 // TradeCanyon/wayland-core; Desktop integrates against a specific tag rather
 // than tracking `latest` so version drift can't sneak in via a release made
 // while a CI build is mid-flight. Override with WCORE_VERSION=... when bumping.
-const DEFAULT_WCORE_VERSION = 'v0.6.5-wayland-base';
+const DEFAULT_WCORE_VERSION = 'v0.8.1-wayland-base';
 
 function getVersion() {
   return (process.env.WCORE_VERSION || DEFAULT_WCORE_VERSION).trim();
