@@ -1,6 +1,6 @@
 import { ASSISTANT_PRESETS } from '@/common/config/presets/assistantPresets';
 import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
-import type { AssistantListItem } from './types';
+import type { AssistantKickoff, AssistantListItem, KickoffScenario, KickoffTimeBucket } from './types';
 
 export type AssistantListFilter = 'all' | 'enabled' | 'disabled' | 'builtin' | 'custom' | 'extension';
 export type AssistantSource = 'builtin' | 'custom' | 'extension';
@@ -66,6 +66,45 @@ export const sortAssistants = (agents: AssistantListItem[]): AssistantListItem[]
     });
 };
 
+const KICKOFF_SCENARIOS: ReadonlySet<KickoffScenario> = new Set([
+  'cold-start',
+  'continuation-friendly',
+  'post-fire-ritual',
+]);
+const KICKOFF_TIME_BUCKETS: ReadonlySet<KickoffTimeBucket> = new Set(['morning', 'afternoon', 'evening']);
+
+/**
+ * Normalize the raw `kickoffs` array off a bundle record into a typed
+ * AssistantKickoff[]. Drops entries missing required fields (id/text/prefill/
+ * scenario) and clamps optional fields to known enum values. Returns undefined
+ * when no valid entries survive so the SuggestionEngine can short-circuit on
+ * `no-kickoffs-defined`.
+ */
+const normalizeKickoffs = (raw: unknown): AssistantKickoff[] | undefined => {
+  if (!Array.isArray(raw)) return undefined;
+  const out: AssistantKickoff[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const id = typeof e.id === 'string' ? e.id : '';
+    const text = typeof e.text === 'string' ? e.text : '';
+    const prefill = typeof e.prefill === 'string' ? e.prefill : '';
+    const scenario = typeof e.scenario === 'string' ? (e.scenario as KickoffScenario) : undefined;
+    if (!id || !text || !prefill || !scenario || !KICKOFF_SCENARIOS.has(scenario)) continue;
+    const bucket = typeof e.timeBucket === 'string' ? (e.timeBucket as KickoffTimeBucket) : undefined;
+    out.push({
+      id,
+      text,
+      prefill,
+      scenario,
+      timeBucket: bucket && KICKOFF_TIME_BUCKETS.has(bucket) ? bucket : undefined,
+      requiresRitualOutput: e.requiresRitualOutput === true ? true : undefined,
+      beginnerSafe: e.beginnerSafe === true ? true : undefined,
+    });
+  }
+  return out.length > 0 ? out : undefined;
+};
+
 /**
  * Normalize raw extension assistant records into typed AssistantListItem[].
  */
@@ -114,6 +153,10 @@ export const normalizeExtensionAssistants = (extensionAssistants: Record<string,
           ? (ext.rituals as Array<{ name: string; cadence: string }>)
           : undefined,
         _standing: typeof ext.standing === 'boolean' ? ext.standing : undefined,
+        // v0.4.7 — Kickoff cards. Normalize through a strict mapper that drops
+        // entries missing required fields rather than passing junk through to
+        // the SuggestionEngine where it would silently misfire.
+        _kickoffs: normalizeKickoffs(ext.kickoffs),
       } as AssistantListItem;
     })
     .filter((item): item is AssistantListItem => item !== null);

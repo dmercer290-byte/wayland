@@ -84,4 +84,33 @@ describe('applyVendoredOverlay', () => {
     await applyVendoredOverlay(assistants);
     expect(assistants[0].standing).toBe(false);
   });
+
+  it('injects the kickoffs array onto a known assistant whose live record lacks it', async () => {
+    // v0.4.7 — every vendored assistant ships with 7 kickoffs. Confirms the
+    // overlay carries the new schema field across the dual-write boundary.
+    const assistants: Record<string, unknown>[] = [{ id: 'ext-helm', name: 'Coach' }];
+    await applyVendoredOverlay(assistants);
+    const kickoffs = assistants[0].kickoffs as Array<{ id: string; scenario: string }> | undefined;
+    expect(Array.isArray(kickoffs)).toBe(true);
+    expect(kickoffs!.length).toBe(7);
+    const ids = kickoffs!.map((k) => k.id);
+    expect(ids).toContain('what-am-i-avoiding');
+    expect(kickoffs!.every((k) => typeof k.id === 'string' && typeof k.scenario === 'string')).toBe(true);
+  });
+
+  it('preserves a live-record kickoffs override rather than clobbering with the bundle', async () => {
+    // Overlay is non-destructive: if the running bundle already shipped its
+    // own kickoffs (e.g. assistant-author update), the vendored snapshot must
+    // not silently shadow them.
+    const assistants: Record<string, unknown>[] = [
+      {
+        id: 'ext-helm',
+        kickoffs: [{ id: 'live-override', text: 't', prefill: 'p', scenario: 'cold-start' }],
+      },
+    ];
+    await applyVendoredOverlay(assistants);
+    const kickoffs = assistants[0].kickoffs as Array<{ id: string }>;
+    expect(kickoffs).toHaveLength(1);
+    expect(kickoffs[0].id).toBe('live-override');
+  });
 });

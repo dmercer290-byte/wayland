@@ -42,4 +42,32 @@ export type AssistantListItem = AcpBackendConfig & {
   _rituals?: Array<{ name: string; cadence: string }>;
   /** W1a / TRIAGE C4 — True only for the 5 Standing Companies. */
   _standing?: boolean;
+  /** v0.4.7 — Hand-curated kickoffs surfaced by the SuggestionEngine on empty-state. */
+  _kickoffs?: AssistantKickoff[];
+};
+
+/**
+ * v0.4.7 — Kickoff card data carried per assistant. Authored in
+ * .planning/kickoff-library/v3-consolidated.yaml, spliced into the vendored
+ * bundle (assistants.json) and overlayed at runtime via vendoredAssistantOverlay.
+ *
+ * scenario gates which cascade level the SuggestionEngine matches:
+ *   - cold-start            → level 3 (default empty-state library)
+ *   - continuation-friendly → level 2 (recent-thread quality-gated)
+ *   - post-fire-ritual      → level 1 (Standing Company ritual fired in last 4h)
+ *
+ * beginnerSafe entries are the level-4 fallback for first-touch users.
+ * requiresRitualOutput hard-gates a card on actual ritual output existing.
+ */
+export type KickoffTimeBucket = 'morning' | 'afternoon' | 'evening';
+export type KickoffScenario = 'cold-start' | 'continuation-friendly' | 'post-fire-ritual';
+
+export type AssistantKickoff = {
+  id: string;
+  text: string;
+  prefill: string;
+  scenario: KickoffScenario;
+  timeBucket?: KickoffTimeBucket;
+  requiresRitualOutput?: boolean;
+  beginnerSafe?: boolean;
 };

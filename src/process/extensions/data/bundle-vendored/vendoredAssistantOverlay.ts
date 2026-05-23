@@ -40,10 +40,28 @@
 // disabling the standing/teammates/rituals overlay in production.
 import vendoredAssistantsJson from './assistants.json';
 
+type VendoredKickoffEntry = {
+  id: string;
+  text: string;
+  prefill: string;
+  scenario: string;
+  timeBucket?: string;
+  requiresRitualOutput?: boolean;
+  beginnerSafe?: boolean;
+};
+
 type VendoredOverlayEntry = {
   standing?: boolean;
   teammates?: string[];
   rituals?: Array<{ name: string; cadence: string }>;
+  /**
+   * v0.4.7 — Kickoff cards. Authored in
+   * .planning/kickoff-library/v3-consolidated.yaml, spliced into this same
+   * vendored assistants.json. Overlay dual-write requirement: ADD entries
+   * here AND in assistants.json or the overlay silently drops them and the
+   * SuggestionEngine returns `no-kickoffs-defined` at runtime.
+   */
+  kickoffs?: VendoredKickoffEntry[];
 };
 
 type VendoredOverlayMap = Map<string, VendoredOverlayEntry>;
@@ -91,6 +109,21 @@ async function loadOverlay(): Promise<VendoredOverlayMap> {
           )
         ) {
           overlay.rituals = rituals as Array<{ name: string; cadence: string }>;
+        }
+        const kickoffs = (entry as { kickoffs?: unknown }).kickoffs;
+        if (
+          Array.isArray(kickoffs) &&
+          kickoffs.every(
+            (k) =>
+              k !== null &&
+              typeof k === 'object' &&
+              typeof (k as { id?: unknown }).id === 'string' &&
+              typeof (k as { text?: unknown }).text === 'string' &&
+              typeof (k as { prefill?: unknown }).prefill === 'string' &&
+              typeof (k as { scenario?: unknown }).scenario === 'string'
+          )
+        ) {
+          overlay.kickoffs = kickoffs as VendoredKickoffEntry[];
         }
         map.set(id, overlay);
       }
@@ -157,6 +190,13 @@ export async function applyVendoredOverlay(
     ) {
       (assistant as { rituals?: Array<{ name: string; cadence: string }> }).rituals =
         overlayEntry.rituals;
+      touched = true;
+    }
+    if (
+      overlayEntry.kickoffs !== undefined &&
+      (assistant as { kickoffs?: unknown }).kickoffs === undefined
+    ) {
+      (assistant as { kickoffs?: VendoredKickoffEntry[] }).kickoffs = overlayEntry.kickoffs;
       touched = true;
     }
     if (touched) patched += 1;
