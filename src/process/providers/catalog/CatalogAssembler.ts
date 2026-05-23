@@ -32,7 +32,7 @@
 
 import type { CatalogSource } from '../sources/CatalogSource';
 import type { ModelsDevModel, ModelsDevRegistry } from '../enrichment/modelsDevSchema';
-import type { CatalogModel, ModelKind, ProviderId, RawModel } from '../types';
+import type { CatalogModel, ModelKind, ProviderId, RawModel, UsageTag } from '../types';
 import { ModelDisplayNames } from './ModelDisplayNames';
 
 /**
@@ -130,17 +130,20 @@ export class CatalogAssembler {
         family: deriveFamily(raw.id),
         kind: 'text',
         enriched: false,
+        tags: [],
       };
     }
 
     // Matched — every enriched field comes from the models.dev entry.
+    const kind = deriveKind(match);
     const model: CatalogModel = {
       id: raw.id,
       providerId: raw.providerId,
       displayName: match.name,
       family: match.family ?? deriveFamily(raw.id),
-      kind: deriveKind(match),
+      kind,
       enriched: true,
+      tags: deriveTags(raw.id, kind, match),
     };
     if (match.release_date) model.releaseDate = match.release_date;
     if (match.limit?.context !== undefined) model.contextWindow = match.limit.context;
@@ -188,6 +191,67 @@ function deriveKind(model: ModelsDevModel): ModelKind {
 function looksLikeEmbedding(model: ModelsDevModel): boolean {
   const haystack = `${model.family ?? ''} ${model.id}`.toLowerCase();
   return haystack.includes('embed');
+}
+
+/**
+ * Derive usage tags from a models.dev model + the already-derived `kind`.
+ *
+ * Tags are purely a function of the registry data — never fabricated.
+ * Mapping (per the polish-pass spec):
+ *  - kind === 'image'                  → 'image'    (image-output model)
+ *  - kind === 'audio'                  → 'audio'    (audio-output model)
+ *  - kind === 'embedding'              → 'embeddings'
+ *  - modalities.input includes 'image' → 'vision'   (text-in + image-in)
+ *  - reasoning: true                   → 'reasoning'
+ *  - tool_call: true                   → 'tools'
+ *  - text-only chat → 'chat'           (fallback when no specialty tag)
+ *  - research-grade reasoning ids      → 'research' (additive)
+ *
+ * The returned array is deduplicated and ordered for stable display.
+ */
+function deriveTags(modelId: string, kind: ModelKind, model: ModelsDevModel): UsageTag[] {
+  const tags = new Set<UsageTag>();
+
+  // Output-kind drives the primary specialty tag.
+  if (kind === 'image') tags.add('image');
+  else if (kind === 'audio') tags.add('audio');
+  else if (kind === 'embedding') tags.add('embeddings');
+
+  // Vision is independent: a text-output model with image-input is a VLM.
+  const input = model.modalities?.input ?? [];
+  if (kind !== 'image' && input.includes('image')) tags.add('vision');
+
+  // Capability flags.
+  if (model.reasoning) tags.add('reasoning');
+  if (model.tool_call) tags.add('tools');
+
+  // Research-grade reasoning ids (deep-research variants, o1/o3 family).
+  // Only OpenAI's `o`-series + `*-deep-research*` ids qualify — keeping this
+  // narrow avoids fabricating a "research" claim for general reasoning models.
+  if (looksResearchGrade(modelId)) tags.add('research');
+
+  // Default: a text-only model with no specialty tag is `chat`.
+  if (tags.size === 0 && kind === 'text') tags.add('chat');
+
+  // Stable display order — primary specialty first, then modalities, then
+  // capability flags, then research.
+  const order: UsageTag[] = ['chat', 'image', 'audio', 'embeddings', 'vision', 'reasoning', 'tools', 'research'];
+  return order.filter((tag) => tags.has(tag));
+}
+
+/**
+ * True when a model id reads like a research-grade reasoning model. Matches
+ * OpenAI's `o`-series flagships (o1, o3, o4-...) and any model whose id
+ * contains `deep-research`. Kept conservative — the tag is additive to
+ * `reasoning`, not a replacement.
+ */
+function looksResearchGrade(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  if (id.includes('deep-research')) return true;
+  // `o1`, `o1-mini`, `o3`, `o3-mini`, `o4`, ... — match the bare `o<digit>`
+  // prefix, optionally with a `-suffix`. Excludes `gpt-4o` (the `o` here is
+  // a suffix on `gpt-4`, not a leading `o`-series id).
+  return /^o[1-9](?:-|$)/.test(id);
 }
 
 /**

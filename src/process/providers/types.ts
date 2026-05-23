@@ -62,6 +62,19 @@ export type DetectionResult =
 
 export type ModelKind = 'text' | 'image' | 'audio' | 'embedding' | 'other';
 
+/**
+ * Usage-typed tag derived from a model's modalities + capabilities.
+ *
+ * Replaces the old generic "MOST CAPABLE" / "RECOMMENDED" badge in the UI:
+ * each model carries 0..N of these so a user reading the row knows what the
+ * model is actually for (chat, vision, image-gen, reasoning, ...).
+ *
+ * Derived in `CatalogAssembler` from the models.dev `modalities` /
+ * `reasoning` / `tool_call` fields — pure mapping, no fabricated data.
+ * Persisted to the catalog so a cold load doesn't have to re-derive.
+ */
+export type UsageTag = 'chat' | 'vision' | 'image' | 'audio' | 'embeddings' | 'reasoning' | 'tools' | 'research';
+
 /** Unenriched model identity straight off a CatalogSource. */
 export type RawModel = { id: string; providerId: ProviderId; rawName?: string };
 
@@ -79,6 +92,13 @@ export type CatalogModel = {
   status?: 'available' | 'preview' | 'deprecated';
   /** false = no models.dev match. */
   enriched: boolean;
+  /**
+   * Usage tags derived from models.dev modalities + capability flags. An
+   * unenriched model has an empty `tags` array. See `UsageTag` for the
+   * vocabulary. Always present (default `[]`) for forward compatibility —
+   * the renderer can rely on it being an array.
+   */
+  tags: UsageTag[];
 };
 
 /** A curated view of a CatalogModel for the chat model picker. */

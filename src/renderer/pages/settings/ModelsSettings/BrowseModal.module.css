@@ -97,12 +97,12 @@
 }
 
 .tile:hover {
-  border-color: var(--brand-soft-border, var(--color-primary-3));
+  border-color: var(--brand-soft-border);
   background: var(--color-fill-1);
 }
 
 .tile:focus-visible {
-  outline: 2px solid var(--brand, var(--color-primary-6));
+  outline: 2px solid var(--brand);
   outline-offset: 1px;
 }
 
@@ -158,8 +158,8 @@
   letter-spacing: 0.03em;
   padding: 3px 6px;
   border-radius: 6px;
-  background: var(--color-success-1);
-  color: var(--color-success-6);
+  background: var(--success-soft-bg);
+  color: var(--success);
 }
 
 /* ---- Single-key form view ---- */
@@ -182,13 +182,13 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  background: var(--color-danger-1);
-  border: 1px solid var(--color-danger-6);
+  background: var(--danger-soft-bg);
+  border: 1px solid var(--danger-soft-border);
   border-radius: 9px;
   padding: 9px 11px;
   margin-top: 10px;
   font-size: 12px;
-  color: var(--color-danger-6);
+  color: var(--danger);
   line-height: 1.45;
 }
 

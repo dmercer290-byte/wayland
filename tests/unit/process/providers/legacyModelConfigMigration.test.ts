@@ -312,7 +312,15 @@ describe('runLegacyModelConfigMigration — existing registry rows', () => {
       creds: { key: 'sk-new' },
     });
     repo.replaceRegistryCatalog('openai', [
-      { id: 'gpt-4o', providerId: 'openai', displayName: 'GPT-4o', family: 'gpt-4o', kind: 'text', enriched: true },
+      {
+        id: 'gpt-4o',
+        providerId: 'openai',
+        displayName: 'GPT-4o',
+        family: 'gpt-4o',
+        kind: 'text',
+        enriched: true,
+        tags: [],
+      },
     ]);
 
     const result = await runLegacyModelConfigMigration({ store, repo });

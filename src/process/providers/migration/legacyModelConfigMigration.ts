@@ -327,6 +327,7 @@ function buildUnenrichedCatalogModel(modelId: string, providerId: ProviderId): C
     family: deriveFamily(modelId),
     kind: 'text',
     enriched: false,
+    tags: [],
   };
 }
 

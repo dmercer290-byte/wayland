@@ -186,6 +186,7 @@ const model = (over: Partial<CuratedModel>): CuratedModel => ({
   family: 'default',
   kind: 'text',
   enriched: true,
+  tags: [],
   recommended: false,
   enabled: false,
   ...over,
@@ -220,6 +221,7 @@ const imageModel = model({
   id: 'gpt-image-1',
   displayName: 'GPT Image 1.5',
   kind: 'image',
+  tags: ['image'],
   recommended: false,
   enabled: false,
 });
@@ -228,6 +230,7 @@ const audioModel = model({
   id: 'whisper-v4',
   displayName: 'Whisper v4',
   kind: 'audio',
+  tags: ['audio'],
   recommended: false,
   enabled: false,
 });
@@ -236,6 +239,13 @@ const curated: CuratedModel[] = [flagship, sonnet, olderText, imageModel, audioM
 
 /** A non-text catalog row — image / audio / embedding aren't in `curated`. */
 function catalogOnly(id: string, kind: 'image' | 'audio' | 'embedding'): CatalogModel {
+  // The Manage page derives tags off the persisted `tags` field; for fixtures
+  // mirror the assembler's mapping (kind → primary specialty tag).
+  const tagForKind: Record<typeof kind, 'image' | 'audio' | 'embeddings'> = {
+    image: 'image',
+    audio: 'audio',
+    embedding: 'embeddings',
+  };
   return {
     id,
     providerId: 'anthropic',
@@ -243,6 +253,7 @@ function catalogOnly(id: string, kind: 'image' | 'audio' | 'embedding'): Catalog
     family: id,
     kind,
     enriched: true,
+    tags: [tagForKind[kind]],
   };
 }
 
@@ -335,19 +346,19 @@ describe('ManageProvider page', () => {
     });
   });
 
-  it('shows a capability tag on image and audio rows', async () => {
+  it('shows a usage tag on image and audio rows', async () => {
     renderPage();
 
     await waitFor(() => expect(rows().length).toBe(5));
 
     const imageRow = document.querySelector('[data-model="gpt-image-1"]') as HTMLElement;
     const audioRow = document.querySelector('[data-model="whisper-v4"]') as HTMLElement;
-    expect(within(imageRow).getByText('settings.modelsPage.manage.capImage')).toBeInTheDocument();
-    expect(within(audioRow).getByText('settings.modelsPage.manage.capAudio')).toBeInTheDocument();
+    expect(within(imageRow).getByText('settings.modelsPage.manage.tagImage')).toBeInTheDocument();
+    expect(within(audioRow).getByText('settings.modelsPage.manage.tagAudio')).toBeInTheDocument();
 
-    // A plain text model carries no capability tag.
+    // A text model in the fixture has no `tags` set — no usage chip renders.
     const textRow = document.querySelector('[data-model="opus-4-7"]') as HTMLElement;
-    expect(within(textRow).queryByText(/manage\.cap/)).not.toBeInTheDocument();
+    expect(within(textRow).queryByText(/manage\.tag/)).not.toBeInTheDocument();
   });
 
   it('renders the header Refresh / Re-key / Disconnect actions', async () => {
@@ -508,8 +519,8 @@ describe('ManageProvider page', () => {
     // turns them on).
     const dalle = document.querySelector('[data-model="dalle-3"]') as HTMLElement;
     expect(dalle.getAttribute('data-enabled')).toBe('false');
-    // …and carry their capability tag.
-    expect(within(dalle).getByText('settings.modelsPage.manage.capImage')).toBeInTheDocument();
+    // …and carry their usage tag derived from the persisted `tags` field.
+    expect(within(dalle).getByText('settings.modelsPage.manage.tagImage')).toBeInTheDocument();
   });
 
   it('shows the no-match state when a search query matches no models', async () => {

@@ -890,6 +890,12 @@ function buildChatStartPayload(
 // ─── IPC registration ─────────────────────────────────────────────────────────
 
 let _repo: ProviderRepository | null = null;
+/**
+ * The production `ModelRegistryHandlers` instance, captured at `initModelRegistryIpc`
+ * time so the post-upgrade catalog refresh can call `refresh()` with the real
+ * `modelsDevClient` + `makeApiSource` deps. `null` before init.
+ */
+let _handlers: ModelRegistryHandlers | null = null;
 
 /**
  * Build the production dependency set wired to the real 1A–1E modules and the
@@ -989,6 +995,10 @@ async function runStartupMigration(repo: ProviderRepository): Promise<void> {
 export async function initModelRegistryIpc(): Promise<void> {
   const deps = await buildProductionDeps();
   const h = createModelRegistryHandlers(deps);
+  // Capture the production handlers so the post-upgrade catalog refresh
+  // (`runPostUpgradeCatalogRefresh`) can reuse `refresh()` — it needs the
+  // real `modelsDevClient` + `makeApiSource` deps, not just `repo`.
+  _handlers = h;
 
   ipcBridge.modelRegistry.detectKeys.provider(() => h.detectKeys());
   // Wave 3 Fix 13 — wrap connect/rekey/disconnect with a v2 write-through
@@ -1036,9 +1046,30 @@ export async function initModelRegistryIpc(): Promise<void> {
 let _migrationScheduled = false;
 
 /**
+ * Catalog data-version baked into this build. Bumped whenever
+ *  - the Curator's eligibility logic changes (excludes more / fewer ids), or
+ *  - `CatalogModel` gains a derived field (e.g. `tags`).
+ *
+ * On boot, if the persisted `migration.modelRegistryCatalogDataVersion` is
+ * less than this constant, every connected provider's catalog is refreshed
+ * once and the cursor is bumped. See `runPostUpgradeCatalogRefresh`.
+ *
+ * Version history:
+ *  - 0 (implicit) — pre-polish-pass; old catalog rows have no `tags` and were
+ *    curated with the old "every unmatched id is a singleton family" rule.
+ *  - 1            — polish pass adds usage tags + smarter Curator (legacy
+ *    exclusion + recency floor + dedup). One-time refresh re-derives both.
+ */
+export const CATALOG_DATA_VERSION = 1;
+
+/**
  * Schedule the one-time legacy-config migration to run once `app.whenReady()`
  * resolves. Wave-4 ship-gate Fix A1. Idempotent — multiple calls schedule only
  * one run. Errors inside the migration are logged but never propagate.
+ *
+ * After the legacy migration succeeds, also runs the post-upgrade catalog
+ * refresh (`runPostUpgradeCatalogRefresh`) so the cursor migration sees a
+ * fully-populated set of providers — both legacy-migrated and pre-existing.
  */
 function scheduleStartupMigration(): void {
   if (_migrationScheduled) return;
@@ -1054,10 +1085,91 @@ function scheduleStartupMigration(): void {
         // outer guard so a thrown migration cannot crash the main process.
         console.warn('[modelRegistry] Legacy-config migration failed:', error);
       }
+      try {
+        // The post-upgrade refresh is independent of the legacy migration —
+        // it runs whether or not the legacy step did any work. A failure of
+        // one provider's refresh does not block the others.
+        await runPostUpgradeCatalogRefresh();
+      } catch (error) {
+        console.warn('[modelRegistry] Post-upgrade catalog refresh failed:', error);
+      }
     })
     .catch((error) => {
       console.warn('[modelRegistry] app.whenReady() rejected before migration could run:', error);
     });
+}
+
+/**
+ * One-time catalog refresh after a build that changes how catalogs are
+ * derived. Iterates every connected provider in the registry and calls
+ * `refresh()` (the existing IPC path) so their persisted `CatalogModel[]`
+ * rows are re-assembled with the new Curator + assembler logic (legacy
+ * exclusion, recency floor, dedup, `tags`).
+ *
+ * Idempotent — gated by the persisted `migration.modelRegistryCatalogDataVersion`
+ * cursor. If the cursor is already at or above `CATALOG_DATA_VERSION`, returns
+ * immediately. After every provider is refreshed (whether or not each call
+ * succeeded), the cursor is bumped so the next boot skips this work entirely.
+ *
+ * Defensive — a single provider's refresh throwing does NOT abort the others
+ * and does NOT prevent the cursor from advancing. Stale data on one provider
+ * is better than a stuck migration that re-attempts on every boot.
+ *
+ * Exported (via the test wrapper below) so unit tests can assert the cursor
+ * behavior without spinning up the Electron `app` lifecycle.
+ */
+async function runPostUpgradeCatalogRefresh(): Promise<void> {
+  if (!_repo || !_handlers) return;
+  await _runPostUpgradeCatalogRefresh(_repo, _handlers, {
+    get: async () => {
+      const v = await ProcessConfig.get('migration.modelRegistryCatalogDataVersion');
+      return typeof v === 'number' ? v : undefined;
+    },
+    set: async (v) => {
+      await ProcessConfig.set('migration.modelRegistryCatalogDataVersion', v);
+    },
+  });
+}
+
+/**
+ * The cursor-aware refresh loop, factored out so tests can drive it with a
+ * fake handlers + cursor store. Pure logic — no module-level state, no IPC,
+ * no `app.whenReady()`.
+ *
+ * Iterates every registered provider, calling `handlers.refresh` for each.
+ * A single provider's failure is logged but does NOT abort the sweep and
+ * does NOT prevent the cursor advance. After the sweep, sets the cursor to
+ * `CATALOG_DATA_VERSION`.
+ */
+export async function _runPostUpgradeCatalogRefresh(
+  repo: Pick<ProviderRepository, 'listRegistryProviders'>,
+  handlers: Pick<ModelRegistryHandlers, 'refresh'>,
+  cursor: {
+    get: () => Promise<number | undefined>;
+    set: (value: number) => Promise<void>;
+  }
+): Promise<void> {
+  const persisted = (await cursor.get().catch((): number | undefined => undefined)) ?? 0;
+  if (persisted >= CATALOG_DATA_VERSION) return;
+
+  const providers = repo.listRegistryProviders();
+  for (const provider of providers) {
+    try {
+      await handlers.refresh({ providerId: provider.providerId });
+    } catch (error) {
+      // One provider's failure must never block the rest of the refresh
+      // sweep or the cursor bump.
+      console.warn(`[modelRegistry] Post-upgrade refresh failed for provider ${provider.providerId}:`, error);
+    }
+  }
+
+  try {
+    await cursor.set(CATALOG_DATA_VERSION);
+  } catch (error) {
+    // Failing to persist the cursor means the next boot will re-run the
+    // refresh — that's wasteful but never wrong. Log and move on.
+    console.warn('[modelRegistry] Failed to persist catalog data-version cursor:', error);
+  }
 }
 
 /** The model-registry repository instance, available after `initModelRegistryIpc`. */

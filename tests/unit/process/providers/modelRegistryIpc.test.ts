@@ -58,6 +58,7 @@ function catalogModel(over: Partial<CatalogModel> & { id: string; providerId: Pr
     family: over.id,
     kind: 'text',
     enriched: false,
+    tags: [],
     ...over,
   };
 }
@@ -1185,6 +1186,89 @@ describeOrSkip('ProviderRepository — registry credential encryption round-trip
 });
 
 // ─── Ship-gate Fix A1: migration defers when safeStorage unavailable ───────────
+
+// ─── Post-upgrade catalog refresh ─────────────────────────────────────────────
+
+describe('runPostUpgradeCatalogRefresh', () => {
+  it('refreshes every registered provider once when the cursor is below CATALOG_DATA_VERSION', async () => {
+    const mod = await import('@process/providers/ipc/modelRegistryIpc');
+    const refreshCalls: ProviderId[] = [];
+    const repoStub = {
+      listRegistryProviders: () => [
+        { providerId: 'openai' as ProviderId },
+        { providerId: 'anthropic' as ProviderId },
+        { providerId: 'google-gemini' as ProviderId },
+      ],
+    };
+    const handlersStub = {
+      refresh: async ({ providerId }: { providerId: ProviderId }) => {
+        refreshCalls.push(providerId);
+        return { ok: true };
+      },
+    };
+    let cursor: number | undefined = 0;
+    await mod._runPostUpgradeCatalogRefresh(repoStub, handlersStub, {
+      get: async () => cursor,
+      set: async (v) => {
+        cursor = v;
+      },
+    });
+    expect(refreshCalls).toEqual(['openai', 'anthropic', 'google-gemini']);
+    expect(cursor).toBe(mod.CATALOG_DATA_VERSION);
+  });
+
+  it('is idempotent — a second call with the cursor at CATALOG_DATA_VERSION is a no-op', async () => {
+    const mod = await import('@process/providers/ipc/modelRegistryIpc');
+    let refreshCount = 0;
+    const repoStub = {
+      listRegistryProviders: () => [{ providerId: 'openai' as ProviderId }],
+    };
+    const handlersStub = {
+      refresh: async () => {
+        refreshCount++;
+        return { ok: true };
+      },
+    };
+    let cursor: number | undefined = mod.CATALOG_DATA_VERSION;
+    await mod._runPostUpgradeCatalogRefresh(repoStub, handlersStub, {
+      get: async () => cursor,
+      set: async (v) => {
+        cursor = v;
+      },
+    });
+    expect(refreshCount).toBe(0);
+  });
+
+  it('continues the sweep when one provider refresh throws + still bumps the cursor', async () => {
+    const mod = await import('@process/providers/ipc/modelRegistryIpc');
+    const refreshCalls: ProviderId[] = [];
+    const repoStub = {
+      listRegistryProviders: () => [
+        { providerId: 'openai' as ProviderId },
+        { providerId: 'anthropic' as ProviderId },
+        { providerId: 'google-gemini' as ProviderId },
+      ],
+    };
+    const handlersStub = {
+      refresh: async ({ providerId }: { providerId: ProviderId }) => {
+        refreshCalls.push(providerId);
+        if (providerId === 'anthropic') throw new Error('boom');
+        return { ok: true };
+      },
+    };
+    let cursor: number | undefined = 0;
+    await mod._runPostUpgradeCatalogRefresh(repoStub, handlersStub, {
+      get: async () => cursor,
+      set: async (v) => {
+        cursor = v;
+      },
+    });
+    // Every provider was attempted, in order.
+    expect(refreshCalls).toEqual(['openai', 'anthropic', 'google-gemini']);
+    // The cursor still advanced — a single provider's failure is acceptable.
+    expect(cursor).toBe(mod.CATALOG_DATA_VERSION);
+  });
+});
 
 describe('runStartupMigration — safeStorage gating (Fix A1)', () => {
   it('returns early (without touching the repo) when safeStorage is unavailable', async () => {

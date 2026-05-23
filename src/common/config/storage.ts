@@ -141,6 +141,16 @@ export interface IConfigStorageRefer {
    * the translation entirely.
    */
   'migration.legacyModelConfigToRegistry'?: boolean;
+  /**
+   * Catalog data-version cursor for the polish-pass post-upgrade refresh.
+   * Bumped whenever the Curator's eligibility logic or `CatalogModel`'s
+   * derived fields (e.g. `tags`) change in a way that requires re-deriving
+   * already-persisted rows. On boot, when the stored value is less than the
+   * `CATALOG_DATA_VERSION` baked into the build, the model-registry IPC
+   * iterates every connected provider and calls `refresh()` once, then bumps
+   * the stored value. Absent the cursor is treated as `0`.
+   */
+  'migration.modelRegistryCatalogDataVersion'?: number;
   // 关闭窗口时最小化到系统托盘 / Minimize to system tray when closing window
   'system.closeToTray'?: boolean;
   // First-run flag: set once after applying smart defaults (close-to-tray on, start-on-boot on).

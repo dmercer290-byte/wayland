@@ -502,7 +502,13 @@ export class ProviderRepository {
     const models: CatalogModel[] = [];
     for (const r of rows) {
       try {
-        models.push(JSON.parse(r.model_json as string) as CatalogModel);
+        const parsed = JSON.parse(r.model_json as string) as CatalogModel;
+        // Catalog rows written before the `tags` field existed have no `tags`
+        // property. Default to `[]` so renderer/curator code can treat `tags`
+        // as always-present. The post-upgrade refresh (catalog.dataVersion)
+        // backfills real tags on the next refresh cycle.
+        if (!Array.isArray(parsed.tags)) parsed.tags = [];
+        models.push(parsed);
       } catch {
         // A corrupt row is skipped rather than failing the whole read.
       }

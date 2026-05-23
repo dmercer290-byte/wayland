@@ -3,7 +3,7 @@ import { Button, Input, Message, Modal, Spin, Switch, Tooltip } from '@arco-desi
 import { AlertTriangle, ChevronLeft, RefreshCw as RefreshIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { IModelRegistryProviderView } from '@/common/adapter/ipcBridge';
-import type { CatalogModel, ConnectError, CuratedModel, ModelKind } from '@process/providers/types';
+import type { CatalogModel, ConnectError, CuratedModel, UsageTag } from '@process/providers/types';
 import { useModelRegistry } from '@renderer/hooks/useModelRegistry';
 import { providerMeta } from './providerCatalog';
 import styles from './ManageProvider.module.css';
@@ -34,13 +34,24 @@ const ERROR_KEY: Record<ConnectError, string> = {
   unknown: 'errorUnknown',
 };
 
-/** Map a non-text `ModelKind` to its capability-tag i18n key suffix. */
-const CAP_KEY: Partial<Record<ModelKind, string>> = {
-  image: 'capImage',
-  audio: 'capAudio',
-  embedding: 'capEmbedding',
-  other: 'capOther',
+/**
+ * Map a `UsageTag` to its label i18n key suffix. The `chat` tag is the most
+ * common ("good for chat"), so it's marked `tagPrimary` in the row renderer
+ * to read as the model's primary purpose. The rest are neutral chips.
+ */
+const TAG_KEY: Record<UsageTag, string> = {
+  chat: 'tagChat',
+  vision: 'tagVision',
+  image: 'tagImage',
+  audio: 'tagAudio',
+  embeddings: 'tagEmbeddings',
+  reasoning: 'tagReasoning',
+  tools: 'tagTools',
+  research: 'tagResearch',
 };
+
+/** Tags shown with the brand-coloured `.tagPrimary` style — model's PRIMARY purpose. */
+const PRIMARY_TAGS = new Set<UsageTag>(['chat', 'image', 'audio', 'embeddings', 'reasoning']);
 
 /**
  * The Manage Provider page (prototype `#screen-manage`, spec §3.6 / §4.5).
@@ -113,6 +124,7 @@ const ManageProvider: React.FC<Props> = ({ provider, onBack, onDisconnected }) =
               costOutPerM: c.costOutPerM,
               status: c.status,
               enriched: c.enriched,
+              tags: Array.isArray(c.tags) ? c.tags : [],
               recommended: false,
               enabled: false,
             };
@@ -267,16 +279,20 @@ const ManageProvider: React.FC<Props> = ({ provider, onBack, onDisconnected }) =
 
   // ---- Row renderer ------------------------------------------------------
   const renderRow = (model: CuratedModel) => {
-    const capSuffix = model.kind !== 'text' ? CAP_KEY[model.kind] : undefined;
     const metaText = modelMeta(model);
-    const roleLabel =
+    const tags = Array.isArray(model.tags) ? model.tags : [];
+    // The role dot is a tiny brand-coloured marker showing the model's family
+    // role (flagship / previous). Replaces the loud "MOST CAPABLE" badge so
+    // usage tags carry the primary visual weight. Hidden for the "Latest" dot
+    // when it would just clutter the row (non-recommended models).
+    const showRoleDot = model.recommended && (model.role === 'flagship' || model.role === 'previous');
+    const roleAriaLabel =
       model.role === 'flagship'
         ? t('settings.modelsPage.manage.roleFlagship')
-        : model.role === 'fast'
-          ? t('settings.modelsPage.manage.roleFast')
-          : model.role === 'previous'
-            ? t('settings.modelsPage.manage.rolePrevious')
-            : t('settings.modelsPage.manage.recommended');
+        : model.role === 'previous'
+          ? t('settings.modelsPage.manage.rolePrevious')
+          : '';
+    const roleDotClass = model.role === 'previous' ? `${styles.roleDot} ${styles.roleDotPrevious}` : styles.roleDot;
 
     return (
       <div
@@ -285,9 +301,17 @@ const ManageProvider: React.FC<Props> = ({ provider, onBack, onDisconnected }) =
         data-model={model.id}
         data-enabled={model.enabled}
       >
+        {showRoleDot && <span className={roleDotClass} aria-label={roleAriaLabel} role='img' />}
         <span className={styles.modelName}>{model.displayName}</span>
-        {model.recommended && <span className={styles.recBadge}>{roleLabel}</span>}
-        {capSuffix && <span className={styles.capTag}>{t(`settings.modelsPage.manage.${capSuffix}`)}</span>}
+        {tags.length > 0 && (
+          <span className={styles.tags}>
+            {tags.map((tag) => (
+              <span key={tag} className={PRIMARY_TAGS.has(tag) ? `${styles.tag} ${styles.tagPrimary}` : styles.tag}>
+                {t(`settings.modelsPage.manage.${TAG_KEY[tag]}`)}
+              </span>
+            ))}
+          </span>
+        )}
         {metaText && <span className={styles.modelMeta}>{metaText}</span>}
         <Switch
           className={styles.toggle}
@@ -380,7 +404,7 @@ const ManageProvider: React.FC<Props> = ({ provider, onBack, onDisconnected }) =
 
         {!loading && loadError && (
           <div className={styles.cardState} role='alert'>
-            <AlertTriangle size={20} color='var(--color-danger-6)' aria-hidden='true' />
+            <AlertTriangle size={20} color='var(--danger)' aria-hidden='true' />
             <div className={styles.cardStateText}>{t('settings.modelsPage.manage.loadError')}</div>
             <Button size='small' onClick={() => void loadCatalog()}>
               {t('settings.modelsPage.manage.retry')}
@@ -445,7 +469,7 @@ const ManageProvider: React.FC<Props> = ({ provider, onBack, onDisconnected }) =
             disabled={rekeySubmitting}
           />
           {rekeyError && (
-            <div className='text-12px text-[var(--color-danger-6)] leading-1.45' role='alert'>
+            <div className='text-12px text-[var(--danger)] leading-1.45' role='alert'>
               {t(`settings.modelsPage.manage.${rekeyError}`, { provider: meta.displayName })}
             </div>
           )}
