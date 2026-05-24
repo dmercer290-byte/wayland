@@ -170,6 +170,31 @@ const GuidPage: React.FC = () => {
     t,
   });
 
+  const recordTelemetry = useUsageTelemetry();
+
+  // Fire 'guid.foreground' once on mount so usage analytics can attribute
+  // dashboard sessions to a starting page view.
+  useEffect(() => {
+    recordTelemetry({ eventType: 'guid.foreground' });
+  }, [recordTelemetry]);
+
+  // Fire-and-forget 'guid.message_sent' helper. Recorded synchronously at the
+  // same call site as `send.sendMessageHandler` / `send.handleSend` so the
+  // event is captured before any async work clears the input/files.
+  const recordMessageSent = useCallback(() => {
+    recordTelemetry({
+      eventType: 'guid.message_sent',
+      assistantId: agentSelection.selectedAgentInfo?.customAgentId,
+      cliBackend: agentSelection.selectedAgent,
+      metadata: { hasFiles: guidInput.files.length > 0 },
+    });
+  }, [
+    recordTelemetry,
+    agentSelection.selectedAgentInfo,
+    agentSelection.selectedAgent,
+    guidInput.files,
+  ]);
+
   // --- Coordinated handlers (depend on multiple hooks) ---
   const handleInputChange = useCallback(
     (value: string) => {
@@ -256,10 +281,11 @@ const GuidPage: React.FC = () => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         if (!guidInput.input.trim()) return;
+        recordMessageSent();
         send.sendMessageHandler();
       }
     },
-    [mention, guidInput.input, send.sendMessageHandler]
+    [mention, guidInput.input, send.sendMessageHandler, recordMessageSent]
   );
 
   const handleSelectAgent = useCallback(
@@ -269,6 +295,7 @@ const GuidPage: React.FC = () => {
       mention.setMentionQuery(null);
       mention.setMentionSelectorOpen(false);
       mention.setMentionActiveIndex(0);
+      recordTelemetry({ eventType: 'guid.cli_selected', cliBackend: key });
     },
     [
       agentSelection.setSelectedAgentKey,
@@ -276,6 +303,7 @@ const GuidPage: React.FC = () => {
       mention.setMentionQuery,
       mention.setMentionSelectorOpen,
       mention.setMentionActiveIndex,
+      recordTelemetry,
     ]
   );
 
@@ -328,8 +356,6 @@ const GuidPage: React.FC = () => {
       guidInput.handleTextareaFocus();
     }
   }, [kickoff, guidInput.setInput, guidInput.handleTextareaFocus]);
-
-  const recordTelemetry = useUsageTelemetry();
 
   const handleQuickLaunchAnchor = useCallback(
     (anchor: QuickLaunchAnchor) => {
@@ -645,6 +671,7 @@ const GuidPage: React.FC = () => {
         <SpeechInputButton variant='prominent' locale={i18n.language} onTranscript={handleSpeechTranscript} />
       }
       onSend={() => {
+        recordMessageSent();
         send.handleSend().catch((error) => {
           console.error('Failed to send message:', error);
         });
