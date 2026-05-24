@@ -129,6 +129,26 @@ async function readAssistantResource(
   locale: string,
   fileNamePattern: (id: string, loc: string) => string
 ): Promise<string> {
+  // ext-* extension assistants: the bundle's contextFile content was loaded
+  // by AssistantResolver at registry-build time and stored on the registry
+  // record's `context` field. The on-disk filename pattern
+  // `${assistantId}.${locale}.md` does NOT match the bare-named files in
+  // the waylandteams bundle, so the disk lookup below would silently return
+  // '' and the model would spawn with no system prompt. Consult the registry
+  // first for rules; the registry's `context` is the source of truth.
+  if (resourceType === 'rules' && assistantId.startsWith('ext-')) {
+    try {
+      const registry = ExtensionRegistry.getInstance();
+      const record = registry.getAssistants().find((a) => (a as { id?: string }).id === assistantId);
+      const context = (record as { context?: string } | undefined)?.context;
+      if (typeof context === 'string' && context.length > 0) {
+        return context;
+      }
+    } catch {
+      // Registry not initialized — fall through to filename lookup.
+    }
+  }
+
   const assistantsDir = getAssistantsDir();
   const locales = [locale, 'en-US', 'zh-CN'].filter((l, i, arr) => arr.indexOf(l) === i);
 

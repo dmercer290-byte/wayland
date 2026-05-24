@@ -409,9 +409,38 @@ export class TeamMcpServer {
       // stored with `id: ext-<bare>`, but launcher prompts written against the
       // extension's own manifest use the bare form. Mirrors the renderer-side
       // tolerance in usePresetAssistantInfo.ts.
-      const preset = assistants.find(
+      let preset:
+        | { id: string; isPreset?: boolean; enabled?: boolean; presetAgentType?: string }
+        | undefined = assistants.find(
         (a) => (a.id === customAgentId || a.id === `ext-${customAgentId}`) && a.isPreset
       );
+      // Extension-contributed assistants live in ExtensionRegistry, not
+      // ProcessConfig. Fall back to the registry so the leader can spawn
+      // ext-* specialists (e.g. Quiet Money Council layer specialists).
+      if (!preset) {
+        try {
+          const { ExtensionRegistry } = await import('@process/extensions/ExtensionRegistry');
+          const extRecord = ExtensionRegistry.getInstance()
+            .getAssistants()
+            .find((a) => {
+              const id = (a as { id?: string }).id;
+              if (typeof id !== 'string') return false;
+              return id === customAgentId || id === `ext-${customAgentId}`;
+            }) as
+            | { id?: string; isPreset?: boolean; enabled?: boolean; presetAgentType?: string }
+            | undefined;
+          if (extRecord && typeof extRecord.id === 'string' && extRecord.isPreset) {
+            preset = {
+              id: extRecord.id,
+              isPreset: extRecord.isPreset,
+              enabled: extRecord.enabled,
+              presetAgentType: extRecord.presetAgentType,
+            };
+          }
+        } catch {
+          // Registry not initialized — fall through to not-found error below.
+        }
+      }
       if (!preset) {
         const availableIds = assistants
           .filter((a) => a.isPreset && a.enabled !== false)

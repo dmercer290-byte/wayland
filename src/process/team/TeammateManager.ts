@@ -295,12 +295,38 @@ export class TeammateManager extends EventEmitter {
             }));
 
           const assistants = (await ProcessConfig.get('assistants')) ?? [];
-          availableAssistants = assistants
+          // Extension-contributed assistants (ext-*) live in ExtensionRegistry,
+          // not ProcessConfig. Merge them so the leader's "Available Preset
+          // Assistants for Spawning" list includes ext-* specialists (e.g.
+          // Quiet Money Council layer specialists). Dedupe by id with config
+          // entries winning (config can override extension fields if the user
+          // edited the assistant).
+          let extensionAssistants: Array<{
+            id?: string;
+            name?: string;
+            presetAgentType?: string;
+            description?: string;
+            enabledSkills?: string[];
+            isPreset?: boolean;
+            enabled?: boolean;
+          }> = [];
+          try {
+            const { ExtensionRegistry } = await import('@process/extensions/ExtensionRegistry');
+            extensionAssistants = ExtensionRegistry.getInstance().getAssistants() as typeof extensionAssistants;
+          } catch {
+            // Registry not initialized — leader sees only ProcessConfig entries.
+          }
+          const configIds = new Set(assistants.map((a) => a.id));
+          const mergedAssistants = [
+            ...assistants,
+            ...extensionAssistants.filter((a) => typeof a.id === 'string' && !configIds.has(a.id as string)),
+          ];
+          availableAssistants = mergedAssistants
             .filter((a) => a.isPreset && a.enabled !== false)
             .map((a) => ({
-              customAgentId: a.id,
-              name: a.name,
-              backend: a.presetAgentType || 'gemini',
+              customAgentId: a.id as string,
+              name: a.name as string,
+              backend: (a.presetAgentType as string) || 'gemini',
               description: a.description,
               skills: a.enabledSkills,
             }))

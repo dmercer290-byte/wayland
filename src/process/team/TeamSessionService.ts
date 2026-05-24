@@ -220,6 +220,28 @@ export class TeamSessionService {
     return undefined;
   }
 
+  /**
+   * Resolve a launcher id (bare or `ext-` prefixed) to its bundle entry and
+   * return whether the bundle declares `standing: true`. Used at createTeam
+   * time to auto-promote standing-flagged teams so ritual kickoff cards
+   * surface without requiring a manual promote click.
+   */
+  private async isStandingFlaggedLauncher(sourceLauncherId: string): Promise<boolean> {
+    try {
+      const { ExtensionRegistry } = await import('@process/extensions/ExtensionRegistry');
+      const assistants = ExtensionRegistry.getInstance().getAssistants();
+      const stripped = sourceLauncherId.startsWith('ext-') ? sourceLauncherId.slice(4) : sourceLauncherId;
+      const record = assistants.find((a) => {
+        const id = (a as { id?: string }).id;
+        if (typeof id !== 'string') return false;
+        return id === sourceLauncherId || id === `ext-${sourceLauncherId}` || id === stripped || id === `ext-${stripped}`;
+      });
+      return (record as { standing?: boolean } | undefined)?.standing === true;
+    } catch {
+      return false;
+    }
+  }
+
   private async findBuiltinResourceDir(resourceType: 'rules' | 'skills'): Promise<string> {
     const base = process.cwd();
     const devDir = resourceType === 'skills' ? 'src/process/resources/skills' : resourceType;
@@ -242,6 +264,28 @@ export class TeamSessionService {
     assistantId: string,
     locale: string
   ): Promise<string> {
+    // ext-* extension assistants: AssistantResolver embedded the bundle's
+    // contextFile into the registry record's `context` field at registry
+    // build time. The on-disk filename pattern `${assistantId}.${locale}.md`
+    // does NOT match the bare-named files in the waylandteams bundle, so the
+    // disk lookup below would silently return '' and the agent would spawn
+    // without its domain system prompt (regulatory exposure for Quiet Money).
+    // Consult the registry first for rules.
+    if (resourceType === 'rules' && assistantId.startsWith('ext-')) {
+      try {
+        const { ExtensionRegistry } = await import('@process/extensions/ExtensionRegistry');
+        const record = ExtensionRegistry.getInstance()
+          .getAssistants()
+          .find((a) => (a as { id?: string }).id === assistantId);
+        const context = (record as { context?: string } | undefined)?.context;
+        if (typeof context === 'string' && context.length > 0) {
+          return context;
+        }
+      } catch {
+        // Registry not initialized — fall through to filename lookup.
+      }
+    }
+
     const assistantsDir = getAssistantsDir();
     const locales = [locale, 'en-US', 'zh-CN'].filter((value, index, values) => values.indexOf(value) === index);
     const fileName = (targetLocale: string) =>
@@ -571,6 +615,16 @@ export class TeamSessionService {
     }
     if (!leadAgent) throw new Error('Team must have at least one leader agent');
 
+    // Auto-promote teams created from a launcher whose bundle entry has
+    // `standing: true`. Without this, ritual crons install at createTeam but
+    // SignalCollector.detectRecentRitualOutput gates post-fire kickoff cards
+    // on `promotedToStanding === true`, which only gets set by the explicit
+    // user-facing promote button. Standing-flagged bundles already declare
+    // intent at the bundle layer; making the user click promote is a UX gap.
+    const isStandingByBundle = params.sourceLauncherId
+      ? await this.isStandingFlaggedLauncher(params.sourceLauncherId)
+      : false;
+
     const team: TTeam = {
       id: teamId,
       userId: params.userId,
@@ -581,6 +635,7 @@ export class TeamSessionService {
       agents: agentsWithConversations,
       sessionMode: params.sessionMode,
       sourceLauncherId: params.sourceLauncherId,
+      promotedToStanding: isStandingByBundle ? true : undefined,
       createdAt: now,
       updatedAt: now,
     };
