@@ -19,8 +19,11 @@ import Greeting from './components/newChatStarter/Greeting';
 import IntentPillBar from './components/newChatStarter/IntentPillBar';
 import IntentSuggestionPanel from './components/newChatStarter/IntentSuggestionPanel';
 import KickoffCard from './components/newChatStarter/KickoffCard';
+import QuickLaunchRow from './components/newChatStarter/QuickLaunchRow';
 import RecentsStrip from './components/newChatStarter/RecentsStrip';
 import type { IntentKey, IntentPrompt } from './intents';
+import type { QuickLaunchAnchor } from './quickLaunchAnchors';
+import { useUsageTelemetry } from '@/renderer/hooks/usage/useUsageTelemetry';
 import { useUserDisplayName } from '@/renderer/hooks/system/useUserDisplayName';
 import { useKickoff } from '@/renderer/hooks/kickoff/useKickoff';
 import { ASSISTANT_PRESETS } from '@/common/config/presets/assistantPresets';
@@ -329,6 +332,49 @@ const GuidPage: React.FC = () => {
       guidInput.handleTextareaFocus();
     }
   }, [kickoff, guidInput.setInput, guidInput.handleTextareaFocus]);
+
+  const recordTelemetry = useUsageTelemetry();
+
+  const handleQuickLaunchAnchor = useCallback(
+    (anchor: QuickLaunchAnchor) => {
+      // Mirror handleSelectIntentPrompt: built-in presets get presetAgentType,
+      // ext-* assistants fall through to selectPresetAssistant's gemini default.
+      const preset = ASSISTANT_PRESETS.find((p) => p.id === anchor.assistantId);
+      if (preset) {
+        agentSelection.selectPresetAssistant({ id: preset.id, presetAgentType: preset.presetAgentType });
+      } else {
+        agentSelection.selectPresetAssistant({ id: anchor.assistantId });
+      }
+      guidInput.setInput(anchor.prefill);
+      guidInput.handleTextareaFocus();
+      mention.setMentionOpen(false);
+      mention.setMentionQuery(null);
+      mention.setMentionSelectorOpen(false);
+      mention.setMentionActiveIndex(0);
+      recordTelemetry({
+        eventType: 'launchpad.card_clicked',
+        anchorId: anchor.id,
+        assistantId: anchor.assistantId,
+        cliBackend: agentSelection.selectedAgent,
+      });
+    },
+    [
+      agentSelection.selectPresetAssistant,
+      agentSelection.selectedAgent,
+      guidInput.setInput,
+      guidInput.handleTextareaFocus,
+      mention.setMentionOpen,
+      mention.setMentionQuery,
+      mention.setMentionSelectorOpen,
+      mention.setMentionActiveIndex,
+      recordTelemetry,
+    ]
+  );
+
+  const handleQuickLaunchViewAll = useCallback(() => {
+    recordTelemetry({ eventType: 'launchpad.view_all_clicked' });
+    navigate('/assistants');
+  }, [navigate, recordTelemetry]);
 
   const handleSelectIntent = useCallback((intent: IntentKey | null) => {
     setActiveIntent(intent);
@@ -864,14 +910,7 @@ const GuidPage: React.FC = () => {
 
           {!agentSelection.isPresetAgent ? (
             <div className={styles.newChatStarter} data-testid='new-chat-starter'>
-              <IntentPillBar activeIntent={activeIntent} onSelect={handleSelectIntent} />
-              {activeIntent ? (
-                <IntentSuggestionPanel
-                  intent={activeIntent}
-                  onSelect={handleSelectIntentPrompt}
-                  onClose={handleCloseIntentPanel}
-                />
-              ) : null}
+              <QuickLaunchRow onAnchorClick={handleQuickLaunchAnchor} onViewAll={handleQuickLaunchViewAll} />
               <RecentsStrip onSelect={handleSelectRecent} />
             </div>
           ) : null}
