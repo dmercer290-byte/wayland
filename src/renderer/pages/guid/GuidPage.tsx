@@ -399,6 +399,14 @@ const GuidPage: React.FC = () => {
         id: anchor.assistantId,
         presetAgentType: preset?.presetAgentType,
       });
+      // Bug 7 — Always overwrite, even when the user already typed or a prior
+      // anchor's prefill is still in the textarea. The React state setter is
+      // an overwrite, but we also force the underlying DOM value via the ref
+      // so the Arco TextArea can't keep the prior text on re-mount/back-nav.
+      const textareaEl = guidInput.textareaRef.current?.dom;
+      if (textareaEl) {
+        textareaEl.value = anchor.prefill;
+      }
       guidInput.setInput(anchor.prefill);
       guidInput.handleTextareaFocus();
       mention.setMentionOpen(false);
