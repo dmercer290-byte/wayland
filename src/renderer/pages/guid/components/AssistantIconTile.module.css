@@ -31,3 +31,12 @@
   height: 60%;
   display: block;
 }
+
+/* Bundled assistant logo files (waylandteams SVGs) are dark-fill pixels —
+   they render invisible against any dark background regardless of the tile
+   color. SVGs inherit the tile color via currentColor; <img> elements can't.
+   In dark theme we force them to render as white via a brightness/invert
+   filter so they always sit clearly against the colored tile background. */
+body[arco-theme='dark'] .tile :global(img) {
+  filter: brightness(0) invert(1);
+}
