@@ -1,0 +1,52 @@
+/**
+ * FullPanelShell -- Wave 4 multi-tab chrome (header + Arco Tabs). Layout
+ * styles only; typography and colors come from UnoCSS utility classes in
+ * the component to stay token-aligned.
+ */
+.shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border-2);
+}
+
+.breadcrumb {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-1);
+  margin: 0;
+}
+
+.headerActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tabsHost {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tabsHost :global(.arco-tabs) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.tabsHost :global(.arco-tabs-content) {
+  flex: 1;
+  min-height: 0;
+}
