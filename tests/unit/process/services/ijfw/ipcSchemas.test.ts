@@ -45,6 +45,120 @@ describe('ijfw/ipcSchemas', () => {
       expect(ALLOWED_VERBS).toContain('wiki.compile');
       expect(ALLOWED_VERBS).toContain('conflict.resolve');
     });
+
+    // Wave 7 B1: every verb in the renderer's `IjfwVerb` union must be in the
+    // allowlist. The 11 below were silently rejected by `validateInvocation`
+    // before this fix — the renderer declared them legal but the bridge zod
+    // gate didn't know about them. Tests passed because they all mock
+    // `brainInvoke` directly; the live wire was dead.
+    it('includes every memory.* / lifecycle / cross-project verb the renderer uses', () => {
+      const required = [
+        'memory_recall',
+        'memory_search',
+        'memory_store',
+        'memory_facts',
+        'memory_prelude',
+        'state',
+        'metrics',
+        'prompt_check',
+        'update_check',
+        'update_apply',
+        'cross_audit_converge',
+        'cross_project_search',
+      ] as const;
+      for (const verb of required) {
+        expect(ALLOWED_VERBS).toContain(verb);
+      }
+    });
+  });
+
+  describe('Wave 7 B1: memory.* verbs accept the args renderer call sites pass', () => {
+    it('memory_facts {any:true} (MemoryPage routing gate)', () => {
+      expect(validateInvocation('memory_facts', { any: true }).ok).toBe(true);
+    });
+    it('memory_facts {promotable:true} (HomeTab)', () => {
+      expect(validateInvocation('memory_facts', { promotable: true }).ok).toBe(true);
+    });
+    it('memory_facts {conflicts:true} (ConflictsTab)', () => {
+      expect(validateInvocation('memory_facts', { conflicts: true }).ok).toBe(true);
+    });
+    it('memory_facts {pending_promotion:true} (PromotionsTab)', () => {
+      expect(validateInvocation('memory_facts', { pending_promotion: true }).ok).toBe(true);
+    });
+    it('memory_facts {id, skipPromotion} (PromotionsTab.handleSkip)', () => {
+      const result = validateInvocation('memory_facts', { id: 'abc', skipPromotion: true });
+      expect(result.ok).toBe(true);
+    });
+    it('memory_store {content} (OnboardingEmptyState)', () => {
+      const result = validateInvocation('memory_store', { content: 'hello world' });
+      expect(result.ok).toBe(true);
+    });
+    it('memory_store rejects empty content', () => {
+      const result = validateInvocation('memory_store', { content: '' });
+      expect(result.ok).toBe(false);
+    });
+    it('memory_search {query}', () => {
+      expect(validateInvocation('memory_search', { query: 'hi' }).ok).toBe(true);
+    });
+    it('memory_recall {} (arg-free)', () => {
+      expect(validateInvocation('memory_recall', {}).ok).toBe(true);
+    });
+    it('memory_prelude {} (arg-free)', () => {
+      expect(validateInvocation('memory_prelude', {}).ok).toBe(true);
+    });
+  });
+
+  describe('Wave 7 B1: lifecycle / diagnostics verbs', () => {
+    it.each(['state', 'metrics', 'update_check'] as const)('%s accepts arg-free invocation', (verb) => {
+      expect(validateInvocation(verb, {}).ok).toBe(true);
+    });
+    it('prompt_check {prompt}', () => {
+      expect(validateInvocation('prompt_check', { prompt: 'check me' }).ok).toBe(true);
+    });
+    it('update_apply {version}', () => {
+      expect(validateInvocation('update_apply', { version: '1.6.0' }).ok).toBe(true);
+    });
+  });
+
+  describe('Wave 7 B1: cross-project verbs', () => {
+    it('cross_audit_converge {findings}', () => {
+      const result = validateInvocation('cross_audit_converge', { findings: [] });
+      expect(result.ok).toBe(true);
+    });
+    it('cross_project_search {query, scope, path} (CrossProjectTab full payload)', () => {
+      const result = validateInvocation('cross_project_search', {
+        query: 'memory leak',
+        scope: 'app',
+        path: '/Users/foo/dev/bar',
+      });
+      expect(result.ok).toBe(true);
+    });
+    it('cross_project_search rejects unknown scope value', () => {
+      const result = validateInvocation('cross_project_search', { query: 'x', scope: 'global' });
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('Wave 7 B1: wiki.promote accepts both slug and id arg shapes', () => {
+    it('accepts {slug} (WikiTab)', () => {
+      expect(validateInvocation('wiki.promote', { slug: 'memory' }).ok).toBe(true);
+    });
+    it('accepts {id} (HomeTab, PromotionsTab)', () => {
+      expect(validateInvocation('wiki.promote', { id: 'cand-123' }).ok).toBe(true);
+    });
+    it('rejects empty {}', () => {
+      expect(validateInvocation('wiki.promote', {}).ok).toBe(false);
+    });
+  });
+
+  describe('Wave 7 B1: conflict.resolve accepts ConflictsTab arg shape', () => {
+    it('accepts {conflictId, winnerVariantId}', () => {
+      const result = validateInvocation('conflict.resolve', {
+        conflictId: 'cf-1',
+        winnerVariantId: 'v-2',
+      });
+      expect(result.ok).toBe(true);
+    });
   });
 
   describe('think verb', () => {

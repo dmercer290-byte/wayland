@@ -22,6 +22,26 @@ export const ALLOWED_VERBS = [
   'wiki.export',
   'wiki.shareReadme',
   'conflict.resolve',
+  // Wave 7 B1: memory.* family — used by every Memory tab via `useIjfwBrain`.
+  // The renderer's `IjfwVerb` union (src/renderer/pages/memory/types/brain.ts)
+  // declared these as legal but they were silently rejected by the bridge zod
+  // gate because they were absent from this allowlist. MemoryPage's routing
+  // gate uses `memory_facts` — without it MemoryPage collapses to the
+  // degraded fallback.
+  'memory_recall',
+  'memory_search',
+  'memory_store',
+  'memory_facts',
+  'memory_prelude',
+  // Wave 7 B1: diagnostics / lifecycle.
+  'state',
+  'metrics',
+  'prompt_check',
+  'update_check',
+  'update_apply',
+  // Wave 7 B1: cross-project audit + search.
+  'cross_audit_converge',
+  'cross_project_search',
 ] as const;
 export type IjfwVerb = (typeof ALLOWED_VERBS)[number];
 
@@ -49,23 +69,85 @@ const exportPathSchema = z.string().refine((p) => {
 
 const COMPILE_TYPES = ['summary', 'timeline', 'entity', 'concept', 'candidate'] as const;
 
+// Wave 7 B1: memory_store payload byte cap. Server already enforces a 256KB
+// limit; reject early so the IPC layer never enqueues an oversized write to
+// the MCP child.
+const MEMORY_STORE_MAX_BYTES = 262_144;
+const memoryStoreContentSchema = z
+  .string()
+  .min(1)
+  .refine((s) => Buffer.byteLength(s, 'utf8') <= MEMORY_STORE_MAX_BYTES, 'content exceeds 256KB');
+
 export const verbSchemas: Record<IjfwVerb, z.ZodTypeAny> = {
-  think: z.object({ query: queryStringSchema }),
+  think: z.object({ query: queryStringSchema, k: z.number().int().min(1).max(50).optional() }).passthrough(),
   links: z.object({ of: slugSchema }),
   'wiki.get': z.object({ slug: slugSchema }),
   'wiki.compile': z.object({
     subject: z.string().min(1).max(500),
     type: z.enum(COMPILE_TYPES).optional(),
   }),
-  'wiki.promote': z.object({ slug: slugSchema }),
+  // Wave 7 B1: HomeTab + PromotionsTab call wiki.promote with `{id}`; WikiTab
+  // calls it with `{slug}`. Accept either; let the MCP server pick lookup mode.
+  'wiki.promote': z
+    .object({
+      slug: slugSchema.optional(),
+      id: z.string().min(1).max(200).optional(),
+    })
+    .passthrough()
+    .refine((v) => v.slug !== undefined || v.id !== undefined, {
+      message: 'wiki.promote requires `slug` or `id`',
+    }),
   'wiki.export': z.object({ slug: slugSchema, outFile: exportPathSchema }),
   'wiki.shareReadme': z.object({}),
-  'conflict.resolve': z.object({
-    subject: z.string().min(1).max(500),
-    predicate: z.string().min(1).max(500),
-    winnerId: z.string().min(1).max(200),
-    supersede: z.boolean().optional(),
-  }),
+  // Wave 7 B1: ConflictsTab passes `{conflictId, winnerVariantId}`. Prior
+  // schema demanded `{subject, predicate, winnerId}` — never matched any call
+  // site. Accept both arg shapes; server owns the contract.
+  'conflict.resolve': z
+    .object({
+      conflictId: z.string().min(1).max(500).optional(),
+      winnerVariantId: z.string().min(1).max(500).optional(),
+      subject: z.string().min(1).max(500).optional(),
+      predicate: z.string().min(1).max(500).optional(),
+      winnerId: z.string().min(1).max(200).optional(),
+      supersede: z.boolean().optional(),
+    })
+    .passthrough(),
+  // Wave 7 B1: memory.* family. Server-owned argument shapes documented next
+  // to each verb. `passthrough()` lets the contract evolve without breaking
+  // the bridge gate (the gate stays a containment perimeter — size, prototype
+  // pollution, byte cap — not an exhaustive contract).
+  // PromotionsTab / ConflictsTab / HomeTab / MemoryPage:
+  //   { any?, promotable?, conflicts?, pending_promotion?, id?, skipPromotion? }
+  memory_facts: z.object({}).passthrough(),
+  memory_store: z.object({ content: memoryStoreContentSchema }).passthrough(),
+  memory_search: z
+    .object({
+      query: queryStringSchema,
+      k: z.number().int().min(1).max(50).optional(),
+    })
+    .passthrough(),
+  memory_recall: z
+    .object({
+      query: queryStringSchema.optional(),
+      limit: z.number().int().min(1).max(200).optional(),
+    })
+    .passthrough(),
+  memory_prelude: z.object({}).passthrough(),
+  // Wave 7 B1: diagnostics / lifecycle.
+  state: z.object({}).passthrough(),
+  metrics: z.object({}).passthrough(),
+  prompt_check: z.object({ prompt: z.string().min(1).max(8000).optional() }).passthrough(),
+  update_check: z.object({}).passthrough(),
+  update_apply: z.object({ version: z.string().min(1).max(64).optional() }).passthrough(),
+  // Wave 7 B1: cross-project verbs. CrossProjectTab passes `{query, scope, path}`.
+  cross_audit_converge: z.object({ findings: z.array(z.unknown()).optional() }).passthrough(),
+  cross_project_search: z
+    .object({
+      query: queryStringSchema,
+      scope: z.enum(['project', 'app']).optional(),
+      path: z.string().min(1).max(4096).optional(),
+    })
+    .passthrough(),
 };
 
 export const MAX_ARGS_BYTES = 1_048_576;
