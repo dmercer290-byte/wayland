@@ -4,6 +4,36 @@ All notable changes to the Wayland Electron app are documented in this file. For
 
 ## [Unreleased]
 
+### IJFW v0.6.3 — system service + first-boot install (Wave 1)
+
+- New `src/process/services/ijfwSystemService.ts` replaces the previous
+  `ijfwAutoInstallService`. Detects a local IJFW install at
+  `~/.ijfw/mcp-server` (lstat-safe — handles symlinks), falls back to a PATH
+  probe for CLI-only installs, resolves the latest `@ijfw/install` version
+  via `npm view` (cached for 24 h, semver-validated), and either installs on
+  first boot (`installing` → `installed_current`) or stages an upgrade into
+  `~/.ijfw/mcp-server.pending` (`upgrading` → `installed_pending_activation`).
+- `applyPendingUpgrade()` activates a staged upgrade on the next boot:
+  ownership check (refuses symlinks, world-writable trees, or non-uid roots
+  on POSIX), MCP-client drain, EBUSY-retried staged swap (current →
+  `.prev`, pending → current), full JSON-RPC envelope spawn-test against
+  the new install, and rollback to `.prev` on failure.
+- Wired into `src/index.ts` after the auto-updater, gated by the same
+  `isCiRuntime` / `WAYLAND_E2E_TEST` / `WAYLAND_DISABLE_IJFW=1` env vars.
+  `applyPendingUpgrade()` runs immediately; `bootstrap()` is deferred 5 s
+  so first-paint is never blocked by an `npm view` round-trip.
+- Two independent opt-out paths short-circuit `bootstrap()` before any
+  spawn: `IJFW_AUTO_INSTALL=never` (env) and `ijfw.skipSetup=true`
+  (ConfigStorage setting; Wave 6 will ship the Settings toggle).
+- New `ipcBridge.ijfw.onStatusChanged` emitter with the
+  `IjfwLifecycleStatus` union (`not_installed` | `installing` | `upgrading`
+  | `installed_current` | `installed_pending_activation` | `install_failed`)
+  carrying optional `version` / `reason` / `errorReason` / `stderr` /
+  `offline` fields. Wave 2 wires a UI surface; Wave 1 emits-only.
+- Trust boundary: Decision 1a — we trust npm's OIDC publish chain rather
+  than verifying an on-the-wire fingerprint at the client. The trust
+  decision lives at publish time, not at install time.
+
 ### Constitution wiring (`feat/constitution-wiring`)
 
 - Wire the user Constitution (`~/.wayland/CONSTITUTION.md`) into every chat-send
