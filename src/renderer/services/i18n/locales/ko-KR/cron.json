@@ -14,7 +14,8 @@
     "unread": "새 실행",
     "unconfigured": "예약 작업 미설정",
     "unconfiguredHint": "이 채팅에는 아직 예약 작업이 없습니다. Agent와 함께 만들어 보세요!",
-    "createNow": "지금 만들기"
+    "createNow": "지금 만들기",
+    "naturalLanguageHint": "또는 아래 에이전트에게 \"schedule this every day at 9am\"이라고 입력하세요."
   },
   "actions": {
     "goTo": "채팅 보기",
@@ -43,7 +44,7 @@
     "notFound": "작업을 찾을 수 없음",
     "executionModeDescriptionNew": "실행할 때마다 새 대화를 시작하므로 이전 문맥이 다음 실행으로 이어지지 않습니다. 매번 독립적으로 처리해야 하는 리포트나 점검 작업에 적합합니다.",
     "executionModeDescriptionExisting": "실행할 때마다 같은 대화에서 이어서 작업하므로 이전 문맥과 결과가 유지됩니다. 이전 실행을 바탕으로 계속 추적해야 하는 작업에 적합합니다.",
-    "executionModePickFirst": "Pick how this scheduled task runs"
+    "executionModePickFirst": "예약된 작업의 실행 방식 선택"
   },
   "notification": {
     "taskComplete": "작업 완료",
@@ -143,21 +144,34 @@
     "conversationBusy": "대화가 사용 중이며 {{count}}번 시도 후 건너뜁니다"
   },
   "propose": {
-    "title": "Schedule confirmation",
-    "subtitle": "Review then confirm",
-    "name": "Name",
-    "schedule": "Schedule",
-    "prompt": "Prompt",
-    "yes": "Yes, schedule",
-    "edit": "Edit details",
-    "cancel": "Cancel",
-    "accepted": "Scheduled — {{name}}",
-    "cancelled": "Proposal dismissed",
-    "viewTask": "View task",
-    "parseError": "Schedule parse error",
-    "deletedChatError": "Source chat was deleted"
+    "title": "일정 확인",
+    "subtitle": "검토 후 확인",
+    "name": "이름",
+    "schedule": "일정",
+    "prompt": "프롬프트",
+    "yes": "일정 예약",
+    "edit": "상세 편집",
+    "cancel": "취소",
+    "accepted": "예약됨 — {{name}}",
+    "cancelled": "제안 거부됨",
+    "viewTask": "작업 보기",
+    "parseError": "일정 분석 오류",
+    "deletedChatError": "Source chat was deleted",
+    "parseErrorHelp": "편집을 클릭하여 일정을 수동으로 수정하세요.",
+    "successToast": "예약 완료: {{name}}",
+    "error": {
+      "unknown": "Something went wrong. Try again.",
+      "unauthorized": "Permission denied for this proposal.",
+      "message_not_found": "Proposal not found. It may have been removed.",
+      "wrong_message_type": "Internal error: message is not a proposal.",
+      "already_resolved": "This proposal was already actioned.",
+      "parse_error_cannot_accept": "Schedule is invalid. Click Edit to fix it.",
+      "prompt_invalid_length": "Prompt is too long. Click Edit to shorten it.",
+      "cron_expr_validation_failed": "Schedule failed validation. Click Edit to fix it.",
+      "conversation_deleted": "The source chat was deleted. Cannot schedule."
+    }
   },
   "smartPrefill": {
-    "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"
+    "descriptionScaffold": "채팅의 반복 실행: {{chatTitle}}"
   }
 }

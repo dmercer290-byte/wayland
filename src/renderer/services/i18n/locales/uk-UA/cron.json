@@ -14,7 +14,8 @@
     "unread": "Нове виконання",
     "unconfigured": "Немає запланованих завдань",
     "unconfiguredHint": "Запланованих завдань ще немає. Створіть одне за допомогою свого Агента!",
-    "createNow": "Створити зараз"
+    "createNow": "Створити зараз",
+    "naturalLanguageHint": "Або введіть агенту нижче: \"schedule this every day at 9am\"."
   },
   "actions": {
     "goTo": "Переглянути чат",
@@ -42,7 +43,7 @@
     "notFound": "Завдання не знайдено",
     "executionModeDescriptionNew": "Кожен запуск починає новий діалог, тому попередній контекст не зберігається. Найкраще підходить для регулярних звітів або перевірок, які мають залишатися незалежними.",
     "executionModeDescriptionExisting": "Кожен запуск продовжується в тому самому діалозі, тому попередній контекст і результати залишаються доступними. Найкраще підходить для завдань, що доповнюють попередні результати.",
-    "executionModePickFirst": "Pick how this scheduled task runs"
+    "executionModePickFirst": "Виберіть спосіб виконання завдання"
   },
   "notification": {
     "taskComplete": "Завдання завершено",
@@ -141,21 +142,34 @@
     "conversationBusy": "Діалог зайнятий після {{count}} спроб"
   },
   "propose": {
-    "title": "Schedule confirmation",
-    "subtitle": "Review then confirm",
-    "name": "Name",
-    "schedule": "Schedule",
-    "prompt": "Prompt",
-    "yes": "Yes, schedule",
-    "edit": "Edit details",
-    "cancel": "Cancel",
-    "accepted": "Scheduled — {{name}}",
-    "cancelled": "Proposal dismissed",
-    "viewTask": "View task",
-    "parseError": "Schedule parse error",
-    "deletedChatError": "Source chat was deleted"
+    "title": "Підтвердження розкладу",
+    "subtitle": "Перегляньте та підтвердіть",
+    "name": "Назва",
+    "schedule": "Розклад",
+    "prompt": "Промпт",
+    "yes": "Запланувати",
+    "edit": "Редагувати деталі",
+    "cancel": "Скасувати",
+    "accepted": "Заплановано — {{name}}",
+    "cancelled": "Пропозицію відхилено",
+    "viewTask": "Переглянути завдання",
+    "parseError": "Помилка аналізу розкладу",
+    "deletedChatError": "Source chat was deleted",
+    "parseErrorHelp": "Натисніть «Редагувати», щоб виправити розклад вручну.",
+    "successToast": "Заплановано: {{name}}",
+    "error": {
+      "unknown": "Something went wrong. Try again.",
+      "unauthorized": "Permission denied for this proposal.",
+      "message_not_found": "Proposal not found. It may have been removed.",
+      "wrong_message_type": "Internal error: message is not a proposal.",
+      "already_resolved": "This proposal was already actioned.",
+      "parse_error_cannot_accept": "Schedule is invalid. Click Edit to fix it.",
+      "prompt_invalid_length": "Prompt is too long. Click Edit to shorten it.",
+      "cron_expr_validation_failed": "Schedule failed validation. Click Edit to fix it.",
+      "conversation_deleted": "The source chat was deleted. Cannot schedule."
+    }
   },
   "smartPrefill": {
-    "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"
+    "descriptionScaffold": "Періодичний запуск із чату: {{chatTitle}}"
   }
 }

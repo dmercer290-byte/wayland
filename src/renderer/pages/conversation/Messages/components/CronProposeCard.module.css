@@ -68,6 +68,22 @@
   overflow-y: auto;
 }
 
+/**
+ * v0.6.2.6.1 (Gemini G-S-04) — clamp Name and Schedule fields to a single
+ * line with ellipsis so an agent emitting multi-line content with weird
+ * Unicode / box-drawing chars can't spoof the card layout (e.g. fake
+ * "SYSTEM WARNING" lines). Prompt stays multi-line because that's the
+ * useful body the user is approving.
+ */
+.singleLine {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -83,4 +99,16 @@
 
 .errorTag {
   margin-left: 8px;
+}
+
+/**
+ * v0.6.2.6.1 (Codex C-P-03) — inline explanatory text when parseError set.
+ * Tag alone says "Schedule parse error" but doesn't tell the user how to
+ * fix it; this paragraph below the tag points them at the Edit button.
+ */
+.parseErrorHelp {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-3);
+  font-style: italic;
 }

@@ -67,6 +67,24 @@ interface EventTypes {
    * and ChatConversation reads ?schedule=1 to open on mount.
    */
   'cron.modal.openForChat': [{ conversationId: string }];
+  /**
+   * v0.6.2.6.1 (fixes Gemini G-P-01: Edit button dead-end) — fired by
+   * CronProposeCard when the user clicks "Edit details". CronJobManager
+   * listens for the matching conversation and opens the CreateTaskDialog
+   * pre-filled with the proposed name / schedule / scheduleDescription /
+   * prompt so the user can tweak before save.
+   */
+  'cron.modal.openWithProposal': [
+    {
+      conversationId: string;
+      conversationTitle?: string;
+      agentType?: string;
+      initialName: string;
+      initialPrompt: string;
+      initialSchedule: string;
+      initialScheduleDescription: string;
+    }
+  ];
 }
 
 export const emitter = new EventEmitter<EventTypes>();

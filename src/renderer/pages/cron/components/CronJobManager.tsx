@@ -60,6 +60,12 @@ const CronJobManager: React.FC<CronJobManagerProps> = ({
   const navigate = useNavigate();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [initialPrompt, setInitialPrompt] = useState<string>('');
+  // v0.6.2.6.1 — extra prefill state for the Edit-from-proposal flow
+  // (Gemini G-P-03). Reset to empty when the dialog closes so the next
+  // pill-click path doesn't see stale proposal values.
+  const [initialName, setInitialName] = useState<string>('');
+  const [initialSchedule, setInitialSchedule] = useState<string>('');
+  const [initialScheduleDescription, setInitialScheduleDescription] = useState<string>('');
 
   // v0.6.2.6 smart prefill — CronJobManager mounts in ChatLayout's
   // headerExtra slot, which is ABOVE the per-backend MessageListProvider
@@ -110,6 +116,41 @@ const CronJobManager: React.FC<CronJobManagerProps> = ({
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, openCreateDialog]);
 
+  // v0.6.2.6.1 (Gemini G-P-01 fix) — listen for the Edit-from-proposal
+  // event fired by CronProposeCard. Seeds the full proposed fields (Name,
+  // Schedule, Description) before opening the modal so the user lands on
+  // exactly the agent's proposal and can tweak from there. Only the matching
+  // conversation's CronJobManager handles its own event.
+  useEffect(() => {
+    const handler = (payload: {
+      conversationId: string;
+      initialName: string;
+      initialPrompt: string;
+      initialSchedule: string;
+      initialScheduleDescription: string;
+    }) => {
+      if (payload.conversationId !== conversationId) return;
+      setInitialName(payload.initialName);
+      setInitialPrompt(payload.initialPrompt);
+      setInitialSchedule(payload.initialSchedule);
+      setInitialScheduleDescription(payload.initialScheduleDescription);
+      setShowCreateDialog(true);
+    };
+    emitter.on('cron.modal.openWithProposal', handler);
+    return () => {
+      emitter.off('cron.modal.openWithProposal', handler);
+    };
+  }, [conversationId]);
+
+  // Reset proposal-derived state when the dialog closes so the next pill-
+  // click smart-prefill path doesn't inherit Edit-from-proposal values.
+  const handleDialogClose = useCallback(() => {
+    setShowCreateDialog(false);
+    setInitialName('');
+    setInitialSchedule('');
+    setInitialScheduleDescription('');
+  }, []);
+
   // For child conversations spawned by a cron job, fetch the job directly by ID
   const [directJob, setDirectJob] = useState<ICronJob | null>(null);
   const [directLoading, setDirectLoading] = useState(!!cronJobId);
@@ -136,11 +177,14 @@ const CronJobManager: React.FC<CronJobManagerProps> = ({
   const dialogNode = (
     <CreateTaskDialog
       visible={showCreateDialog}
-      onClose={() => setShowCreateDialog(false)}
+      onClose={handleDialogClose}
       conversationId={conversationId}
       conversationTitle={conversationTitle}
       agentType={agentType}
       initialPrompt={initialPrompt}
+      initialName={initialName || undefined}
+      initialSchedule={initialSchedule || undefined}
+      initialScheduleDescription={initialScheduleDescription || undefined}
     />
   );
 
@@ -163,6 +207,9 @@ const CronJobManager: React.FC<CronJobManagerProps> = ({
               <Button type='primary' size='mini' onClick={openCreateDialog}>
                 {t('cron.status.createNow')}
               </Button>
+              {/* v0.6.2.6.1 (Codex C-P-01) — surface the natural-language path
+                  next to the click path so users discover both. */}
+              <div className='text-11px text-t-tertiary mt-2px'>{t('cron.status.naturalLanguageHint')}</div>
             </div>
           }
         >

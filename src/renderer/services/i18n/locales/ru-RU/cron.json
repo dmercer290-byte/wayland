@@ -14,7 +14,8 @@
     "unread": "Новое выполнение",
     "unconfigured": "Нет запланированной задачи",
     "unconfiguredHint": "Запланированных задач пока нет. Создайте с вашим агентом!",
-    "createNow": "Создать сейчас"
+    "createNow": "Создать сейчас",
+    "naturalLanguageHint": "Или введите агенту ниже: \"schedule this every day at 9am\"."
   },
   "actions": {
     "goTo": "Открыть чат",
@@ -42,7 +43,7 @@
     "notFound": "Задача не найдена",
     "executionModeDescriptionNew": "Каждый запуск начинает новый диалог, предыдущий контекст не сохраняется. Лучше для периодических отчётов или проверок, которые должны быть независимыми.",
     "executionModeDescriptionExisting": "Каждый запуск продолжается в том же диалоге, предыдущий контекст и результаты остаются доступными. Лучше для задач, которые строятся на предыдущих запусках.",
-    "executionModePickFirst": "Pick how this scheduled task runs"
+    "executionModePickFirst": "Выберите способ запуска задачи"
   },
   "notification": {
     "taskComplete": "Задача завершена",
@@ -142,21 +143,34 @@
     "conversationBusy": "Диалог занят после {{count}} попыток"
   },
   "propose": {
-    "title": "Schedule confirmation",
-    "subtitle": "Review then confirm",
-    "name": "Name",
-    "schedule": "Schedule",
-    "prompt": "Prompt",
-    "yes": "Yes, schedule",
-    "edit": "Edit details",
-    "cancel": "Cancel",
-    "accepted": "Scheduled — {{name}}",
-    "cancelled": "Proposal dismissed",
-    "viewTask": "View task",
-    "parseError": "Schedule parse error",
-    "deletedChatError": "Source chat was deleted"
+    "title": "Подтверждение расписания",
+    "subtitle": "Проверьте и подтвердите",
+    "name": "Название",
+    "schedule": "Расписание",
+    "prompt": "Промпт",
+    "yes": "Запланировать",
+    "edit": "Изменить детали",
+    "cancel": "Отмена",
+    "accepted": "Запланировано — {{name}}",
+    "cancelled": "Предложение отклонено",
+    "viewTask": "Посмотреть задачу",
+    "parseError": "Ошибка разбора расписания",
+    "deletedChatError": "Source chat was deleted",
+    "parseErrorHelp": "Нажмите «Изменить», чтобы исправить расписание вручную.",
+    "successToast": "Запланировано: {{name}}",
+    "error": {
+      "unknown": "Something went wrong. Try again.",
+      "unauthorized": "Permission denied for this proposal.",
+      "message_not_found": "Proposal not found. It may have been removed.",
+      "wrong_message_type": "Internal error: message is not a proposal.",
+      "already_resolved": "This proposal was already actioned.",
+      "parse_error_cannot_accept": "Schedule is invalid. Click Edit to fix it.",
+      "prompt_invalid_length": "Prompt is too long. Click Edit to shorten it.",
+      "cron_expr_validation_failed": "Schedule failed validation. Click Edit to fix it.",
+      "conversation_deleted": "The source chat was deleted. Cannot schedule."
+    }
   },
   "smartPrefill": {
-    "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"
+    "descriptionScaffold": "Периодический запуск из чата: {{chatTitle}}"
   }
 }

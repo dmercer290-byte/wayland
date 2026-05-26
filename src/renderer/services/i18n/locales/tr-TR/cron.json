@@ -14,7 +14,8 @@
     "unread": "New execution",
     "unconfigured": "No scheduled task",
     "unconfiguredHint": "No scheduled task yet. Create one with your Agent!",
-    "createNow": "Create Now"
+    "createNow": "Create Now",
+    "naturalLanguageHint": "Veya aşağıdaki asistana \"schedule this every day at 9am\" yazın."
   },
   "actions": {
     "goTo": "View Chat",
@@ -55,7 +56,7 @@
     "notFound": "Görev bulunamadı",
     "executionModeDescriptionNew": "Her çalıştırma yeni bir konuşma başlatır; önceki bağlam sonraki çalıştırmaya taşınmaz. Bağımsız kalması gereken düzenli raporlar ve kontrol görevleri için uygundur.",
     "executionModeDescriptionExisting": "Her çalıştırma aynı konuşmada devam eder; önceki bağlam ve sonuçlar korunur. Önceki çalıştırmaların üzerine eklenen takip işleri için uygundur.",
-    "executionModePickFirst": "Pick how this scheduled task runs"
+    "executionModePickFirst": "Bu programlanmış görevin nasıl çalışacağını seçin"
   },
   "notification": {
     "taskComplete": "Görev Tamamlandı",
@@ -155,21 +156,34 @@
     "conversationBusy": "Konuşma meşgul, {{count}} denemeden sonra atlandı"
   },
   "propose": {
-    "title": "Schedule confirmation",
-    "subtitle": "Review then confirm",
-    "name": "Name",
-    "schedule": "Schedule",
-    "prompt": "Prompt",
-    "yes": "Yes, schedule",
-    "edit": "Edit details",
-    "cancel": "Cancel",
-    "accepted": "Scheduled — {{name}}",
-    "cancelled": "Proposal dismissed",
-    "viewTask": "View task",
-    "parseError": "Schedule parse error",
-    "deletedChatError": "Source chat was deleted"
+    "title": "Program onayı",
+    "subtitle": "İnceleyin ve onaylayın",
+    "name": "Ad",
+    "schedule": "Program",
+    "prompt": "Komut",
+    "yes": "Evet, programla",
+    "edit": "Detayları düzenle",
+    "cancel": "İptal",
+    "accepted": "Programlandı — {{name}}",
+    "cancelled": "Öneri reddedildi",
+    "viewTask": "Görevi görüntüle",
+    "parseError": "Program ayrıştırma hatası",
+    "deletedChatError": "Source chat was deleted",
+    "parseErrorHelp": "Programı manuel olarak düzeltmek için Düzenle'ye tıklayın.",
+    "successToast": "Programlandı: {{name}}",
+    "error": {
+      "unknown": "Something went wrong. Try again.",
+      "unauthorized": "Permission denied for this proposal.",
+      "message_not_found": "Proposal not found. It may have been removed.",
+      "wrong_message_type": "Internal error: message is not a proposal.",
+      "already_resolved": "This proposal was already actioned.",
+      "parse_error_cannot_accept": "Schedule is invalid. Click Edit to fix it.",
+      "prompt_invalid_length": "Prompt is too long. Click Edit to shorten it.",
+      "cron_expr_validation_failed": "Schedule failed validation. Click Edit to fix it.",
+      "conversation_deleted": "The source chat was deleted. Cannot schedule."
+    }
   },
   "smartPrefill": {
-    "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"
+    "descriptionScaffold": "Sohbetten yinelenen çalışma: {{chatTitle}}"
   }
 }

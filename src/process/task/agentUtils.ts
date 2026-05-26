@@ -216,7 +216,17 @@ To use a skill, read its SKILL.md file when needed.
 
 For example:
 - Builtin "cron" skill: ${builtinSkillsDir}/cron/SKILL.md
-- Bundled "pptx" skill: ${builtinSkillsCopyDir}/pptx/SKILL.md`;
+- Bundled "pptx" skill: ${builtinSkillsCopyDir}/pptx/SKILL.md
+
+[Scheduling (CRITICAL — v0.6.2.6.1)]
+When the user asks to schedule any recurring or one-time task ("schedule this every day at 9am", "run this Monday at 5pm", "remind me daily", etc.), you MUST:
+
+1. Read the Wayland builtin "cron" skill at ${builtinSkillsDir}/cron/SKILL.md
+2. Emit a [CRON_PROPOSE] block per that skill's format. The user will see an inline confirmation card with Yes / Edit / Cancel buttons.
+
+Do NOT use any built-in or external "schedule" capability, cloud routine, or scheduling tool. The Wayland cron skill is the ONLY scheduling path that integrates with this app's task list, runtime, and conversation context. Other scheduling mechanisms (e.g., Anthropic Cloud Routines, cron daemons, external schedulers) will create disconnected schedules the user can't see or manage from the Wayland UI.
+
+If you find yourself about to escalate scheduling outside of Wayland or use a non-Wayland schedule skill, STOP and read ${builtinSkillsDir}/cron/SKILL.md first.`;
 
     instructions.push(skillsInstruction);
   }

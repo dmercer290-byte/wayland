@@ -40,6 +40,15 @@ interface CreateTaskDialogProps {
    * messages from extractCronPromptFromUserMessages. Editable by user.
    */
   initialPrompt?: string;
+  /**
+   * v0.6.2.6.1 (Gemini G-P-03) — pre-fill Name / schedule when opening
+   * from an Edit click on a CronProposeCard. Passed via the
+   * `cron.modal.openWithProposal` emitter event from CronJobManager.
+   * Each is independent; supplied subset still works.
+   */
+  initialName?: string;
+  initialSchedule?: string;
+  initialScheduleDescription?: string;
   /** When provided, the dialog operates in edit mode */
   editJob?: ICronJob;
   conversationId?: string;
@@ -151,6 +160,9 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
   agentType,
   initialWorkflowSlug,
   initialPrompt,
+  initialName,
+  initialSchedule,
+  initialScheduleDescription,
 }) => {
   const { t } = useTranslation();
   const [form] = Form.useForm();
@@ -290,13 +302,25 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
       // of the chat's user messages (passed by the caller via `initialPrompt`).
       // Each field stays editable; this just removes the typing tax for the
       // common case of "turn this chat I just finished into a daily task."
+      //
+      // v0.6.2.6.1 (Gemini G-P-03) — also accept initialName, initialSchedule,
+      // initialScheduleDescription (passed via cron.modal.openWithProposal
+      // emitter event when CronProposeCard Edit fires). initialName wins over
+      // the chat-title-derived name; initialSchedule populates the cron
+      // frequency UI via parseCronExpr.
       if (conversationId) {
         const seed: Record<string, string> = {};
-        if (conversationTitle) {
-          const NAME_CAP = 80;
-          const cleanTitle = conversationTitle.replace(/\s+/g, ' ').trim();
-          seed.name =
-            cleanTitle.length > NAME_CAP ? `${cleanTitle.slice(0, NAME_CAP - 1).trimEnd()}…` : cleanTitle;
+        const NAME_CAP = 80;
+        const truncate = (s: string): string => {
+          const clean = s.replace(/\s+/g, ' ').trim();
+          return clean.length > NAME_CAP ? `${clean.slice(0, NAME_CAP - 1).trimEnd()}…` : clean;
+        };
+        if (initialName) {
+          seed.name = truncate(initialName);
+          // Don't auto-scaffold description when caller already has a proposed
+          // name — the proposal flow has its own intent. Let user fill it.
+        } else if (conversationTitle) {
+          seed.name = truncate(conversationTitle);
           seed.description = t('cron.smartPrefill.descriptionScaffold', { chatTitle: seed.name });
         }
         if (initialPrompt) {
@@ -305,9 +329,33 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
         if (Object.keys(seed).length > 0) {
           form.setFieldsValue(seed);
         }
+        // Seed the frequency UI from the proposed cron expression so the
+        // user lands on the same schedule the agent suggested. Falls back
+        // to 'custom' if the expression doesn't match a preset.
+        if (initialSchedule) {
+          const parsed = parseCronExpr(initialSchedule);
+          setFrequency(parsed.frequency);
+          setTime(parsed.time);
+          setWeekday(parsed.weekday);
+          if (parsed.frequency === 'custom') {
+            setCustomCronExpr(initialSchedule);
+          }
+        }
       }
     }
-  }, [visible, editJob, form, initialExecutionMode, conversationId, conversationTitle, initialPrompt, t]);
+  }, [
+    visible,
+    editJob,
+    form,
+    initialExecutionMode,
+    conversationId,
+    conversationTitle,
+    initialPrompt,
+    initialName,
+    initialSchedule,
+    initialScheduleDescription,
+    t,
+  ]);
 
   // Resolve backend from selectedAgent (handles both CLI and preset agents)
   const resolvedBackend = useMemo(() => {

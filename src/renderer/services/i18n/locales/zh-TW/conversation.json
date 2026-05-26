@@ -66,8 +66,8 @@
     "pinnedSection": "Pinned",
     "deleteSuccess": "刪除成功",
     "deleteFailed": "刪除失敗",
-    "schedule": "Schedule this chat",
-    "editSchedule": "Edit scheduled task"
+    "schedule": "排程此對話",
+    "editSchedule": "修改排程任務"
   },
   "historySearch": {
     "tooltip": "搜尋訊息",

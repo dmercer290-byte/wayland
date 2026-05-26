@@ -14,7 +14,8 @@
     "unread": "有新執行",
     "unconfigured": "未配置定時任務",
     "unconfiguredHint": "目前對話暫無定時任務，和 Agent 一起建立一個吧",
-    "createNow": "立即建立"
+    "createNow": "立即建立",
+    "naturalLanguageHint": "或者在下方對代理輸入 \"schedule this every day at 9am\"。"
   },
   "actions": {
     "goTo": "查看對話",
@@ -43,7 +44,7 @@
     "notFound": "未找到任務",
     "executionModeDescriptionNew": "每次觸發都會建立新的對話，之前的上下文不會帶到下一次執行。適合日報、巡檢、定時彙總這類彼此獨立的任務。",
     "executionModeDescriptionExisting": "每次觸發都會回到同一個對話繼續執行，之前的上下文和結果會持續保留。適合長期跟進同一件事的連續任務。",
-    "executionModePickFirst": "Pick how this scheduled task runs"
+    "executionModePickFirst": "選擇此排程任務的執行方式"
   },
   "notification": {
     "taskComplete": "任務完成",
@@ -143,21 +144,34 @@
     "conversationBusy": "對話繁忙，在 {{count}} 次嘗試後跳過"
   },
   "propose": {
-    "title": "Schedule confirmation",
-    "subtitle": "Review then confirm",
-    "name": "Name",
-    "schedule": "Schedule",
-    "prompt": "Prompt",
-    "yes": "Yes, schedule",
-    "edit": "Edit details",
-    "cancel": "Cancel",
-    "accepted": "Scheduled — {{name}}",
-    "cancelled": "Proposal dismissed",
-    "viewTask": "View task",
-    "parseError": "Schedule parse error",
-    "deletedChatError": "Source chat was deleted"
+    "title": "排程確認",
+    "subtitle": "核對並確認",
+    "name": "名稱",
+    "schedule": "排程",
+    "prompt": "提示詞",
+    "yes": "確認排程",
+    "edit": "修改詳情",
+    "cancel": "取消",
+    "accepted": "已排程 — {{name}}",
+    "cancelled": "建議已駁回",
+    "viewTask": "查看任務",
+    "parseError": "排程解析錯誤",
+    "deletedChatError": "Source chat was deleted",
+    "parseErrorHelp": "點擊「修改」手動修復排程。",
+    "successToast": "已排程：{{name}}",
+    "error": {
+      "unknown": "Something went wrong. Try again.",
+      "unauthorized": "Permission denied for this proposal.",
+      "message_not_found": "Proposal not found. It may have been removed.",
+      "wrong_message_type": "Internal error: message is not a proposal.",
+      "already_resolved": "This proposal was already actioned.",
+      "parse_error_cannot_accept": "Schedule is invalid. Click Edit to fix it.",
+      "prompt_invalid_length": "Prompt is too long. Click Edit to shorten it.",
+      "cron_expr_validation_failed": "Schedule failed validation. Click Edit to fix it.",
+      "conversation_deleted": "The source chat was deleted. Cannot schedule."
+    }
   },
   "smartPrefill": {
-    "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"
+    "descriptionScaffold": "來自對話的週期性執行：{{chatTitle}}"
   }
 }

@@ -201,17 +201,16 @@ async function handleCronCommands(
     try {
       switch (cmd.kind) {
         case 'create': {
-          const job = await cronService.addJob({
-            name: cmd.name,
-            schedule: { kind: 'cron', expr: cmd.schedule, description: cmd.scheduleDescription },
-            message: cmd.message,
-            conversationId,
-            agentType,
-            createdBy: 'agent',
-          });
-          // Emit event to renderer process for real-time UI update
-          ipcBridge.cron.onJobCreated.emit(job);
-          responses.push(`✅ Scheduled task created: "${job.name}" (ID: ${job.id})`);
+          // v0.6.2.6.1 (Gemini G-S-01 fix) — block agent-emitted CREATE
+          // because it bypasses the [CRON_PROPOSE] confirmation card.
+          // CREATE is retained in the detector for legacy/skill-driven
+          // programmatic paths (Standing Company rituals etc.) but
+          // agent-side emission should always route through PROPOSE so
+          // the user sees + approves. Tell the user what happened so they
+          // can re-prompt the agent.
+          responses.push(
+            `⚠️ The agent tried to create a scheduled task directly. For your safety, use the proposal flow: ask the agent to "schedule this with a confirmation card" so you can review before it's created.`
+          );
           break;
         }
 
@@ -223,10 +222,24 @@ async function handleCronCommands(
           // when the user accepts.
           let parseError = false;
           try {
-            // Use existing croner instance from cron service deps to validate
-            // syntax. Paused-import keeps validation cheap.
+            // v0.6.2.6.1 (Gemini G-S-03 fix) — validate cron syntax AND
+            // enforce a 5-minute minimum interval so an agent (or
+            // hallucinated proposal) can't propose `* * * * *` and burn
+            // tokens / hit rate limits. Manual /scheduled + New Task path
+            // is unaffected because it doesn't flow through here.
             const { Cron } = await import('croner');
-            new Cron(cmd.schedule, { paused: true });
+            const parsed = new Cron(cmd.schedule, { paused: true });
+            const now = new Date();
+            const next1 = parsed.nextRun(now);
+            const next2 = next1 ? parsed.nextRun(next1) : null;
+            if (next1 && next2) {
+              const intervalMs = next2.getTime() - next1.getTime();
+              if (intervalMs < 5 * 60 * 1000) {
+                // Reject high-frequency proposals — surface as parseError so
+                // the card disables Yes button + user can Edit to fix manually
+                parseError = true;
+              }
+            }
           } catch {
             parseError = true;
           }
@@ -283,6 +296,17 @@ async function handleCronCommands(
           const existingJob = await cronService.getJob(cmd.jobId);
           if (!existingJob) {
             responses.push(`❌ Task not found: ${cmd.jobId}`);
+            break;
+          }
+          // v0.6.2.6.1 (Gemini G-S-02 fix) — reject cross-conversation
+          // updates. An agent in conversation B seeing a job ID from
+          // conversation A's CRON_LIST output should NOT be able to
+          // update Project A's task. If the job's source conversation
+          // doesn't match this one, refuse.
+          if (existingJob.metadata.conversationId && existingJob.metadata.conversationId !== conversationId) {
+            responses.push(
+              `❌ Can't update task "${existingJob.name}" — it belongs to a different conversation. Switch to that chat to make changes.`
+            );
             break;
           }
           const updated = await cronService.updateJob(cmd.jobId, {

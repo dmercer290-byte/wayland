@@ -66,8 +66,8 @@
     "pinnedSection": "Pinned",
     "deleteSuccess": "削除しました",
     "deleteFailed": "削除に失敗しました",
-    "schedule": "Schedule this chat",
-    "editSchedule": "Edit scheduled task"
+    "schedule": "このチャットをスケジュール",
+    "editSchedule": "スケジュール済みタスクを編集"
   },
   "historySearch": {
     "tooltip": "メッセージを検索",

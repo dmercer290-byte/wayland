@@ -385,8 +385,14 @@ export type IMessageCronPropose = IMessage<
     prompt: string;
     /** True if the cron expression failed croner validation; Yes button disabled in this state. */
     parseError: boolean;
-    /** Lifecycle of the proposal — drives which card variant renders. */
-    status: 'pending' | 'accepted' | 'cancelled';
+    /**
+     * Lifecycle of the proposal — drives which card variant renders.
+     * v0.6.2.6.1 (race fix per Gemini G-R-01): `processing` is a transient
+     * status the bridge sets BEFORE calling cronService.addJob, so a parallel
+     * accept call sees non-pending and short-circuits. Reverted to `pending`
+     * if addJob throws; transitions to `accepted` on success.
+     */
+    status: 'pending' | 'processing' | 'accepted' | 'cancelled';
     /** Set after accept — created cron job id so the card can link to its detail page. */
     cronJobId?: string;
     /** Conversation type as known when the proposal was created (for the post-accept addJob payload). */

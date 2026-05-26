@@ -14,7 +14,8 @@
     "unread": "New execution",
     "unconfigured": "No scheduled task",
     "unconfiguredHint": "No scheduled task yet. Create one with your Agent!",
-    "createNow": "Create Now"
+    "createNow": "Create Now",
+    "naturalLanguageHint": "Or type \"schedule this every day at 9am\" to the agent below."
   },
   "actions": {
     "goTo": "View Chat",
@@ -154,7 +155,20 @@
     "cancelled": "Proposal dismissed",
     "viewTask": "View task",
     "parseError": "Schedule parse error",
-    "deletedChatError": "Source chat was deleted"
+    "deletedChatError": "Source chat was deleted",
+    "parseErrorHelp": "Click Edit to fix the schedule manually.",
+    "successToast": "Scheduled: {{name}}",
+    "error": {
+      "unknown": "Something went wrong. Try again.",
+      "unauthorized": "Permission denied for this proposal.",
+      "message_not_found": "Proposal not found. It may have been removed.",
+      "wrong_message_type": "Internal error: message is not a proposal.",
+      "already_resolved": "This proposal was already actioned.",
+      "parse_error_cannot_accept": "Schedule is invalid. Click Edit to fix it.",
+      "prompt_invalid_length": "Prompt is too long. Click Edit to shorten it.",
+      "cron_expr_validation_failed": "Schedule failed validation. Click Edit to fix it.",
+      "conversation_deleted": "The source chat was deleted. Cannot schedule."
+    }
   },
   "smartPrefill": {
     "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"

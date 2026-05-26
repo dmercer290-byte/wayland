@@ -66,8 +66,8 @@
     "pinnedSection": "Pinned",
     "deleteSuccess": "삭제되었습니다",
     "deleteFailed": "삭제에 실패했습니다",
-    "schedule": "Schedule this chat",
-    "editSchedule": "Edit scheduled task"
+    "schedule": "이 채팅 예약하기",
+    "editSchedule": "예약된 작업 편집"
   },
   "historySearch": {
     "tooltip": "메시지 검색",

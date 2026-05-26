@@ -14,7 +14,8 @@
     "unread": "新しい実行",
     "unconfigured": "スケジュールタスク未設定",
     "unconfiguredHint": "このチャットにはまだスケジュールタスクがありません。Agentと一緒に作成しましょう！",
-    "createNow": "今すぐ作成"
+    "createNow": "今すぐ作成",
+    "naturalLanguageHint": "または、以下のエージェントに \"schedule this every day at 9am\" と入力してください。"
   },
   "actions": {
     "goTo": "チャットを表示",
@@ -55,7 +56,7 @@
     "notFound": "タスクが見つかりません",
     "executionModeDescriptionNew": "実行のたびに新しい会話を作成するため、前回までの文脈は引き継がれません。定期レポートや巡回チェックなど、各回を独立させたいタスクに向いています。",
     "executionModeDescriptionExisting": "実行のたびに同じ会話で続行するため、過去の文脈や結果を引き継げます。前回の内容を踏まえて追跡したい継続タスクに向いています。",
-    "executionModePickFirst": "Pick how this scheduled task runs"
+    "executionModePickFirst": "スケジュール済みタスクの実行方法を選択"
   },
   "notification": {
     "taskComplete": "タスク完了",
@@ -155,21 +156,34 @@
     "conversationBusy": "会話がビジーです。{{count}} 回の試行後にスキップしました"
   },
   "propose": {
-    "title": "Schedule confirmation",
-    "subtitle": "Review then confirm",
-    "name": "Name",
-    "schedule": "Schedule",
-    "prompt": "Prompt",
-    "yes": "Yes, schedule",
-    "edit": "Edit details",
-    "cancel": "Cancel",
-    "accepted": "Scheduled — {{name}}",
-    "cancelled": "Proposal dismissed",
-    "viewTask": "View task",
-    "parseError": "Schedule parse error",
-    "deletedChatError": "Source chat was deleted"
+    "title": "スケジュールの確認",
+    "subtitle": "内容を確認して確定",
+    "name": "名前",
+    "schedule": "スケジュール",
+    "prompt": "プロンプト",
+    "yes": "スケジュールを設定",
+    "edit": "詳細を編集",
+    "cancel": "キャンセル",
+    "accepted": "予約済み — {{name}}",
+    "cancelled": "提案を破棄しました",
+    "viewTask": "タスクを表示",
+    "parseError": "スケジュールの解析エラー",
+    "deletedChatError": "Source chat was deleted",
+    "parseErrorHelp": "「編集」をクリックしてスケジュールを手動で修正してください。",
+    "successToast": "スケジュール設定完了: {{name}}",
+    "error": {
+      "unknown": "Something went wrong. Try again.",
+      "unauthorized": "Permission denied for this proposal.",
+      "message_not_found": "Proposal not found. It may have been removed.",
+      "wrong_message_type": "Internal error: message is not a proposal.",
+      "already_resolved": "This proposal was already actioned.",
+      "parse_error_cannot_accept": "Schedule is invalid. Click Edit to fix it.",
+      "prompt_invalid_length": "Prompt is too long. Click Edit to shorten it.",
+      "cron_expr_validation_failed": "Schedule failed validation. Click Edit to fix it.",
+      "conversation_deleted": "The source chat was deleted. Cannot schedule."
+    }
   },
   "smartPrefill": {
-    "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"
+    "descriptionScaffold": "チャットからの定期実行: {{chatTitle}}"
   }
 }

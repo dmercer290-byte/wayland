@@ -298,6 +298,25 @@ export function initConversationBridge(
         }
       }
 
+      // v0.6.2.6.1 (Gemini G-R-03 fix) — cascade-clean cron jobs bound to
+      // this conversation BEFORE deleting it. Without this, cron_jobs rows
+      // referencing a deleted conversation continue firing, fail to load
+      // the conversation, and burn retries forever. Best-effort: log but
+      // don't block the delete if cron cleanup throws.
+      try {
+        const { cronService } = await import('@process/services/cron/cronServiceSingleton');
+        const orphanedJobs = await cronService.listJobsByConversation(id);
+        for (const job of orphanedJobs) {
+          try {
+            await cronService.removeJob(job.id);
+          } catch (jobErr) {
+            console.warn(`[conversationBridge] Failed to remove cron job ${job.id} during conversation delete:`, jobErr);
+          }
+        }
+      } catch (cronCleanupErr) {
+        console.warn('[conversationBridge] Failed to enumerate cron jobs for conversation delete:', cronCleanupErr);
+      }
+
       await conversationService.deleteConversation(id);
       removeFromMessageCache(id);
       if (conversation) {

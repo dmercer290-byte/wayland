@@ -66,8 +66,8 @@
     "yesterday": "Вчора",
     "recent7Days": "Останні 7 днів",
     "earlier": "Раніше",
-    "schedule": "Schedule this chat",
-    "editSchedule": "Edit scheduled task"
+    "schedule": "Запланувати цей чат",
+    "editSchedule": "Редагувати заплановане завдання"
   },
   "historySearch": {
     "tooltip": "Пошук повідомлень",
