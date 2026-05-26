@@ -151,6 +151,19 @@ describe('ijfw/ipcSchemas', () => {
     });
   });
 
+  describe('Wave 7 B3: wiki.export accepts slug-only invocation', () => {
+    it('accepts {slug} without outFile (server picks destination)', () => {
+      expect(validateInvocation('wiki.export', { slug: 'memory' }).ok).toBe(true);
+    });
+    it('still rejects outFile outside Downloads/Documents', () => {
+      const result = validateInvocation('wiki.export', {
+        slug: 'memory',
+        outFile: '/private/etc/passwd',
+      });
+      expect(result.ok).toBe(false);
+    });
+  });
+
   describe('Wave 7 B2: wiki.get accepts list-mode invocation', () => {
     it('accepts {} (list-mode used by HomeTab + WikiTab)', () => {
       expect(validateInvocation('wiki.get', {}).ok).toBe(true);

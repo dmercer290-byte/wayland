@@ -100,7 +100,10 @@ export const verbSchemas: Record<IjfwVerb, z.ZodTypeAny> = {
     .refine((v) => v.slug !== undefined || v.id !== undefined, {
       message: 'wiki.promote requires `slug` or `id`',
     }),
-  'wiki.export': z.object({ slug: slugSchema, outFile: exportPathSchema }),
+  // Wave 7 B3: outFile is server-decided when absent. WikiTab passes {slug}
+  // only (server picks destination under Downloads/Documents); explicit
+  // outFile still enforces positive-root containment (SEC-002).
+  'wiki.export': z.object({ slug: slugSchema, outFile: exportPathSchema.optional() }).passthrough(),
   'wiki.shareReadme': z.object({}),
   // Wave 7 B1: ConflictsTab passes `{conflictId, winnerVariantId}`. Prior
   // schema demanded `{subject, predicate, winnerId}` — never matched any call
