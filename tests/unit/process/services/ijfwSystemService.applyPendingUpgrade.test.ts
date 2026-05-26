@@ -188,6 +188,46 @@ describe('ijfwSystemService.applyPendingUpgrade', () => {
     expect(fs.existsSync(path.join(tmpHome, '.ijfw', 'mcp-server.pending'))).toBe(false);
   });
 
+  it('Checkpoint B B2: acquires installLock and short-circuits when one is already held', async () => {
+    // Pre-seed a lockfile that matches the current host+boot and points at the
+    // running test process pid so `pidAlive()` returns true → the lock is
+    // treated as held (not stale).
+    const lockDir = path.join(tmpHome, '.ijfw');
+    fs.mkdirSync(lockDir, { recursive: true });
+    const lockPath = path.join(lockDir, '.install-lock');
+    const currentBootTime = Date.now() - os.uptime() * 1000;
+    const fakeMeta = {
+      pid: process.pid,
+      startTime: Date.now(),
+      bootTime: currentBootTime,
+      nonce: 'aa'.repeat(16),
+      hostname: os.hostname(),
+    };
+    fs.writeFileSync(lockPath, JSON.stringify(fakeMeta), { mode: 0o600 });
+    writePendingDir();
+
+    await ijfwSystemService.applyPendingUpgrade();
+
+    // Lockfile still present (we never released it). No mutation occurred.
+    expect(fs.existsSync(lockPath)).toBe(true);
+    // No spawn-test fired, pending tree untouched, no current dir created.
+    expect(spawnSpy).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(tmpHome, '.ijfw', 'mcp-server.pending'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpHome, '.ijfw', 'mcp-server'))).toBe(false);
+  });
+
+  it('Checkpoint B B2: releases installLock after successful activation', async () => {
+    writePendingDir();
+    spawnSpy.mockImplementation(() => makeSpawnTestSuccessChild());
+
+    await ijfwSystemService.applyPendingUpgrade();
+    for (let i = 0; i < 8; i++) await flush();
+
+    // Lockfile must be gone — releaseLock fired in `finally`.
+    const lockPath = path.join(tmpHome, '.ijfw', '.install-lock');
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
   it('rolls back to .prev and emits install_failed when spawn-test fails', async () => {
     // Existing current install we will preserve.
     const current = path.join(tmpHome, '.ijfw', 'mcp-server');

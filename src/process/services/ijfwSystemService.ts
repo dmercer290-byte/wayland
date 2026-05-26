@@ -564,87 +564,101 @@ async function applyPendingUpgradeImpl(): Promise<void> {
     return;
   }
 
-  // SEC-010: ownership check before activation.
-  if (!(await isSafelyOwned(pending)) || !(await isSafelyOwned(path.dirname(pending)))) {
-    log.error('[ijfw] pending tree not safely owned — refusing to activate');
-    emitStatus({ status: 'install_failed', errorReason: 'unsafe_ownership' });
+  // Checkpoint B B2: serialize activation with the same lockfile bootstrap
+  // uses. Without this, two concurrent boots race the move-current-to-prev
+  // → move-pending-to-current sequence and corrupt the install tree.
+  const lock = await acquireLock();
+  if (!lock.acquired) {
+    log.info('[ijfw] applyPendingUpgrade — install already running by pid', lock.holderPid);
     return;
   }
+  const lockHandle: LockMetadata = lock.handle!;
 
   try {
-    await ijfwMcpClient.shutdown();
-  } catch (err) {
-    log.warn('[ijfw] mcp shutdown threw', { err });
-  }
-  const drained = await ijfwMcpClient.waitForExit(10_000);
-  if (!drained) {
-    log.warn('[ijfw] MCP client did not exit cleanly — deferring upgrade');
-    return;
-  }
-
-  // Stage swap with Windows EBUSY retry (F-B03).
-  try {
-    await retryOnEbusy(async () => {
-      try {
-        await fs.promises.rm(previous, { recursive: true, force: true });
-      } catch {
-        /* ignore — previous may not exist */
-      }
-      try {
-        await moveWithExdevFallback(current, previous);
-      } catch (err) {
-        log.warn('[ijfw] preserve-previous failed', { err });
-      }
-      await moveWithExdevFallback(pending, current);
-    });
-  } catch (err) {
-    log.error('[ijfw] staged swap failed', { err });
-    emitStatus({
-      status: 'install_failed',
-      errorReason: 'stage_swap_failed',
-      stderr: err instanceof Error ? err.message : String(err),
-    });
-    return;
-  }
-
-  const newOk = await spawnTestVerify(current);
-  if (newOk) {
-    emitStatus({ status: 'installed_current' });
-    runtimeMode = 'enabled';
-    await syncPrelude('installed_current');
-    try {
-      await agentRegistry.refreshAll();
-    } catch (err) {
-      log.warn('[ijfw] agentRegistry.refreshAll failed post-activation', { err });
+    // SEC-010: ownership check before activation.
+    if (!(await isSafelyOwned(pending)) || !(await isSafelyOwned(path.dirname(pending)))) {
+      log.error('[ijfw] pending tree not safely owned — refusing to activate');
+      emitStatus({ status: 'install_failed', errorReason: 'unsafe_ownership' });
+      return;
     }
-    return;
-  }
 
-  log.warn('[ijfw] new version failed spawn-test — rolling back');
-  try {
-    await retryOnEbusy(async () => {
-      await fs.promises.rm(current, { recursive: true, force: true });
+    try {
+      await ijfwMcpClient.shutdown();
+    } catch (err) {
+      log.warn('[ijfw] mcp shutdown threw', { err });
+    }
+    const drained = await ijfwMcpClient.waitForExit(10_000);
+    if (!drained) {
+      log.warn('[ijfw] MCP client did not exit cleanly — deferring upgrade');
+      return;
+    }
+
+    // Stage swap with Windows EBUSY retry (F-B03).
+    try {
+      await retryOnEbusy(async () => {
+        try {
+          await fs.promises.rm(previous, { recursive: true, force: true });
+        } catch {
+          /* ignore — previous may not exist */
+        }
+        try {
+          await moveWithExdevFallback(current, previous);
+        } catch (err) {
+          log.warn('[ijfw] preserve-previous failed', { err });
+        }
+        await moveWithExdevFallback(pending, current);
+      });
+    } catch (err) {
+      log.error('[ijfw] staged swap failed', { err });
+      emitStatus({
+        status: 'install_failed',
+        errorReason: 'stage_swap_failed',
+        stderr: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    const newOk = await spawnTestVerify(current);
+    if (newOk) {
+      emitStatus({ status: 'installed_current' });
+      runtimeMode = 'enabled';
+      await syncPrelude('installed_current');
       try {
-        await moveWithExdevFallback(previous, current);
+        await agentRegistry.refreshAll();
       } catch (err) {
-        log.error('[ijfw] rollback move failed', { err });
-        throw err;
+        log.warn('[ijfw] agentRegistry.refreshAll failed post-activation', { err });
       }
-    });
-  } catch (err) {
-    emitStatus({
-      status: 'install_failed',
-      errorReason: 'upgrade_failed_no_rollback',
-      stderr: err instanceof Error ? err.message : String(err),
-    });
-    return;
-  }
+      return;
+    }
 
-  const rollbackOk = await spawnTestVerify(current);
-  if (!rollbackOk) {
-    emitStatus({ status: 'install_failed', errorReason: 'rollback_also_failed' });
-  } else {
-    emitStatus({ status: 'install_failed', errorReason: 'upgrade_failed_rolled_back' });
+    log.warn('[ijfw] new version failed spawn-test — rolling back');
+    try {
+      await retryOnEbusy(async () => {
+        await fs.promises.rm(current, { recursive: true, force: true });
+        try {
+          await moveWithExdevFallback(previous, current);
+        } catch (err) {
+          log.error('[ijfw] rollback move failed', { err });
+          throw err;
+        }
+      });
+    } catch (err) {
+      emitStatus({
+        status: 'install_failed',
+        errorReason: 'upgrade_failed_no_rollback',
+        stderr: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    const rollbackOk = await spawnTestVerify(current);
+    if (!rollbackOk) {
+      emitStatus({ status: 'install_failed', errorReason: 'rollback_also_failed' });
+    } else {
+      emitStatus({ status: 'install_failed', errorReason: 'upgrade_failed_rolled_back' });
+    }
+  } finally {
+    await releaseLock(lockHandle);
   }
 }
 
