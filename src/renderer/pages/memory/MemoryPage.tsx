@@ -26,11 +26,11 @@
 import React, { useEffect, useState } from 'react';
 import { ipcBridge } from '@/common';
 import type { IjfwStatusPayload } from '@/common/adapter/ipcBridge';
-import InstallerPitchCardPlaceholder from './state-branches/InstallerPitchCard.placeholder';
-import InstallingCardPlaceholder from './state-branches/InstallingCard.placeholder';
-import InstallFailedCardPlaceholder from './state-branches/InstallFailedCard.placeholder';
-import OnboardingEmptyStatePlaceholder from './state-branches/OnboardingEmptyState.placeholder';
-import FullPanelShellPlaceholder from './state-branches/FullPanelShell.placeholder';
+import InstallerPitchCard from './state-branches/InstallerPitchCard';
+import InstallingCard from './state-branches/InstallingCard';
+import InstallFailedCard from './state-branches/InstallFailedCard';
+import OnboardingEmptyState from './state-branches/OnboardingEmptyState';
+import FullPanelShell from './state-branches/FullPanelShell';
 import styles from './MemoryPage.module.css';
 
 const renderStateBranch = (status: IjfwStatusPayload | null): React.ReactElement => {
@@ -43,24 +43,24 @@ const renderStateBranch = (status: IjfwStatusPayload | null): React.ReactElement
   }
   switch (status.status) {
     case 'not_installed':
-      return <InstallerPitchCardPlaceholder />;
+      return <InstallerPitchCard />;
     case 'installing':
-      return <InstallingCardPlaceholder version={status.version} />;
+      return <InstallingCard version={status.version} />;
     case 'upgrading':
-      return <InstallingCardPlaceholder version={status.version} />;
+      return <InstallingCard version={status.version} />;
     case 'installed_pending_activation':
-      return <InstallingCardPlaceholder version={status.version} />;
+      return <InstallingCard version={status.version} />;
     case 'install_failed':
-      return <InstallFailedCardPlaceholder errorReason={status.errorReason} />;
+      return <InstallFailedCard errorReason={status.errorReason} stderr={status.stderr} />;
     case 'installed_current':
-      // Wave 3 placeholder: always treat as "no memories yet". Wave 5 will
-      // check the active brain via useActiveBrainScope + brainInvoke and
-      // route between OnboardingEmptyState and FullPanelShell.
-      return <OnboardingEmptyStatePlaceholder />;
+      // Wave 4 production routing: always treat as "no memories yet" for now.
+      // Wave 5 Task 5.0 will check the active brain via useActiveBrainScope +
+      // brainInvoke and route between OnboardingEmptyState and FullPanelShell.
+      return <OnboardingEmptyState />;
     default:
       // Exhaustiveness guard — keeps FullPanelShell reachable for the
       // typechecker and gives Wave 5 a fallback for unknown states.
-      return <FullPanelShellPlaceholder />;
+      return <FullPanelShell />;
   }
 };
 

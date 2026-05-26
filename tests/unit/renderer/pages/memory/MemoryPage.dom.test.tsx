@@ -7,13 +7,13 @@
 // @vitest-environment jsdom
 
 /**
- * Task 3.1 — DOM tests for the 6-state MemoryPage router.
+ * DOM tests for the 6-state MemoryPage router.
  *
- * The page subscribes to `ipcBridge.ijfw.onStatusChanged` on mount and
- * dispatches one of five placeholder components based on
- * {@link IjfwLifecycleStatus}. These tests drive the subscription handler
- * directly and assert the rendered branch — they do not exercise the real
- * IPC layer (Wave 2 owns that wire).
+ * MemoryPage subscribes to `ipcBridge.ijfw.onStatusChanged` and dispatches one
+ * of five Wave-4 production components based on {@link IjfwLifecycleStatus}.
+ * The tests mock each branch component so the assertions verify MemoryPage's
+ * routing logic without coupling to child implementation details (the child
+ * components have their own dom tests).
  */
 
 import React from 'react';
@@ -46,6 +46,30 @@ vi.mock('@/common', () => ({
   },
 }));
 
+vi.mock('@renderer/pages/memory/state-branches/InstallerPitchCard', () => ({
+  default: () => <div data-testid='branch-installer-pitch' />,
+}));
+
+vi.mock('@renderer/pages/memory/state-branches/InstallingCard', () => ({
+  default: ({ version }: { version?: string }) => (
+    <div data-testid='branch-installing' data-version={version ?? ''} />
+  ),
+}));
+
+vi.mock('@renderer/pages/memory/state-branches/InstallFailedCard', () => ({
+  default: ({ errorReason, stderr }: { errorReason?: string; stderr?: string }) => (
+    <div data-testid='branch-install-failed' data-reason={errorReason ?? ''} data-stderr={stderr ?? ''} />
+  ),
+}));
+
+vi.mock('@renderer/pages/memory/state-branches/OnboardingEmptyState', () => ({
+  default: () => <div data-testid='branch-onboarding-empty' />,
+}));
+
+vi.mock('@renderer/pages/memory/state-branches/FullPanelShell', () => ({
+  default: () => <div data-testid='branch-full-panel-shell' />,
+}));
+
 import MemoryPage from '@renderer/pages/memory/MemoryPage';
 
 const emit = (payload: IjfwStatusPayload): void => {
@@ -57,8 +81,6 @@ const emit = (payload: IjfwStatusPayload): void => {
 beforeEach(() => {
   listeners.clear();
   unsubscribeSpy.mockReset();
-  // Default: getStatus resolves with no payload, leaving the page in its
-  // initial loading state until an emit arrives. Individual tests override.
   getStatusInvoke.mockReset();
   getStatusInvoke.mockResolvedValue(undefined);
 });
@@ -76,48 +98,48 @@ describe('MemoryPage', () => {
     expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('renders InstallerPitch placeholder when status is not_installed', () => {
+  it('renders InstallerPitchCard when status is not_installed', () => {
     render(<MemoryPage />);
     emit({ status: 'not_installed' });
-    expect(screen.getByTestId('memory-installer-pitch-placeholder')).toBeTruthy();
+    expect(screen.getByTestId('branch-installer-pitch')).toBeTruthy();
   });
 
-  it('renders Installing placeholder when status is installing', () => {
+  it('renders InstallingCard when status is installing', () => {
     render(<MemoryPage />);
-    emit({ status: 'installing' });
-    expect(screen.getByTestId('memory-installing-placeholder')).toBeTruthy();
+    emit({ status: 'installing', version: '1.5.4' });
+    const card = screen.getByTestId('branch-installing');
+    expect(card.getAttribute('data-version')).toBe('1.5.4');
   });
 
-  it('renders Installing placeholder when status is upgrading', () => {
+  it('renders InstallingCard when status is upgrading', () => {
     render(<MemoryPage />);
     emit({ status: 'upgrading', version: '1.2.3' });
-    const card = screen.getByTestId('memory-installing-placeholder');
-    expect(card).toBeTruthy();
-    expect(card.textContent).toContain('1.2.3');
+    const card = screen.getByTestId('branch-installing');
+    expect(card.getAttribute('data-version')).toBe('1.2.3');
   });
 
-  it('renders InstallFailed placeholder with errorReason', () => {
-    render(<MemoryPage />);
-    emit({ status: 'install_failed', errorReason: 'NPM_EXIT_NON_ZERO' });
-    const card = screen.getByTestId('memory-install-failed-placeholder');
-    expect(card).toBeTruthy();
-    expect(card.textContent).toContain('NPM_EXIT_NON_ZERO');
-  });
-
-  it('renders Installing placeholder when status is installed_pending_activation', () => {
+  it('renders InstallingCard when status is installed_pending_activation', () => {
     render(<MemoryPage />);
     emit({ status: 'installed_pending_activation', version: '2.0.0' });
-    const card = screen.getByTestId('memory-installing-placeholder');
-    expect(card).toBeTruthy();
-    expect(card.textContent).toContain('2.0.0');
+    const card = screen.getByTestId('branch-installing');
+    expect(card.getAttribute('data-version')).toBe('2.0.0');
   });
 
-  it('renders OnboardingEmptyState placeholder when status is installed_current', () => {
-    // Wave 3 contract: always render OnboardingEmptyState for installed_current;
-    // Wave 5 will replace this with the real "has memories?" branching.
+  it('renders InstallFailedCard with errorReason and stderr when status is install_failed', () => {
+    render(<MemoryPage />);
+    emit({ status: 'install_failed', errorReason: 'spawn_error', stderr: 'ENOENT npm' });
+    const card = screen.getByTestId('branch-install-failed');
+    expect(card.getAttribute('data-reason')).toBe('spawn_error');
+    expect(card.getAttribute('data-stderr')).toBe('ENOENT npm');
+  });
+
+  it('renders OnboardingEmptyState when status is installed_current', () => {
+    // Wave 4 production routing: always render OnboardingEmptyState for
+    // installed_current. Wave 5 Task 5.0 will replace this with a real
+    // "has memories?" branching that may route to FullPanelShell instead.
     render(<MemoryPage />);
     emit({ status: 'installed_current', version: '1.0.0' });
-    expect(screen.getByTestId('memory-onboarding-empty-placeholder')).toBeTruthy();
+    expect(screen.getByTestId('branch-onboarding-empty')).toBeTruthy();
   });
 
   it('does not duplicate subscriptions under React strict-mode double-mount', () => {
@@ -126,8 +148,6 @@ describe('MemoryPage', () => {
         <MemoryPage />
       </React.StrictMode>
     );
-    // After strict-mode double-invoke, exactly one listener remains —
-    // the first effect's cleanup ran before the second effect attached.
     expect(listeners.size).toBe(1);
     unmount();
     expect(listeners.size).toBe(0);
