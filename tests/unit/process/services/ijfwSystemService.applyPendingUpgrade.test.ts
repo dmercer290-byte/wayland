@@ -53,6 +53,23 @@ vi.mock('@process/services/ijfw/ijfwMcpClient', () => ({
   },
 }));
 
+// Checkpoint B H4: tests inject a moveWithExdevFallback that simulates the
+// TOCTOU — the rename appears to succeed but the post-swap directory is an
+// attacker-controlled symlink. Default impl delegates to the real one.
+let moveWithExdevFallbackImpl:
+  | ((src: string, dst: string) => Promise<void>)
+  | null = null;
+vi.mock('@process/services/ijfw/atomicFile', async () => {
+  const actual = await vi.importActual<typeof import('@process/services/ijfw/atomicFile')>(
+    '@process/services/ijfw/atomicFile',
+  );
+  return {
+    ...actual,
+    moveWithExdevFallback: (src: string, dst: string) =>
+      moveWithExdevFallbackImpl ? moveWithExdevFallbackImpl(src, dst) : actual.moveWithExdevFallback(src, dst),
+  };
+});
+
 const spawnSpy = vi.fn();
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -142,6 +159,7 @@ describe('ijfwSystemService.applyPendingUpgrade', () => {
     mcpShutdownSpy.mockReset().mockResolvedValue(undefined);
     mcpWaitSpy.mockReset().mockResolvedValue(true);
     spawnSpy.mockReset();
+    moveWithExdevFallbackImpl = null;
   });
 
   afterEach(() => {
@@ -226,6 +244,50 @@ describe('ijfwSystemService.applyPendingUpgrade', () => {
     // Lockfile must be gone — releaseLock fired in `finally`.
     const lockPath = path.join(tmpHome, '.ijfw', '.install-lock');
     expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('Checkpoint B H4: emits unsafe_ownership when post-swap re-check finds a symlink', async () => {
+    // Simulate the TOCTOU: pending tree passes the pre-swap ownership check,
+    // but during the rename an attacker substitutes the destination with a
+    // symlink. The post-swap re-stat must catch this.
+    writePendingDir();
+    const evilTarget = path.join(tmpHome, 'attacker-controlled');
+    fs.mkdirSync(evilTarget, { recursive: true });
+    fs.writeFileSync(
+      path.join(evilTarget, 'package.json'),
+      JSON.stringify({ version: '666.0.0' }),
+    );
+
+    let renameCount = 0;
+    moveWithExdevFallbackImpl = async (src, dst) => {
+      renameCount += 1;
+      // The pending → current rename is the second move call (preceded by the
+      // current → previous preserve, which we let go through). Substitute a
+      // symlink for the second call.
+      if (renameCount === 2 || src.endsWith('mcp-server.pending')) {
+        // Drop the real pending tree (simulating attacker removing it after
+        // the ownership check passed) and put a symlink in its place at `dst`.
+        await fs.promises.rm(src, { recursive: true, force: true });
+        fs.symlinkSync(evilTarget, dst);
+        return;
+      }
+      // For other rename ops (preserve current → previous), no current dir
+      // exists in this test so just ignore ENOENT.
+      try {
+        await fs.promises.rename(src, dst);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    };
+
+    await ijfwSystemService.applyPendingUpgrade();
+    for (let i = 0; i < 8; i++) await flush();
+
+    expect(emitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'install_failed', errorReason: 'unsafe_ownership' }),
+    );
+    // spawnTestVerify must NOT have run — the re-check fires before verify.
+    expect(spawnSpy).not.toHaveBeenCalled();
   });
 
   it('rolls back to .prev and emits install_failed when spawn-test fails', async () => {

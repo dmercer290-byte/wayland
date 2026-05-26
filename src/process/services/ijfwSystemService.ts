@@ -628,6 +628,35 @@ async function applyPendingUpgradeImpl(): Promise<void> {
       return;
     }
 
+    // Checkpoint B H4: TOCTOU defense. Between the ownership check on
+    // `pending` (above) and the rename, a local attacker who controls
+    // `~/.ijfw/` could swap `pending` for a symlink. After the rename,
+    // `current` would then point at attacker-controlled content and
+    // `spawnTestVerify` would read attacker-controlled package.json. Re-stat
+    // `current` after the rename and require: not a symlink, is a directory,
+    // owned by us. On failure: attempt rollback and emit unsafe_ownership.
+    if (!(await isSafelyOwned(current))) {
+      log.error('[ijfw] post-swap ownership re-check failed — refusing to verify');
+      try {
+        await retryOnEbusy(async () => {
+          await fs.promises.rm(current, { recursive: true, force: true });
+          try {
+            await moveWithExdevFallback(previous, current);
+          } catch (rollbackErr) {
+            log.error('[ijfw] rollback after unsafe-ownership re-check failed', {
+              err: rollbackErr,
+            });
+          }
+        });
+      } catch (err) {
+        log.error('[ijfw] rollback retry exhausted after unsafe-ownership re-check', {
+          err,
+        });
+      }
+      emitStatus({ status: 'install_failed', errorReason: 'unsafe_ownership' });
+      return;
+    }
+
     const newOk = await spawnTestVerify(current);
     if (newOk) {
       emitStatus({ status: 'installed_current' });
