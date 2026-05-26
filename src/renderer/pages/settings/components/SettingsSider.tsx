@@ -1,6 +1,7 @@
 import {
   Bot,
   BookOpen,
+  Brain,
   Cable,
   Cpu,
   Globe,
@@ -50,6 +51,7 @@ export const BUILTIN_TAB_IDS = [
   'general',
   'notifications',
   'storage',
+  'ijfw',
   // ABOUT
   'about',
 ] as const;
@@ -252,6 +254,12 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         label: t('settings.sider.storage', { defaultValue: 'Storage' }),
         icon: <Globe />,
         path: 'storage',
+      },
+      ijfw: {
+        id: 'ijfw',
+        label: t('memory.settings.panel_title', { defaultValue: 'IJFW Memory' }),
+        icon: <Brain />,
+        path: 'ijfw',
       },
       about: {
         id: 'about',

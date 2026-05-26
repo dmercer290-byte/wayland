@@ -39,6 +39,7 @@ const TeamIndex = React.lazy(() => import('@renderer/pages/team'));
 const TeamsLibraryPage = React.lazy(() => import('@renderer/pages/teams/TeamsLibraryPage'));
 const TeamLauncherPage = React.lazy(() => import('@renderer/pages/teams/TeamLauncherPage'));
 const MemoryPage = React.lazy(() => import('@renderer/pages/memory/MemoryPage'));
+const IjfwSettingsPanel = React.lazy(() => import('@renderer/pages/settings/IjfwSettingsPanel'));
 
 const withRouteFallback = (Component: React.LazyExoticComponent<React.ComponentType>) => (
   <Suspense fallback={<AppLoader />}>
@@ -103,6 +104,8 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
             <Route path='/settings/general' element={withRouteFallback(GeneralSettings)} />
             <Route path='/settings/notifications' element={withRouteFallback(NotificationsSettings)} />
             <Route path='/settings/storage' element={withRouteFallback(StorageSettings)} />
+            {/* IJFW MEMORY (Decision 3b: the ONLY Skip toggle in the app) */}
+            <Route path='/settings/ijfw' element={withRouteFallback(IjfwSettingsPanel)} />
             {/* ABOUT */}
             <Route path='/settings/about' element={withRouteFallback(SystemSettings)} />
             <Route
