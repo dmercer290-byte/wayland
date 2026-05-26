@@ -42,6 +42,7 @@ import {
   discoverTargets,
   type IjfwStatus as PreludeStatus,
 } from '@process/services/ijfw/preludeManager';
+import { watchInstallRoot } from '@process/services/ijfw/healthCheck';
 import { resolveEntry } from '@process/services/ijfw/entryResolver';
 import { encode, decode } from '@process/services/ijfw/mcpWireProtocol';
 import { jsonRpcResponseSchema } from '@process/services/ijfw/ipcSchemas';
@@ -650,7 +651,44 @@ export const ijfwSystemService = {
   getRuntimeMode(): IjfwRuntimeMode {
     return runtimeMode;
   },
+
+  /**
+   * Subscribe to ~/.ijfw filesystem changes. When the mcp-server tree
+   * disappears (user-driven rm, background uninstall, AV quarantine), shut
+   * down the MCP client and emit `not_installed` so downstream UI surfaces
+   * react. Returns a disposer.
+   */
+  startHealthWatcher(): () => void {
+    return startHealthWatcherImpl();
+  },
 };
+
+let lastEmittedAbsent = false;
+
+function startHealthWatcherImpl(): () => void {
+  // Initialize the debounce flag to the inverse of current state so the very
+  // first absent-event triggers an emit even if we boot into a no-install.
+  lastEmittedAbsent = false;
+  const dispose = watchInstallRoot((exists) => {
+    if (!exists) {
+      if (lastEmittedAbsent) return;
+      lastEmittedAbsent = true;
+      void (async () => {
+        try {
+          await ijfwMcpClient.shutdown();
+        } catch (err) {
+          log.warn('[ijfw] mcp shutdown on health-watcher absent failed', { err });
+        }
+        emitStatus({ status: 'not_installed', reason: 'install_removed' });
+        runtimeMode = 'disabled';
+        await syncPrelude('not_installed');
+      })();
+    } else {
+      lastEmittedAbsent = false;
+    }
+  });
+  return dispose;
+}
 
 /** Test-only — reset module-level state. */
 export function __setRuntimeModeForTests(mode: IjfwRuntimeMode): void {

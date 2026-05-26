@@ -460,6 +460,14 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         } catch (err) {
           console.error('[Wayland] ijfw applyPendingUpgrade failed:', err);
         }
+        // Subscribe to ~/.ijfw — emit not_installed if the user removes the
+        // install out from under us, and shut down the MCP client so a stale
+        // socket doesn't keep the renderer in 'installed_current' state.
+        try {
+          ijfwSystemService.startHealthWatcher();
+        } catch (err) {
+          console.error('[Wayland] ijfw startHealthWatcher failed:', err);
+        }
         // Defer bootstrap by 5s so first-paint is not blocked by npm view.
         setTimeout(() => {
           void ijfwSystemService.bootstrap().catch((err) => {

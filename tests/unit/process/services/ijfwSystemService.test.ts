@@ -44,4 +44,8 @@ describe('ijfwSystemService — contract', () => {
     const mode = ijfwSystemService.getRuntimeMode();
     expect(['disabled', 'enabled', 'pending_activation']).toContain(mode);
   });
+
+  it('exposes startHealthWatcher', () => {
+    expect(typeof ijfwSystemService.startHealthWatcher).toBe('function');
+  });
 });
