@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/catalog.schema.json",
   "version": "1.0.0",
-  "publishedAt": "2026-05-27T08:50:35.010Z",
+  "publishedAt": "2026-05-27T08:55:40.729Z",
   "entries": [
     {
       "id": "io.github.taylorwilsdon/google-workspace-mcp",
@@ -56,6 +56,23 @@
       "installRate": 0.62,
       "entryUrl": "entries/com.slack-slack-mcp.json",
       "guideUrl": "guides/com.slack-slack-mcp.md"
+    },
+    {
+      "id": "com.github/github-mcp-server",
+      "name": "GitHub",
+      "shortDescription": "Repos, issues, pull requests, Actions, and code search — GitHub's official hosted MCP with OAuth.",
+      "iconUrl": "icons/github.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "code"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 4,
+      "installRate": 0.78,
+      "entryUrl": "entries/com.github-github-mcp-server.json",
+      "guideUrl": "guides/com.github-github-mcp-server.md"
     },
     {
       "id": "com.notion/notion-mcp",
@@ -517,6 +534,286 @@
       "installRate": 0.1,
       "entryUrl": "entries/com.raindrop-raindrop-mcp.json",
       "guideUrl": "guides/com.raindrop-raindrop-mcp.md"
+    },
+    {
+      "id": "com.gitlab/gitlab-mcp",
+      "name": "GitLab",
+      "shortDescription": "Projects, issues, merge requests, and pipelines — GitLab's official hosted MCP with OAuth.",
+      "iconUrl": "icons/gitlab.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "code"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 33,
+      "installRate": 0.18,
+      "entryUrl": "entries/com.gitlab-gitlab-mcp.json",
+      "guideUrl": "guides/com.gitlab-gitlab-mcp.md"
+    },
+    {
+      "id": "com.stripe/stripe-mcp",
+      "name": "Stripe",
+      "shortDescription": "Customers, payments, subscriptions, invoices, and refunds — Stripe's official hosted MCP.",
+      "iconUrl": "icons/stripe.svg",
+      "tier": "builder",
+      "categories": [
+        "payments",
+        "developer"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 34,
+      "installRate": 0.32,
+      "entryUrl": "entries/com.stripe-stripe-mcp.json",
+      "guideUrl": "guides/com.stripe-stripe-mcp.md"
+    },
+    {
+      "id": "com.vercel/vercel-mcp",
+      "name": "Vercel",
+      "shortDescription": "Deployments, projects, env vars, and logs — Vercel's official hosted MCP with OAuth.",
+      "iconUrl": "icons/vercel.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "devops"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 35,
+      "installRate": 0.27,
+      "entryUrl": "entries/com.vercel-vercel-mcp.json",
+      "guideUrl": "guides/com.vercel-vercel-mcp.md"
+    },
+    {
+      "id": "com.supabase/supabase-mcp",
+      "name": "Supabase",
+      "shortDescription": "Projects, schema, tables, RLS, edge functions, and logs — Supabase's official hosted MCP.",
+      "iconUrl": "icons/supabase.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "data",
+        "devops"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 36,
+      "installRate": 0.24,
+      "entryUrl": "entries/com.supabase-supabase-mcp.json",
+      "guideUrl": "guides/com.supabase-supabase-mcp.md"
+    },
+    {
+      "id": "com.cloudflare/cloudflare-mcp",
+      "name": "Cloudflare Suite",
+      "shortDescription": "Workers, Pages, DNS, R2, KV, D1, and Analytics — Cloudflare's official hosted MCP with OAuth.",
+      "iconUrl": "icons/cloudflare.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "devops",
+        "infrastructure"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 37,
+      "installRate": 0.21,
+      "entryUrl": "entries/com.cloudflare-cloudflare-mcp.json",
+      "guideUrl": "guides/com.cloudflare-cloudflare-mcp.md"
+    },
+    {
+      "id": "com.amazon/aws-mcp",
+      "name": "AWS",
+      "shortDescription": "EC2, S3, Lambda, CloudFormation, and core AWS services via your AWS credentials.",
+      "iconUrl": "icons/aws.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "devops",
+        "infrastructure"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 38,
+      "installRate": 0.2,
+      "entryUrl": "entries/com.amazon-aws-mcp.json",
+      "guideUrl": "guides/com.amazon-aws-mcp.md"
+    },
+    {
+      "id": "com.google/gcloud-mcp",
+      "name": "Google Cloud",
+      "shortDescription": "Projects, compute, Cloud Storage, BigQuery, and Cloud Run via Application Default Credentials.",
+      "iconUrl": "icons/gcloud.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "devops",
+        "infrastructure"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 39,
+      "installRate": 0.17,
+      "entryUrl": "entries/com.google-gcloud-mcp.json",
+      "guideUrl": "guides/com.google-gcloud-mcp.md"
+    },
+    {
+      "id": "com.sentry/sentry-mcp",
+      "name": "Sentry",
+      "shortDescription": "Issues, events, releases, and performance traces — Sentry's official hosted MCP with OAuth.",
+      "iconUrl": "icons/sentry.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "observability"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 40,
+      "installRate": 0.19,
+      "entryUrl": "entries/com.sentry-sentry-mcp.json",
+      "guideUrl": "guides/com.sentry-sentry-mcp.md"
+    },
+    {
+      "id": "com.upstash/context7-mcp",
+      "name": "Context7",
+      "shortDescription": "Up-to-date library and SDK docs (React, Next.js, Stripe, Supabase, and 9000+ others) for accurate code generation.",
+      "iconUrl": "icons/context7.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "research"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 41,
+      "installRate": 0.28,
+      "entryUrl": "entries/com.upstash-context7-mcp.json",
+      "guideUrl": "guides/com.upstash-context7-mcp.md"
+    },
+    {
+      "id": "com.sourcegraph/sourcegraph-mcp",
+      "name": "Sourcegraph",
+      "shortDescription": "Cross-repo code search, references, and definitions across your entire codebase — Sourcegraph's hosted MCP.",
+      "iconUrl": "icons/sourcegraph.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "code",
+        "search"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 42,
+      "installRate": 0.15,
+      "entryUrl": "entries/com.sourcegraph-sourcegraph-mcp.json",
+      "guideUrl": "guides/com.sourcegraph-sourcegraph-mcp.md"
+    },
+    {
+      "id": "com.crystaldba/postgres-mcp",
+      "name": "Postgres",
+      "shortDescription": "Run read-only SQL, inspect schemas, and explain query plans against any Postgres database.",
+      "iconUrl": "icons/postgres.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "data"
+      ],
+      "maintainerType": "community",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 43,
+      "installRate": 0.22,
+      "entryUrl": "entries/com.crystaldba-postgres-mcp.json",
+      "guideUrl": "guides/com.crystaldba-postgres-mcp.md"
+    },
+    {
+      "id": "com.microsoft/playwright-mcp",
+      "name": "Playwright",
+      "shortDescription": "Headless browser automation — click, type, navigate, screenshot, and assert. Powered by Playwright.",
+      "iconUrl": "icons/playwright.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "automation",
+        "browser"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 44,
+      "installRate": 0.33,
+      "entryUrl": "entries/com.microsoft-playwright-mcp.json",
+      "guideUrl": "guides/com.microsoft-playwright-mcp.md"
+    },
+    {
+      "id": "com.google/chrome-devtools-mcp",
+      "name": "Chrome DevTools",
+      "shortDescription": "Live page inspection, console, network, performance, and Lighthouse audits via Chrome DevTools Protocol.",
+      "iconUrl": "icons/chrome.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "browser"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 45,
+      "installRate": 0.18,
+      "entryUrl": "entries/com.google-chrome-devtools-mcp.json",
+      "guideUrl": "guides/com.google-chrome-devtools-mcp.md"
+    },
+    {
+      "id": "com.exa/exa-mcp",
+      "name": "Exa",
+      "shortDescription": "Neural web search optimized for AI agents — semantic search, similar-page discovery, and content retrieval.",
+      "iconUrl": "icons/exa.svg",
+      "tier": "builder",
+      "categories": [
+        "search",
+        "research",
+        "developer"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 46,
+      "installRate": 0.2,
+      "entryUrl": "entries/com.exa-exa-mcp.json",
+      "guideUrl": "guides/com.exa-exa-mcp.md"
+    },
+    {
+      "id": "com.firecrawl/firecrawl-mcp",
+      "name": "Firecrawl",
+      "shortDescription": "Crawl, scrape, and extract structured data from any website — turn URLs into clean Markdown.",
+      "iconUrl": "icons/firecrawl.svg",
+      "tier": "builder",
+      "categories": [
+        "search",
+        "research",
+        "developer"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 47,
+      "installRate": 0.17,
+      "entryUrl": "entries/com.firecrawl-firecrawl-mcp.json",
+      "guideUrl": "guides/com.firecrawl-firecrawl-mcp.md"
+    },
+    {
+      "id": "com.docker/docker-mcp",
+      "name": "Docker",
+      "shortDescription": "List, inspect, start, stop, and log local Docker containers, images, and Compose services.",
+      "iconUrl": "icons/docker.svg",
+      "tier": "builder",
+      "categories": [
+        "developer",
+        "devops"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-12",
+      "popularityRank": 48,
+      "installRate": 0.16,
+      "entryUrl": "entries/com.docker-docker-mcp.json",
+      "guideUrl": "guides/com.docker-docker-mcp.md"
     }
   ]
 }

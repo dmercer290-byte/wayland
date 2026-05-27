@@ -1,0 +1,41 @@
+{
+  "$schema": "../schema/entry.schema.json",
+  "name": "com.docker/docker-mcp",
+  "title": "Docker",
+  "description": "List, inspect, start, stop, and log local Docker containers, images, and Compose services.",
+  "version": "1.0.0",
+  "websiteUrl": "https://docs.docker.com/desktop/mcp",
+  "repository": { "url": "https://github.com/docker/mcp-server", "source": "github" },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@docker/mcp",
+      "version": "1.0.0",
+      "runtimeHint": "npx",
+      "transport": { "type": "stdio" },
+      "environmentVariables": []
+    }
+  ],
+  "x-wayland": {
+    "tier": "builder",
+    "categories": ["developer", "devops"],
+    "tags": ["docker", "containers"],
+    "maintainerType": "official",
+    "license": "Apache-2.0",
+    "verifiedAt": "2026-05-12",
+    "popularityRank": 48,
+    "installRate": 0.16,
+    "iconUrl": "icons/docker.svg",
+    "brand": { "logoBackground": "#ffffff", "logoForeground": "#2496ed" },
+    "auth": { "method": "none" },
+    "toolGroups": [
+      { "label": "Containers", "count": 5 },
+      { "label": "Images", "count": 3 },
+      { "label": "Compose", "count": 3 },
+      { "label": "Logs", "count": 2 }
+    ],
+    "setupGuide": { "path": "guides/com.docker-docker-mcp.md", "estimatedMinutes": 1, "stepCount": 1 },
+    "platforms": ["macos", "windows", "linux"],
+    "minWaylandVersion": "0.8.0"
+  }
+}

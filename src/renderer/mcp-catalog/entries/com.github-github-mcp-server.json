@@ -1,0 +1,45 @@
+{
+  "$schema": "../schema/entry.schema.json",
+  "name": "com.github/github-mcp-server",
+  "title": "GitHub",
+  "description": "Repos, issues, pull requests, Actions, and code search — GitHub's official hosted MCP with OAuth.",
+  "version": "1.0.0",
+  "websiteUrl": "https://github.com/github/github-mcp-server",
+  "repository": { "url": "https://github.com/github/github-mcp-server", "source": "github" },
+  "packages": [],
+  "remotes": [
+    { "type": "streamable-http", "url": "https://api.githubcopilot.com/mcp" }
+  ],
+  "x-wayland": {
+    "tier": "builder",
+    "categories": ["developer", "code"],
+    "tags": ["github", "git", "code"],
+    "maintainerType": "official",
+    "license": "MIT",
+    "verifiedAt": "2026-05-12",
+    "popularityRank": 4,
+    "installRate": 0.78,
+    "iconUrl": "icons/github.svg",
+    "brand": { "logoBackground": "#ffffff", "logoForeground": "#1a1a1a" },
+    "auth": {
+      "method": "oauth2-byo",
+      "providerName": "GitHub",
+      "providerSignupUrl": "https://github.com",
+      "scopes": [
+        { "name": "repo", "plainLanguage": "Read and write your repositories." },
+        { "name": "read:org", "plainLanguage": "List the organizations you belong to." },
+        { "name": "workflow", "plainLanguage": "Read and trigger GitHub Actions." }
+      ]
+    },
+    "toolGroups": [
+      { "label": "Repos", "count": 6 },
+      { "label": "Issues", "count": 5 },
+      { "label": "Pull Requests", "count": 7 },
+      { "label": "Actions", "count": 4 },
+      { "label": "Search", "count": 3 }
+    ],
+    "setupGuide": { "path": "guides/com.github-github-mcp-server.md", "estimatedMinutes": 1, "stepCount": 2 },
+    "platforms": ["macos", "windows", "linux"],
+    "minWaylandVersion": "0.8.0"
+  }
+}
