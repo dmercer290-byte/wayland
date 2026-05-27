@@ -43,9 +43,11 @@ describe('ijfwMcpClient (integration — real IJFW MCP server)', () => {
     __resetForTests();
   });
 
-  itLocal('invokes ijfw_memory_recall against the real server and gets a valid JSON-RPC response', async () => {
+  itLocal('invokes memory_recall against the real server and gets a valid JSON-RPC response', async () => {
+    // Codex B1: pass the renderer-side verb 'memory_recall'; the client maps
+    // it to 'ijfw_memory_recall' before sending and unwraps the MCP envelope.
     const result = await ijfwMcpClient.invoke(
-      'ijfw_memory_recall',
+      'memory_recall',
       { query: 'wayland-integration-test-marker', limit: 1 },
       { timeoutMs: 15_000 },
     );
@@ -60,6 +62,42 @@ describe('ijfwMcpClient (integration — real IJFW MCP server)', () => {
     expect(result.ok).toBe(true);
     expect(result.data).toBeDefined();
   }, 20_000);
+
+  itLocal('Codex B1: memory_facts resolves to ijfw_memory_facts and unwraps envelope', async () => {
+    const result = await ijfwMcpClient.invoke(
+      'memory_facts',
+      { any: true },
+      { timeoutMs: 15_000 },
+    );
+    if (!result.ok) {
+      expect(result.errorReason === 'mcp_error' || result.errorReason === 'timeout').toBe(true);
+      return;
+    }
+    // After Codex B2 unwrap, data should be the parsed JSON payload, NOT a
+    // raw `{content: [...]}` MCP envelope.
+    expect(result.data).toBeDefined();
+    if (result.data && typeof result.data === 'object') {
+      expect(Object.prototype.hasOwnProperty.call(result.data, 'content')).toBe(false);
+    }
+  }, 20_000);
+
+  itLocal('Codex B1: wiki.get is wrapped into ijfw_brain {verb, args} and returns parsed data', async () => {
+    const result = await ijfwMcpClient.invoke('wiki.get', {}, { timeoutMs: 15_000 });
+    if (!result.ok) {
+      expect(result.errorReason === 'mcp_error' || result.errorReason === 'timeout').toBe(true);
+      return;
+    }
+    expect(result.data).toBeDefined();
+    if (result.data && typeof result.data === 'object') {
+      expect(Object.prototype.hasOwnProperty.call(result.data, 'content')).toBe(false);
+    }
+  }, 20_000);
+
+  itLocal('Codex B1: unknown verbs are rejected with validation_failed without spawning', async () => {
+    const result = await ijfwMcpClient.invoke('totally.bogus.verb', {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errorReason).toBe('validation_failed');
+  });
 
   itLocal('mode flips to full after a successful round-trip', async () => {
     // The first test already booted the child. Either way getMode should reflect it.

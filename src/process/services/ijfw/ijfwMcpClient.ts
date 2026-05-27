@@ -30,6 +30,98 @@ const SHUTDOWN_DEFAULT_MS = 5_000;
 // fail repeatedly (missing install, bad permissions, syntax error in entry).
 const RESPAWN_BACKOFF_MS = 5_000;
 
+// Codex B1: the renderer (and our own bridge) speaks the schema-allowlisted
+// verb names ('memory_facts', 'wiki.get', 'think', etc.). The REAL IJFW MCP
+// server (`~/.ijfw/mcp-server/src/server.js`) exposes 14 tools — most under
+// the `ijfw_` namespace, plus a single `ijfw_brain` facade that accepts a
+// `{verb, args}` envelope for the brain.* / wiki.* / conflict.* family.
+//
+// Without this mapping every `tools/call` was sent with the wrong tool name
+// and the MCP server replied with -32601 method-not-found for every verb.
+// Now: direct-mapped verbs resolve straight to their `ijfw_*` peer, and the
+// brain verbs are wrapped into a single `ijfw_brain` call.
+const BRAIN_VERBS = new Set<string>([
+  'think',
+  'links',
+  'wiki.get',
+  'wiki.compile',
+  'wiki.promote',
+  'wiki.export',
+  'wiki.shareReadme',
+  'conflict.resolve',
+]);
+
+const DIRECT_TOOL_MAP: Record<string, string> = {
+  memory_recall: 'ijfw_memory_recall',
+  memory_search: 'ijfw_memory_search',
+  memory_store: 'ijfw_memory_store',
+  memory_facts: 'ijfw_memory_facts',
+  memory_prelude: 'ijfw_memory_prelude',
+  state: 'ijfw_state',
+  metrics: 'ijfw_metrics',
+  prompt_check: 'ijfw_prompt_check',
+  update_check: 'ijfw_update_check',
+  update_apply: 'ijfw_update_apply',
+  cross_audit_converge: 'ijfw_cross_audit_converge',
+  cross_project_search: 'ijfw_cross_project_search',
+};
+
+type ResolvedToolCall =
+  | { ok: true; toolName: string; toolArgs: Record<string, unknown> }
+  | { ok: false; reason: string };
+
+function resolveToolCall(
+  verb: string,
+  args: Record<string, unknown>,
+): ResolvedToolCall {
+  if (Object.prototype.hasOwnProperty.call(DIRECT_TOOL_MAP, verb)) {
+    return { ok: true, toolName: DIRECT_TOOL_MAP[verb]!, toolArgs: args };
+  }
+  if (BRAIN_VERBS.has(verb)) {
+    return { ok: true, toolName: 'ijfw_brain', toolArgs: { verb, args } };
+  }
+  return { ok: false, reason: `unknown verb: ${verb}` };
+}
+
+/**
+ * Codex B2: the IJFW MCP server returns responses wrapped in the standard MCP
+ * envelope `{content: [{type: 'text', text: '<json>'}], isError: boolean}`.
+ * The `text` field is itself a JSON-stringified payload. Without unwrapping,
+ * every caller saw `{content: [...]}` instead of the real `{ok, answer, ...}`
+ * and downstream routing collapsed.
+ */
+type McpEnvelope = {
+  content?: Array<{ type?: unknown; text?: unknown }>;
+  isError?: unknown;
+};
+
+function unwrapMcpResult(raw: unknown): IjfwInvokeResult {
+  if (raw === null || typeof raw !== 'object') {
+    return { ok: true, data: raw };
+  }
+  const envelope = raw as McpEnvelope;
+  const firstText =
+    Array.isArray(envelope.content) && envelope.content[0]?.text !== undefined
+      ? String(envelope.content[0].text)
+      : undefined;
+  if (envelope.isError === true) {
+    return {
+      ok: false,
+      error: firstText ?? 'IJFW MCP returned isError',
+      errorReason: 'mcp_error',
+    };
+  }
+  if (firstText === undefined) {
+    return { ok: true, data: raw };
+  }
+  try {
+    const parsed = JSON.parse(firstText) as unknown;
+    return { ok: true, data: parsed };
+  } catch {
+    return { ok: true, data: firstText };
+  }
+}
+
 type PendingHandler = {
   resolve: (value: IjfwInvokeResult) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -78,6 +170,13 @@ class IjfwMcpClient {
   ): Promise<IjfwInvokeResult> {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
+    // Codex B1: resolve renderer verb to the actual MCP tool name BEFORE we
+    // pay the spawn cost. Unknown verbs return validation_failed.
+    const resolved = resolveToolCall(verb, args);
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.reason, errorReason: 'validation_failed' };
+    }
+
     let child: ChildProcess | null;
     try {
       child = await this.ensureSpawned();
@@ -94,7 +193,7 @@ class IjfwMcpClient {
       jsonrpc: '2.0',
       id,
       method: 'tools/call',
-      params: { name: verb, arguments: args },
+      params: { name: resolved.toolName, arguments: resolved.toolArgs },
     };
     // Checkpoint B H3: direct callers of invoke() (memory enrichment hooks
     // and future internal callers) skip the bridge-layer zod validation. An
@@ -283,7 +382,9 @@ class IjfwMcpClient {
           errorReason: reason,
         });
       } else {
-        handler.resolve({ ok: true, data: parsed.data.result });
+        // Codex B2: unwrap the MCP envelope (`{content: [{text}], isError}`)
+        // so callers receive the real JSON payload, not the transport shell.
+        handler.resolve(unwrapMcpResult(parsed.data.result));
       }
     }
   }

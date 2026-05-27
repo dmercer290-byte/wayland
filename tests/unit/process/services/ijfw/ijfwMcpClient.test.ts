@@ -107,6 +107,18 @@ function encodeNewline(obj: unknown): string {
   return `${JSON.stringify(obj)}\n`;
 }
 
+/**
+ * Codex B2: wrap a payload in the real MCP envelope shape so tests exercise the
+ * unwrap path. The IJFW MCP server returns
+ * `{content: [{type: 'text', text: '<JSON string>'}], isError: false}`.
+ */
+function mcpEnvelope(data: unknown, opts: { isError?: boolean } = {}): unknown {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(data) }],
+    isError: opts.isError ?? false,
+  };
+}
+
 describe('ijfwMcpClient', () => {
   it('spawns on first invoke and routes the response back to the caller', async () => {
     const { ijfwMcpClient } = await loadClient();
@@ -119,12 +131,23 @@ describe('ijfwMcpClient', () => {
     const written = currentChild!.writes[0]!.toString('utf-8');
     const parsed = JSON.parse(written.trim());
     expect(parsed.method).toBe('tools/call');
-    expect(parsed.params).toEqual({ name: 'memory_recall', arguments: { query: 'hello' } });
+    // Codex B1: renderer verb 'memory_recall' is now mapped to the real MCP
+    // tool name 'ijfw_memory_recall' before being put on the wire.
+    expect(parsed.params).toEqual({
+      name: 'ijfw_memory_recall',
+      arguments: { query: 'hello' },
+    });
 
-    // Reply.
+    // Reply with the real MCP envelope shape (Codex B2).
     currentChild!.stdout.emit(
       'data',
-      Buffer.from(encodeNewline({ jsonrpc: '2.0', id: parsed.id, result: { hits: [] } })),
+      Buffer.from(
+        encodeNewline({
+          jsonrpc: '2.0',
+          id: parsed.id,
+          result: mcpEnvelope({ hits: [] }),
+        }),
+      ),
     );
 
     const result = await promise;
@@ -186,14 +209,18 @@ describe('ijfwMcpClient', () => {
     const second = JSON.parse(currentChild!.writes[1]!.toString().trim());
     expect(first.id).not.toBe(second.id);
 
-    // Resolve both.
+    // Resolve both. Use the real MCP envelope shape (Codex B2 unwrap).
     currentChild!.stdout.emit(
       'data',
-      Buffer.from(encodeNewline({ jsonrpc: '2.0', id: first.id, result: 'A' })),
+      Buffer.from(
+        encodeNewline({ jsonrpc: '2.0', id: first.id, result: mcpEnvelope('A') }),
+      ),
     );
     currentChild!.stdout.emit(
       'data',
-      Buffer.from(encodeNewline({ jsonrpc: '2.0', id: second.id, result: 'B' })),
+      Buffer.from(
+        encodeNewline({ jsonrpc: '2.0', id: second.id, result: mcpEnvelope('B') }),
+      ),
     );
 
     const [r1, r2] = await Promise.all([p1, p2]);
@@ -234,11 +261,119 @@ describe('ijfwMcpClient', () => {
     const written = JSON.parse(currentChild!.writes[0]!.toString().trim());
     currentChild!.stdout.emit(
       'data',
-      Buffer.from(encodeNewline({ jsonrpc: '2.0', id: written.id, result: { ok: true } })),
+      Buffer.from(
+        encodeNewline({
+          jsonrpc: '2.0',
+          id: written.id,
+          result: mcpEnvelope({ ok: true }),
+        }),
+      ),
     );
     const result = await promise;
     expect(result.ok).toBe(true);
     expect(ijfwMcpClient.getMode()).toBe('full');
+  });
+
+  it('Codex B1: maps direct verbs to ijfw_* tool names', async () => {
+    const { ijfwMcpClient } = await loadClient();
+    const promise = ijfwMcpClient.invoke('memory_facts', { any: true });
+    await new Promise((r) => setImmediate(r));
+    const sent = JSON.parse(currentChild!.writes[0]!.toString().trim());
+    expect(sent.method).toBe('tools/call');
+    expect(sent.params.name).toBe('ijfw_memory_facts');
+    expect(sent.params.arguments).toEqual({ any: true });
+    currentChild!.stdout.emit(
+      'data',
+      Buffer.from(
+        encodeNewline({
+          jsonrpc: '2.0',
+          id: sent.id,
+          result: mcpEnvelope({ facts: [] }),
+        }),
+      ),
+    );
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toEqual({ facts: [] });
+  });
+
+  it('Codex B1: brain-family verbs are wrapped in ijfw_brain {verb, args}', async () => {
+    const { ijfwMcpClient } = await loadClient();
+    const promise = ijfwMcpClient.invoke('wiki.get', {});
+    await new Promise((r) => setImmediate(r));
+    const sent = JSON.parse(currentChild!.writes[0]!.toString().trim());
+    expect(sent.params.name).toBe('ijfw_brain');
+    expect(sent.params.arguments).toEqual({ verb: 'wiki.get', args: {} });
+    currentChild!.stdout.emit(
+      'data',
+      Buffer.from(
+        encodeNewline({
+          jsonrpc: '2.0',
+          id: sent.id,
+          result: mcpEnvelope({ entries: [] }),
+        }),
+      ),
+    );
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toEqual({ entries: [] });
+  });
+
+  it('Codex B1: unknown verbs are rejected with validation_failed before spawn', async () => {
+    const { ijfwMcpClient } = await loadClient();
+    const result = await ijfwMcpClient.invoke('not.a.real.verb', {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errorReason).toBe('validation_failed');
+    expect(spawnSpy).not.toHaveBeenCalled();
+  });
+
+  it('Codex B2: MCP envelope with isError=true surfaces as ok:false / mcp_error', async () => {
+    const { ijfwMcpClient } = await loadClient();
+    const promise = ijfwMcpClient.invoke('memory_recall', { query: 'x' });
+    await new Promise((r) => setImmediate(r));
+    const sent = JSON.parse(currentChild!.writes[0]!.toString().trim());
+    currentChild!.stdout.emit(
+      'data',
+      Buffer.from(
+        encodeNewline({
+          jsonrpc: '2.0',
+          id: sent.id,
+          result: {
+            content: [{ type: 'text', text: 'server crashed in tool handler' }],
+            isError: true,
+          },
+        }),
+      ),
+    );
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errorReason).toBe('mcp_error');
+      expect(result.error).toMatch(/server crashed/);
+    }
+  });
+
+  it('Codex B2: non-JSON envelope text falls back to raw string data', async () => {
+    const { ijfwMcpClient } = await loadClient();
+    const promise = ijfwMcpClient.invoke('memory_recall', { query: 'x' });
+    await new Promise((r) => setImmediate(r));
+    const sent = JSON.parse(currentChild!.writes[0]!.toString().trim());
+    currentChild!.stdout.emit(
+      'data',
+      Buffer.from(
+        encodeNewline({
+          jsonrpc: '2.0',
+          id: sent.id,
+          result: {
+            content: [{ type: 'text', text: 'not-json-payload' }],
+            isError: false,
+          },
+        }),
+      ),
+    );
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toBe('not-json-payload');
   });
 
   it('shutdown sends SIGTERM and waits for exit', async () => {
