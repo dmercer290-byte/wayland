@@ -30,6 +30,7 @@
     "statusWarn": "Потрібна повторна авторизація",
     "statusError": "Помилка",
     "statusStopped": "Вимкнено",
+    "statusIdle": "Очікування",
     "statusToolCount": "Доступно інструментів: {{count}}",
     "statusToolCountLabel": "інструментів доступно",
     "statusReauthCount": "Потребують повторної авторизації: {{count}}",

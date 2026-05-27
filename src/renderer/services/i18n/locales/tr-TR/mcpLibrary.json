@@ -30,6 +30,7 @@
     "statusWarn": "Yeniden yetkilendirme gerekli",
     "statusError": "Hata",
     "statusStopped": "Devre dışı",
+    "statusIdle": "Boşta",
     "statusToolCount": "{{count}} araç kullanılabilir",
     "statusToolCountLabel": "araç mevcut",
     "statusReauthCount": "{{count}} yeniden yetkilendirme gerekiyor",

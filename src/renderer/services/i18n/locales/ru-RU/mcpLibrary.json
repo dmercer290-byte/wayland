@@ -30,6 +30,7 @@
     "statusWarn": "Требуется повторная авторизация",
     "statusError": "Ошибка",
     "statusStopped": "Отключено",
+    "statusIdle": "Простой",
     "statusToolCount": "Доступно инструментов: {{count}}",
     "statusToolCountLabel": "инструментов доступно",
     "statusReauthCount": "Требуют повторной авторизации: {{count}}",

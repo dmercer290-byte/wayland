@@ -30,6 +30,7 @@
     "statusWarn": "需要重新授权",
     "statusError": "错误",
     "statusStopped": "已禁用",
+    "statusIdle": "空闲",
     "statusToolCount": "{{count}} 个可用工具",
     "statusToolCountLabel": "个可用工具",
     "statusReauthCount": "{{count}} 个需要重新授权",

@@ -30,6 +30,7 @@
     "statusWarn": "再認証が必要",
     "statusError": "エラー",
     "statusStopped": "無効",
+    "statusIdle": "アイドル",
     "statusToolCount": "{{count}} 個のツールが利用可能",
     "statusToolCountLabel": "個のツール利用可能",
     "statusReauthCount": "{{count}} 個が再認証必要",

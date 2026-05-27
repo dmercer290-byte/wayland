@@ -30,6 +30,7 @@
     "statusWarn": "재인증 필요",
     "statusError": "오류",
     "statusStopped": "비활성화됨",
+    "statusIdle": "유휴",
     "statusToolCount": "{{count}}개의 도구 사용 가능",
     "statusToolCountLabel": "개 도구 사용 가능",
     "statusReauthCount": "{{count}}개 재인증 필요",

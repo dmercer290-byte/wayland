@@ -1,7 +1,7 @@
 {
   "$schema": "./schema/catalog.schema.json",
   "version": "1.0.0",
-  "publishedAt": "2026-05-27T09:04:56.455Z",
+  "publishedAt": "2026-05-27T16:39:16.701Z",
   "entries": [
     {
       "id": "io.github.taylorwilsdon/google-workspace-mcp",
@@ -814,6 +814,309 @@
       "installRate": 0.16,
       "entryUrl": "entries/com.docker-docker-mcp.json",
       "guideUrl": "guides/com.docker-docker-mcp.md"
+    },
+    {
+      "id": "com.microsoft/markitdown",
+      "name": "Markitdown",
+      "shortDescription": "Convert PDFs, Office docs, images, audio, and HTML to clean Markdown for LLM ingestion. Microsoft's official local utility.",
+      "iconUrl": "icons/microsoft.svg",
+      "tier": "core",
+      "categories": [
+        "files-and-docs",
+        "productivity",
+        "developer"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 49,
+      "installRate": 0.18,
+      "entryUrl": "entries/com.microsoft-markitdown.json",
+      "guideUrl": "guides/com.microsoft-markitdown.md"
+    },
+    {
+      "id": "com.figma/figma-mcp",
+      "name": "Figma",
+      "shortDescription": "Read Figma design files, variables, components, and Dev Mode metadata. Figma's official hosted MCP with OAuth.",
+      "iconUrl": "icons/figma.svg",
+      "tier": "worker",
+      "categories": [
+        "design",
+        "developer",
+        "productivity"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 50,
+      "installRate": 0.22,
+      "entryUrl": "entries/com.figma-figma-mcp.json",
+      "guideUrl": "guides/com.figma-figma-mcp.md"
+    },
+    {
+      "id": "com.miro/miro-mcp",
+      "name": "Miro",
+      "shortDescription": "Read and edit Miro boards — sticky notes, frames, shapes, and connectors. Miro's official hosted MCP with OAuth 2.1.",
+      "iconUrl": "icons/miro.svg",
+      "tier": "worker",
+      "categories": [
+        "design",
+        "productivity",
+        "communication"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 51,
+      "installRate": 0.12,
+      "entryUrl": "entries/com.miro-miro-mcp.json",
+      "guideUrl": "guides/com.miro-miro-mcp.md"
+    },
+    {
+      "id": "com.zapier/zapier-mcp",
+      "name": "Zapier",
+      "shortDescription": "Trigger Zapier actions across 9,000+ apps from Wayland — Gmail, Slack, Salesforce, and the rest. Zapier's official hosted MCP.",
+      "iconUrl": "icons/zapier.svg",
+      "tier": "worker",
+      "categories": [
+        "automation",
+        "productivity",
+        "communication"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 52,
+      "installRate": 0.2,
+      "entryUrl": "entries/com.zapier-zapier-mcp.json",
+      "guideUrl": "guides/com.zapier-zapier-mcp.md"
+    },
+    {
+      "id": "com.box/box-mcp",
+      "name": "Box",
+      "shortDescription": "Files, folders, search, and Box AI — Box's official hosted MCP server with OAuth.",
+      "iconUrl": "icons/box.svg",
+      "tier": "worker",
+      "categories": [
+        "files-and-docs",
+        "productivity",
+        "collaboration"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 53,
+      "installRate": 0.12,
+      "entryUrl": "entries/com.box-box-mcp.json",
+      "guideUrl": "guides/com.box-box-mcp.md"
+    },
+    {
+      "id": "com.monday/monday-mcp",
+      "name": "monday.com",
+      "shortDescription": "Boards, items, columns, and workforms — monday.com's official hosted MCP with OAuth.",
+      "iconUrl": "icons/monday.svg",
+      "tier": "worker",
+      "categories": [
+        "productivity",
+        "tasks",
+        "collaboration"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 54,
+      "installRate": 0.11,
+      "entryUrl": "entries/com.monday-monday-mcp.json",
+      "guideUrl": "guides/com.monday-monday-mcp.md"
+    },
+    {
+      "id": "com.intercom/intercom-mcp",
+      "name": "Intercom",
+      "shortDescription": "Search conversations and contacts — Intercom's official hosted MCP with OAuth.",
+      "iconUrl": "icons/intercom.svg",
+      "tier": "worker",
+      "categories": [
+        "support",
+        "communication"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 55,
+      "installRate": 0.09,
+      "entryUrl": "entries/com.intercom-intercom-mcp.json",
+      "guideUrl": "guides/com.intercom-intercom-mcp.md"
+    },
+    {
+      "id": "com.mapbox/mapbox-mcp",
+      "name": "Mapbox",
+      "shortDescription": "Geocoding, routing, isochrones, and geospatial analysis — Mapbox's official MCP server.",
+      "iconUrl": "icons/mapbox.svg",
+      "tier": "worker",
+      "categories": [
+        "maps",
+        "developer",
+        "research"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 56,
+      "installRate": 0.08,
+      "entryUrl": "entries/com.mapbox-mapbox-mcp.json",
+      "guideUrl": "guides/com.mapbox-mapbox-mcp.md"
+    },
+    {
+      "id": "com.mongodb/mongodb-mcp",
+      "name": "MongoDB",
+      "shortDescription": "Query, aggregate, and manage MongoDB clusters and Atlas projects through MongoDB's official MCP server.",
+      "iconUrl": "icons/mongodb.svg",
+      "tier": "builder",
+      "categories": [
+        "database",
+        "developer",
+        "data"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 57,
+      "installRate": 0.14,
+      "entryUrl": "entries/com.mongodb-mongodb-mcp.json",
+      "guideUrl": "guides/com.mongodb-mongodb-mcp.md"
+    },
+    {
+      "id": "co.elastic/elasticsearch-mcp",
+      "name": "Elasticsearch",
+      "shortDescription": "Query and analyze Elasticsearch indices with natural language through Elastic's official MCP server.",
+      "iconUrl": "icons/elastic.svg",
+      "tier": "builder",
+      "categories": [
+        "search",
+        "database",
+        "developer",
+        "data"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 58,
+      "installRate": 0.11,
+      "entryUrl": "entries/co.elastic-elasticsearch-mcp.json",
+      "guideUrl": "guides/co.elastic-elasticsearch-mcp.md"
+    },
+    {
+      "id": "com.hashicorp/terraform-mcp",
+      "name": "Terraform",
+      "shortDescription": "Browse the Terraform Registry, manage HCP Terraform workspaces, and explore providers and modules.",
+      "iconUrl": "icons/terraform.svg",
+      "tier": "builder",
+      "categories": [
+        "infrastructure",
+        "devops",
+        "developer"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 59,
+      "installRate": 0.09,
+      "entryUrl": "entries/com.hashicorp-terraform-mcp.json",
+      "guideUrl": "guides/com.hashicorp-terraform-mcp.md"
+    },
+    {
+      "id": "tech.neon/neon-mcp",
+      "name": "Neon",
+      "shortDescription": "Manage serverless Postgres projects, branches, and queries on Neon — official hosted MCP with OAuth.",
+      "iconUrl": "icons/neon.svg",
+      "tier": "builder",
+      "categories": [
+        "database",
+        "developer",
+        "infrastructure"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 60,
+      "installRate": 0.1,
+      "entryUrl": "entries/tech.neon-neon-mcp.json",
+      "guideUrl": "guides/tech.neon-neon-mcp.md"
+    },
+    {
+      "id": "co.huggingface/huggingface-mcp",
+      "name": "Hugging Face",
+      "shortDescription": "Search models, datasets, Spaces, and papers on the Hugging Face Hub, and run community tools via Gradio Spaces.",
+      "iconUrl": "icons/huggingface.svg",
+      "tier": "builder",
+      "categories": [
+        "ml",
+        "developer",
+        "research"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 61,
+      "installRate": 0.18,
+      "entryUrl": "entries/co.huggingface-huggingface-mcp.json",
+      "guideUrl": "guides/co.huggingface-huggingface-mcp.md"
+    },
+    {
+      "id": "io.snyk/snyk-mcp",
+      "name": "Snyk",
+      "shortDescription": "Scan for vulnerabilities in open-source dependencies, code, IaC, and container images via the Snyk CLI's built-in MCP server.",
+      "iconUrl": "icons/snyk.svg",
+      "tier": "builder",
+      "categories": [
+        "security",
+        "developer"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 62,
+      "installRate": 0.14,
+      "entryUrl": "entries/io.snyk-snyk-mcp.json",
+      "guideUrl": "guides/io.snyk-snyk-mcp.md"
+    },
+    {
+      "id": "com.pagerduty/pagerduty-mcp",
+      "name": "PagerDuty",
+      "shortDescription": "Manage incidents, services, schedules, on-calls, and escalation policies in PagerDuty directly from your assistant.",
+      "iconUrl": "icons/pagerduty.svg",
+      "tier": "builder",
+      "categories": [
+        "incidents",
+        "ops"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 63,
+      "installRate": 0.1,
+      "entryUrl": "entries/com.pagerduty-pagerduty-mcp.json",
+      "guideUrl": "guides/com.pagerduty-pagerduty-mcp.md"
+    },
+    {
+      "id": "com.postman/postman-mcp",
+      "name": "Postman",
+      "shortDescription": "Connect AI agents to your Postman workspaces, collections, environments, and API specs for testing and automation.",
+      "iconUrl": "icons/postman.svg",
+      "tier": "builder",
+      "categories": [
+        "api-testing",
+        "developer"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 64,
+      "installRate": 0.12,
+      "entryUrl": "entries/com.postman-postman-mcp.json",
+      "guideUrl": "guides/com.postman-postman-mcp.md"
+    },
+    {
+      "id": "com.stackoverflow/stackoverflow-mcp",
+      "name": "Stack Overflow",
+      "shortDescription": "Search Stack Overflow's trusted technical questions and answers with OAuth — no API key setup required.",
+      "iconUrl": "icons/stackoverflow.svg",
+      "tier": "builder",
+      "categories": [
+        "knowledge",
+        "developer",
+        "research"
+      ],
+      "maintainerType": "official",
+      "verifiedByWayland": "2026-05-27",
+      "popularityRank": 65,
+      "installRate": 0.16,
+      "entryUrl": "entries/com.stackoverflow-stackoverflow-mcp.json",
+      "guideUrl": "guides/com.stackoverflow-stackoverflow-mcp.md"
     }
   ]
 }

@@ -40,11 +40,18 @@ export function ServerRow({
 }: Props) {
   const { t } = useTranslation();
   const needsReauth = oauthStatus?.needsLogin === true;
+  // `stopped` is a catch-all in deriveStatus: it covers BOTH user-disabled
+  // (toggle off) and enabled-but-not-yet-connected. Split the label so the
+  // pill doesn't say "Disabled" while the user is staring at the toggle they
+  // just flipped on.
+  const stoppedLabel = server.enabled
+    ? t('mcpLibrary.installed.statusIdle', 'Idle')
+    : t('mcpLibrary.installed.statusStopped', 'Disabled');
   const statusLabel = {
     running: t('mcpLibrary.installed.statusRunning', 'Running'),
     warn: t('mcpLibrary.installed.statusWarn', 'Needs re-authorization'),
     error: t('mcpLibrary.installed.statusError', 'Error'),
-    stopped: t('mcpLibrary.installed.statusStopped', 'Disabled'),
+    stopped: stoppedLabel,
   }[server.status];
   const toggleLabel = t('mcpLibrary.installed.actionToggle', 'Enable / disable');
   return (
