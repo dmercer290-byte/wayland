@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ConfigStorage } from '@/common/config/storage';
 import type { IMcpServer } from '@/common/config/storage';
 import { ipcBridge } from '@/common';
+import { migrateExistingServers } from './migrateExistingServers';
 
 /**
  * MCP server state management hook.
@@ -19,7 +20,19 @@ export const useMcpServers = () => {
     void ConfigStorage.get('mcp.config')
       .then((data) => {
         if (data) {
-          setMcpServers(data);
+          // One-time, idempotent migration: tag any server without an explicit
+          // `source` as `source: 'custom'` so the new MCP Library Installed
+          // page groups pre-library installs under "Custom". Persist only when
+          // the migration actually changed something, so subsequent launches
+          // are a no-op write.
+          const migrated = migrateExistingServers(data);
+          const changed = migrated.some((server, idx) => server !== data[idx]);
+          if (changed) {
+            void ConfigStorage.set('mcp.config', migrated).catch((error) => {
+              console.error('[useMcpServers] Failed to persist source migration:', error);
+            });
+          }
+          setMcpServers(migrated);
         }
       })
       .catch((error) => {

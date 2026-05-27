@@ -700,6 +700,13 @@ export type IMcpServerTransport =
   | IMcpServerTransportHTTP
   | IMcpServerTransportStreamableHTTP;
 
+/**
+ * MCP server provenance. Used by the MCP Library UI to group servers into
+ * "From Library" (installed via the in-app catalog) vs "Custom" (added by
+ * the user before the library existed, or via the Add Custom flow).
+ */
+export type McpServerSource = 'library' | 'custom';
+
 export interface IMcpServer {
   id: string;
   name: string;
@@ -714,6 +721,10 @@ export interface IMcpServer {
   originalJson: string; // 存储原始JSON配置，用于编辑时的准确显示
   /** Built-in MCP server managed by Wayland (hide edit/delete in UI) */
   builtin?: boolean;
+  /** Provenance — 'library' for catalog installs, 'custom' for hand-added servers. */
+  source?: McpServerSource;
+  /** Catalog entry id if this server was installed from the MCP Library. */
+  libraryEntryId?: string;
 }
 
 /** Stable ID for the built-in image generation MCP server */
