@@ -20,7 +20,6 @@ const DisplaySettings = React.lazy(() => import('@renderer/pages/settings/Displa
 const EditorSettings = React.lazy(() => import('@renderer/pages/settings/EditorSettings'));
 const GeneralSettings = React.lazy(() => import('@renderer/pages/settings/GeneralSettings'));
 const ImageGenSettings = React.lazy(() => import('@renderer/pages/settings/ImageGenSettings'));
-const McpSettings = React.lazy(() => import('@renderer/pages/settings/McpSettings'));
 const McpLibraryBrowsePage = React.lazy(() =>
   import('@renderer/pages/settings/McpLibrary').then((m) => ({ default: m.BrowsePage }))
 );
@@ -107,7 +106,13 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
             <Route path='/settings/webui' element={withRouteFallback(WebuiSettings)} />
             <Route path='/settings/channels' element={withRouteFallback(ChannelsIndex)} />
             <Route path='/settings/channels/:id' element={withRouteFallback(ChannelDetailPage)} />
-            <Route path='/settings/mcp' element={withRouteFallback(McpSettings)} />
+            {/* Legacy `/settings/mcp` route — the old McpSettings page was
+              removed in P8; redirect to the new MCP Library Installed view so
+              bookmarks still land somewhere useful. */}
+            <Route
+              path='/settings/mcp'
+              element={<Navigate to='/settings/mcp-library/installed' replace />}
+            />
             {/* MCP Library — new catalog-driven Browse / Installed / Detail surface. */}
             <Route
               path='/settings/mcp-library'

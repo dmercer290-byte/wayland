@@ -35,17 +35,11 @@ import { useTranslation } from 'react-i18next';
 import useConfigModelListWithImage from '@/renderer/hooks/agent/useConfigModelListWithImage';
 import WaylandScrollArea from '@/renderer/components/base/WaylandScrollArea';
 import WaylandSelect from '@/renderer/components/base/WaylandSelect';
-import AddMcpServerModal from '@/renderer/pages/settings/components/AddMcpServerModal';
 import McpAgentStatusDisplay from '@/renderer/pages/settings/ToolsSettings/McpAgentStatusDisplay';
-import McpServerItem from '@/renderer/pages/settings/ToolsSettings/McpServerItem';
 import {
   useMcpServers,
   useMcpAgentStatus,
   useMcpOperations,
-  useMcpConnection,
-  useMcpModal,
-  useMcpServerCRUD,
-  useMcpOAuth,
 } from '@/renderer/hooks/mcp';
 import classNames from 'classnames';
 import { useNavigate } from 'react-router-dom';
@@ -590,298 +584,44 @@ export const SpeechToTextSettingsSection: React.FC<{
   );
 };
 
-const ModalMcpManagementSection: React.FC<{
-  message: MessageInstance;
-  mcpServers: IMcpServer[];
-  extensionMcpServers: IMcpServer[];
-  saveMcpServers: (serversOrUpdater: IMcpServer[] | ((prev: IMcpServer[]) => IMcpServer[])) => Promise<void>;
-  isPageMode?: boolean;
-}> = ({ message, mcpServers, extensionMcpServers, saveMcpServers, isPageMode }) => {
+/**
+ * MCP management in the legacy settings modal is now just a pointer at the
+ * new full-page MCP Library. The old inline CRUD (browse / add / edit /
+ * delete server rows) was removed in P8 in favor of `/settings/mcp-library`.
+ * We keep a small CTA here so users opening Tools -> MCP from the modal land
+ * somewhere useful.
+ */
+const ModalMcpLibraryLinkSection: React.FC = () => {
   const { t } = useTranslation();
-  const { agentInstallStatus, setAgentInstallStatus, isServerLoading, checkSingleServerInstallStatus } =
-    useMcpAgentStatus();
-  const { syncMcpToAgents, removeMcpFromAgents } = useMcpOperations(mcpServers, message);
-  const { oauthStatus, loggingIn, checkOAuthStatus, login } = useMcpOAuth();
-  const visibleMcpServers = useMemo(
-    () => mcpServers.filter((server) => !isBuiltinImageGenServer(server)),
-    [mcpServers]
-  );
-
-  const handleAuthRequired = useCallback(
-    (server: IMcpServer) => {
-      void checkOAuthStatus(server);
-    },
-    [checkOAuthStatus]
-  );
-
-  const { testingServers, handleTestMcpConnection } = useMcpConnection(
-    mcpServers,
-    saveMcpServers,
-    message,
-    handleAuthRequired
-  );
-  const {
-    showMcpModal,
-    editingMcpServer,
-    deleteConfirmVisible,
-    serverToDelete,
-    mcpCollapseKey,
-    showAddMcpModal,
-    showEditMcpModal,
-    hideMcpModal,
-    showDeleteConfirm,
-    hideDeleteConfirm,
-    toggleServerCollapse,
-  } = useMcpModal();
-  const {
-    handleAddMcpServer,
-    handleBatchImportMcpServers,
-    handleEditMcpServer,
-    handleDeleteMcpServer,
-    handleToggleMcpServer,
-  } = useMcpServerCRUD(
-    mcpServers,
-    saveMcpServers,
-    syncMcpToAgents,
-    removeMcpFromAgents,
-    checkSingleServerInstallStatus,
-    setAgentInstallStatus
-  );
-
-  const handleOAuthLogin = useCallback(
-    async (server: IMcpServer) => {
-      const result = await login(server);
-
-      if (result.success) {
-        message.success(`${server.name}: ${t('settings.mcpOAuthLoginSuccess') || 'Login successful'}`);
-        void handleTestMcpConnection(server);
-      } else {
-        message.error(`${server.name}: ${result.error || t('settings.mcpOAuthLoginFailed') || 'Login failed'}`);
+  const navigate = useNavigate();
+  const handleOpenLibrary = useCallback(() => {
+    try {
+      navigate('/settings/mcp-library/installed');
+    } catch {
+      if (typeof window !== 'undefined') {
+        window.location.hash = '#/settings/mcp-library/installed';
       }
-    },
-    [login, message, t, handleTestMcpConnection]
-  );
-
-  const wrappedHandleAddMcpServer = useCallback(
-    async (serverData: Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'>) => {
-      const addedServer = await handleAddMcpServer(serverData);
-      if (addedServer) {
-        void handleTestMcpConnection(addedServer);
-        if (addedServer.transport.type === 'http' || addedServer.transport.type === 'sse') {
-          void checkOAuthStatus(addedServer);
-        }
-        if (serverData.enabled) {
-          void syncMcpToAgents(addedServer, true);
-        }
-      }
-    },
-    [handleAddMcpServer, handleTestMcpConnection, checkOAuthStatus, syncMcpToAgents]
-  );
-
-  const wrappedHandleEditMcpServer = useCallback(
-    async (serverToEdit: IMcpServer | undefined, serverData: Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'>) => {
-      const updatedServer = await handleEditMcpServer(serverToEdit, serverData);
-      if (updatedServer) {
-        void handleTestMcpConnection(updatedServer);
-        if (updatedServer.transport.type === 'http' || updatedServer.transport.type === 'sse') {
-          void checkOAuthStatus(updatedServer);
-        }
-        if (serverData.enabled) {
-          void syncMcpToAgents(updatedServer, true);
-        }
-      }
-    },
-    [handleEditMcpServer, handleTestMcpConnection, checkOAuthStatus, syncMcpToAgents]
-  );
-
-  const wrappedHandleBatchImportMcpServers = useCallback(
-    async (serversData: Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'>[]) => {
-      const addedServers = await handleBatchImportMcpServers(serversData);
-      if (addedServers && addedServers.length > 0) {
-        addedServers.forEach((server) => {
-          void handleTestMcpConnection(server);
-          if (server.transport.type === 'http' || server.transport.type === 'sse') {
-            void checkOAuthStatus(server);
-          }
-          if (server.enabled) {
-            void syncMcpToAgents(server, true);
-          }
-        });
-      }
-    },
-    [handleBatchImportMcpServers, handleTestMcpConnection, checkOAuthStatus, syncMcpToAgents]
-  );
-
-  const [detectedAgents, setDetectedAgents] = useState<Array<{ backend: string; name: string }>>([]);
-  const [importMode, setImportMode] = useState<'json' | 'oneclick'>('json');
-
-  useEffect(() => {
-    const loadAgents = async () => {
-      try {
-        const response = await acpConversation.getAvailableAgents.invoke();
-        if (response.success && response.data) {
-          setDetectedAgents(
-            response.data.map((agent) => ({
-              backend: agent.backend,
-              name: agent.name,
-            }))
-          );
-        }
-      } catch (error) {
-        console.error('Failed to load agents:', error);
-      }
-    };
-    void loadAgents();
-  }, []);
-
-  useEffect(() => {
-    const httpServers = mcpServers.filter((s) => s.transport.type === 'http' || s.transport.type === 'sse');
-    if (httpServers.length > 0) {
-      httpServers.forEach((server) => {
-        void checkOAuthStatus(server);
-      });
     }
-  }, [mcpServers, checkOAuthStatus]);
-
-  const handleConfirmDelete = useCallback(async () => {
-    if (!serverToDelete) return;
-    hideDeleteConfirm();
-    await handleDeleteMcpServer(serverToDelete);
-  }, [serverToDelete, hideDeleteConfirm, handleDeleteMcpServer]);
-
-  const renderAddButton = () => {
-    if (detectedAgents.length > 0) {
-      return (
-        <Dropdown
-          trigger='click'
-          droplist={
-            <Menu>
-              <Menu.Item
-                key='json'
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setImportMode('json');
-                  showAddMcpModal();
-                }}
-              >
-                {t('settings.mcpImportFromJSON')}
-              </Menu.Item>
-              <Menu.Item
-                key='oneclick'
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setImportMode('oneclick');
-                  showAddMcpModal();
-                }}
-              >
-                {t('settings.mcpOneKeyImport')}
-              </Menu.Item>
-            </Menu>
-          }
-        >
-          <Button type='outline' icon={<Plus size={'16'} />} shape='round' onClick={(e) => e.stopPropagation()}>
-            {t('settings.mcpAddServer')} <ChevronDown size={12} />
-          </Button>
-        </Dropdown>
-      );
-    }
-
-    return (
-      <Button
-        type='outline'
-        icon={<Plus size={'16'} />}
-        shape='round'
-        onClick={() => {
-          setImportMode('json');
-          showAddMcpModal();
-        }}
-      >
-        {t('settings.mcpAddServer')}
-      </Button>
-    );
-  };
+  }, [navigate]);
 
   return (
-    <div className='flex flex-col gap-16px min-h-0'>
-      <div className='flex gap-8px items-center justify-between'>
-        <div className='text-14px text-t-primary'>{t('settings.mcpSettings')}</div>
-        <div>{renderAddButton()}</div>
+    <div className='flex flex-col gap-12px min-h-0'>
+      <div className='flex items-center justify-between gap-12px'>
+        <div className='flex flex-col gap-4px'>
+          <span className='text-14px text-t-primary'>
+            {t('settings.mcpSettings', { defaultValue: 'MCP Servers' })}
+          </span>
+          <span className='text-13px text-t-secondary'>
+            {t(
+              'settings.mcpModalDeprecatedBody',
+              'Browse, install, and manage MCP servers in the new MCP Library.'
+            )}
+          </span>
+        </div>
+        <Button type='outline' shape='round' onClick={handleOpenLibrary}>
+          {t('settings.mcpModalOpenLibraryCTA', 'Open MCP Library')}
+        </Button>
       </div>
-
-      <div className='flex-1 min-h-0'>
-        {visibleMcpServers.length === 0 && extensionMcpServers.length === 0 ? (
-          <div className='py-24px text-center text-t-secondary text-14px border border-dashed border-border-2 rd-12px'>
-            {t('settings.mcpNoServersFound')}
-          </div>
-        ) : (
-          <WaylandScrollArea
-            className={classNames('max-h-360px', isPageMode && 'max-h-none')}
-            disableOverflow={isPageMode}
-          >
-            <div className='space-y-12px'>
-              {visibleMcpServers.map((server) => (
-                <McpServerItem
-                  key={server.id}
-                  server={server}
-                  isCollapsed={mcpCollapseKey[server.id] || false}
-                  agentInstallStatus={agentInstallStatus}
-                  isServerLoading={isServerLoading}
-                  isTestingConnection={testingServers[server.id] || false}
-                  oauthStatus={oauthStatus[server.id]}
-                  isLoggingIn={loggingIn[server.id]}
-                  onToggleCollapse={() => toggleServerCollapse(server.id)}
-                  onTestConnection={handleTestMcpConnection}
-                  onEditServer={showEditMcpModal}
-                  onDeleteServer={showDeleteConfirm}
-                  onToggleServer={handleToggleMcpServer}
-                  onOAuthLogin={handleOAuthLogin}
-                />
-              ))}
-              {extensionMcpServers.map((server) => (
-                <McpServerItem
-                  key={server.id}
-                  server={server}
-                  isCollapsed={mcpCollapseKey[server.id] || false}
-                  agentInstallStatus={agentInstallStatus}
-                  isServerLoading={isServerLoading}
-                  isTestingConnection={false}
-                  onToggleCollapse={() => toggleServerCollapse(server.id)}
-                  onTestConnection={handleTestMcpConnection}
-                  onEditServer={() => {}}
-                  onDeleteServer={() => {}}
-                  onToggleServer={() => Promise.resolve()}
-                  isReadOnly
-                />
-              ))}
-            </div>
-          </WaylandScrollArea>
-        )}
-      </div>
-
-      <AddMcpServerModal
-        visible={showMcpModal}
-        server={editingMcpServer}
-        onCancel={hideMcpModal}
-        onSubmit={
-          editingMcpServer
-            ? (serverData) => wrappedHandleEditMcpServer(editingMcpServer, serverData)
-            : wrappedHandleAddMcpServer
-        }
-        onBatchImport={wrappedHandleBatchImportMcpServers}
-        importMode={importMode}
-      />
-
-      <Modal
-        title={t('settings.mcpDeleteServer')}
-        visible={deleteConfirmVisible}
-        onCancel={hideDeleteConfirm}
-        onOk={handleConfirmDelete}
-        okButtonProps={{ status: 'danger' }}
-        okText={t('common.confirm')}
-        cancelText={t('common.cancel')}
-      >
-        <p>{t('settings.mcpDeleteConfirm')}</p>
-      </Modal>
     </div>
   );
 };
@@ -895,7 +635,7 @@ const ToolsModalContent: React.FC = () => {
   const [speechToTextConfig, setSpeechToTextConfig] = useState<SpeechToTextConfig>(DEFAULT_SPEECH_TO_TEXT_CONFIG);
   const [isUpdatingImageGeneration, setIsUpdatingImageGeneration] = useState(false);
   const { modelListWithImage: data } = useConfigModelListWithImage();
-  const { mcpServers, extensionMcpServers, saveMcpServers } = useMcpServers();
+  const { mcpServers, saveMcpServers } = useMcpServers();
   const { agentInstallStatus, setAgentInstallStatus, isServerLoading, checkSingleServerInstallStatus } =
     useMcpAgentStatus();
   const { syncMcpToAgents, removeMcpFromAgents } = useMcpOperations(mcpServers, mcpMessage);
@@ -1129,13 +869,7 @@ const ToolsModalContent: React.FC = () => {
                 className={classNames('h-full', isPageMode && 'overflow-visible')}
                 disableOverflow={isPageMode}
               >
-                <ModalMcpManagementSection
-                  message={mcpMessage}
-                  mcpServers={mcpServers}
-                  extensionMcpServers={extensionMcpServers}
-                  saveMcpServers={saveMcpServers}
-                  isPageMode={isPageMode}
-                />
+                <ModalMcpLibraryLinkSection />
               </WaylandScrollArea>
             </div>
           </div>
