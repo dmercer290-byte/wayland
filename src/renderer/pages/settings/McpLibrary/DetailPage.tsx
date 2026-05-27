@@ -1,55 +1,185 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { Message } from '@arco-design/web-react';
 import { Check, ExternalLink } from 'lucide-react';
+import {
+  useMcpServers,
+  useMcpAgentStatus,
+  useMcpOperations,
+  useMcpOAuth,
+  useMcpServerCRUD,
+} from '@renderer/hooks/mcp';
+import type { IMcpServer, IMcpServerTransport } from '@/common/config/storage';
 import { useMcpLibrary } from './hooks/useMcpLibrary';
-import { useMcpServers } from '@renderer/hooks/mcp/useMcpServers';
 import { SetupGuide } from './components/SetupGuide';
 import { TierBadge } from './components/TierBadge';
 import { MaintainerBadge } from './components/MaintainerBadge';
+import type { CatalogEntry } from './types';
 
 type Tab = 'overview' | 'setup-guide' | 'tools' | 'permissions' | 'changelog';
 
-// Plan-shaped server record. The fields source/libraryEntryId are formally
-// added in P8 — for P7 we read them through an `any` cast.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LibraryServer = any;
+// Allow only http(s) absolute URLs or relative catalog asset paths to flow into
+// <a href> / <img src>. A future catalog entry with a `javascript:` or `data:`
+// URL would otherwise execute in the renderer.
+function safeUrl(u: string | undefined): string | undefined {
+  if (!u) return undefined;
+  if (/^https?:\/\//i.test(u)) return u;
+  if (u.startsWith('icons/')) return u;
+  return undefined;
+}
+
+// Catalog uses hyphenated transport types ('streamable-http'); storage uses
+// underscored ('streamable_http'). Normalize between them to avoid invalid
+// transport.type values reaching the connection layer.
+function normalizeRemoteType(t: string): 'sse' | 'http' | 'streamable_http' {
+  if (t === 'streamable-http' || t === 'streamable_http') return 'streamable_http';
+  if (t === 'sse') return 'sse';
+  return 'http';
+}
+
+function entryToServerData(
+  entry: CatalogEntry,
+  envValues: Record<string, string>,
+): Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'> {
+  const pkg = entry.packages.length > 0 ? entry.packages[0] : undefined;
+  const remote = entry.remotes && entry.remotes.length > 0 ? entry.remotes[0] : undefined;
+
+  if (!pkg && !remote) {
+    throw new Error(`Catalog entry ${entry.name} has no installable target.`);
+  }
+
+  // Prefer remote (hosted MCP) if both are present — no local spawn required.
+  const transport: IMcpServerTransport = remote
+    ? {
+        type: normalizeRemoteType(remote.type),
+        url: remote.url,
+        ...(remote.headers && remote.headers.length > 0
+          ? { headers: Object.fromEntries(remote.headers.map((h) => [h.name, h.value])) }
+          : {}),
+      }
+    : {
+        type: 'stdio',
+        command: pkg!.runtimeHint,
+        args: pkg!.identifier ? [pkg!.identifier] : [],
+        env: envValues,
+      };
+
+  return {
+    name: entry.name,
+    description: entry.description,
+    enabled: false,
+    transport,
+    originalJson: JSON.stringify({ source: 'library', entry: entry.name }),
+    source: 'library',
+    libraryEntryId: entry.name,
+  };
+}
 
 export function DetailPage() {
+  const { t } = useTranslation();
   const { entryId } = useParams<{ entryId: string }>();
   const id = decodeURIComponent(entryId ?? '');
   const navigate = useNavigate();
   const library = useMcpLibrary();
-  const { mcpServers } = useMcpServers();
+
+  const [message, contextHolder] = Message.useMessage();
+  const { mcpServers, saveMcpServers } = useMcpServers();
+  const { setAgentInstallStatus, checkSingleServerInstallStatus } = useMcpAgentStatus();
+  const { syncMcpToAgents, removeMcpFromAgents } = useMcpOperations(mcpServers, message);
+  const { login, loggingIn } = useMcpOAuth();
+  const crud = useMcpServerCRUD(
+    mcpServers,
+    saveMcpServers,
+    syncMcpToAgents,
+    removeMcpFromAgents,
+    checkSingleServerInstallStatus,
+    setAgentInstallStatus,
+  );
 
   const entry = useMemo(() => library.getEntry(id), [library, id]);
   const guide = useMemo(
     () => (entry?.['x-wayland'].setupGuide ? library.getGuide(id) : null),
     [library, id, entry],
   );
-  const installed = mcpServers.some((s: LibraryServer) => s.libraryEntryId === id);
+  const installed = mcpServers.some((s) => s.libraryEntryId === id);
+  const installedServer = useMemo(
+    () => mcpServers.find((s) => s.libraryEntryId === id),
+    [mcpServers, id],
+  );
 
   const [tab, setTab] = useState<Tab>('setup-guide');
   const [env, setEnv] = useState<Record<string, string>>({});
+  const [installing, setInstalling] = useState(false);
 
   if (!entry) return <div className="mcp-detail-page">Unknown entry: {id}</div>;
 
   const w = entry['x-wayland'];
 
-  // P8 wires real install/oauth/etc. through the existing useMcpServerCRUD +
-  // useMcpOAuth hooks (which both require parameters that P7 doesn't have
-  // wired up yet). For now we accept the callbacks but no-op them — the
-  // SetupGuide still mutates the local env state, which is the visible UI.
-  const install = () => {
-    // P8: addServer({ id: entry.name, command: pkg.runtimeHint, args: [pkg.identifier],
-    //   env, source: 'library', libraryEntryId: entry.name } as any);
+  const install = async (): Promise<IMcpServer | null> => {
+    setInstalling(true);
+    try {
+      const serverData = entryToServerData(entry, env);
+      const newServer = await crud.handleAddMcpServer(serverData);
+      if (!newServer) {
+        message.error(
+          t('mcpLibrary.install.errorFailed', 'Install failed: {{error}}', {
+            error: 'unknown',
+          }),
+        );
+        return null;
+      }
+      message.success(
+        t('mcpLibrary.install.successAdded', '{{name}} added to library.', {
+          name: entry.title,
+        }),
+      );
+      return newServer;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      message.error(
+        t('mcpLibrary.install.errorFailed', 'Install failed: {{error}}', { error: msg }),
+      );
+      return null;
+    } finally {
+      setInstalling(false);
+    }
   };
 
-  const onPrimary = (_action: string) => {
-    // P8: delegate to useMcpOAuth.login(server) when action === 'oauth-flow'.
+  const onPrimary = async (action: string) => {
+    // Install first (or reuse the existing server if already installed), then
+    // trigger OAuth for entries whose setup guide emits an 'oauth-flow' action.
+    if (action !== 'oauth-flow') return;
+
+    let server: IMcpServer | null = installedServer ?? null;
+    if (!server) {
+      server = await install();
+      if (!server) return;
+    }
+
+    const result = await login(server);
+    if (!result.success) {
+      message.error(
+        t('mcpLibrary.install.oauthFailed', 'Authorization failed: {{error}}', {
+          error: result.error ?? 'unknown',
+        }),
+      );
+      return;
+    }
+    message.success(t('mcpLibrary.install.oauthSuccess', 'Authorized.'));
   };
+
+  const installLabel = installed
+    ? t('mcpLibrary.install.installed', 'Installed')
+    : installing
+      ? t('mcpLibrary.install.installing', 'Installing…')
+      : t('mcpLibrary.install.button', 'Install');
+
+  const oauthInFlight = installedServer ? !!loggingIn[installedServer.id] : false;
 
   return (
     <div className="mcp-detail-page">
+      {contextHolder}
       <button
         className="mcp-back"
         onClick={() => navigate('/settings/mcp-library/browse')}
@@ -58,7 +188,9 @@ export function DetailPage() {
       </button>
 
       <header className="mcp-detail-head">
-        <img className="mcp-detail-logo" src={w.iconUrl} alt="" />
+        {safeUrl(w.iconUrl) && (
+          <img className="mcp-detail-logo" src={safeUrl(w.iconUrl)} alt="" />
+        )}
         <div>
           <h1>{entry.title}</h1>
           {w.verifiedAt && (
@@ -67,9 +199,13 @@ export function DetailPage() {
             </span>
           )}
           <div className="mcp-detail-pub">
-            <a href={entry.websiteUrl} target="_blank" rel="noreferrer">
-              {entry.name}
-            </a>{' '}
+            {safeUrl(entry.websiteUrl) ? (
+              <a href={safeUrl(entry.websiteUrl)} target="_blank" rel="noreferrer">
+                {entry.name}
+              </a>
+            ) : (
+              <span>{entry.name}</span>
+            )}{' '}
             · v{entry.version} · {w.license ?? '—'}
           </div>
           <p className="mcp-detail-tagline">{entry.description}</p>
@@ -77,15 +213,15 @@ export function DetailPage() {
         <div className="mcp-detail-actions">
           <button
             className="mcp-btn-primary"
-            onClick={install}
-            disabled={installed}
+            onClick={() => void install()}
+            disabled={installed || installing || oauthInFlight}
           >
-            {installed ? 'Installed' : 'Install'}
+            {installLabel}
           </button>
-          {entry.websiteUrl && (
+          {safeUrl(entry.websiteUrl) && (
             <a
               className="mcp-btn"
-              href={entry.websiteUrl}
+              href={safeUrl(entry.websiteUrl)}
               target="_blank"
               rel="noreferrer"
             >
@@ -97,13 +233,13 @@ export function DetailPage() {
 
       <div className="mcp-tabs">
         {(['overview', 'setup-guide', 'tools', 'permissions', 'changelog'] as Tab[]).map(
-          (t) => (
+          (tabKey) => (
             <button
-              key={t}
-              className={`mcp-tab ${tab === t ? 'is-active' : ''}`}
-              onClick={() => setTab(t)}
+              key={tabKey}
+              className={`mcp-tab ${tab === tabKey ? 'is-active' : ''}`}
+              onClick={() => setTab(tabKey)}
             >
-              {t.replace('-', ' ').replace(/^./, (c) => c.toUpperCase())}
+              {tabKey.replace('-', ' ').replace(/^./, (c) => c.toUpperCase())}
             </button>
           ),
         )}
@@ -117,7 +253,7 @@ export function DetailPage() {
             onEnvChange={(name, value) =>
               setEnv((prev) => ({ ...prev, [name]: value }))
             }
-            onPrimary={onPrimary}
+            onPrimary={(action) => void onPrimary(action)}
           />
         )}
         {tab === 'tools' && (

@@ -807,3 +807,70 @@
   color: var(--mcp-badge-official);
   border-color: rgba(251, 191, 36, 0.25);
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+ * W1-D gap-close additions
+ * Ported from design-mockups/installed-servers.html + library-detail.html
+ * for class names the React tree actually uses but the CSS didn't yet style.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/* 4-state status border on .mcp-server-row.
+ * Mockup: installed-servers.html lines 192-195 (.server.{state}).
+ * Brand discipline: 'stopped' gets NO chromatic accent
+ * (per feedback-brand-palette-discipline memory + RECON.md §5). */
+.mcp-installed-page .mcp-server-row.mcp-server-running {
+  border-left: 2px solid rgba(74, 222, 128, 0.55);
+}
+.mcp-installed-page .mcp-server-row.mcp-server-warn {
+  border-left: 2px solid var(--mcp-brand);
+}
+.mcp-installed-page .mcp-server-row.mcp-server-error {
+  border-left: 2px solid rgba(248, 113, 113, 0.7);
+}
+.mcp-installed-page .mcp-server-row.mcp-server-stopped {
+  /* no accent — neutral state */
+}
+
+/* Status pill dot — paints the inline .mcp-dot inside .mcp-status-pill.
+ * Mockup: installed-servers.html lines 256-263 (.status-pill .dot variants).
+ * Running pill gets the green glow per RECON.md §8 acceptance gate. */
+.mcp-installed-page .mcp-status-pill .mcp-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+.mcp-installed-page .mcp-status-pill.mcp-status-running .mcp-dot {
+  background: var(--mcp-tier-core);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+.mcp-installed-page .mcp-status-pill.mcp-status-warn .mcp-dot {
+  background: var(--mcp-brand);
+}
+.mcp-installed-page .mcp-status-pill.mcp-status-error .mcp-dot {
+  background: #f87171;
+}
+.mcp-installed-page .mcp-status-pill.mcp-status-stopped .mcp-dot {
+  background: var(--mcp-text-muted);
+}
+
+/* Server status cell — wrapper around the pill in ServerRow grid column. */
+.mcp-installed-page .mcp-server-status {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Setup step body — inert flex/text container for the step content next to
+ * the absolutely-positioned .mcp-step-num.
+ * Mockup uses absolute step-num + sibling text nodes; React wraps content
+ * in a <div className="mcp-step-body">. Style as a transparent layout box. */
+.mcp-detail-page .mcp-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Detail tab content wrapper — minimal layout box around the active tab. */
+.mcp-detail-page .mcp-detail-body {
+  margin-top: 4px;
+}

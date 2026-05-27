@@ -28,6 +28,7 @@ import teams from './teams.json';
 import skills from './skills.json';
 import workflow from './workflow.json';
 import memory from './memory.json';
+import mcpLibrary from './mcpLibrary.json';
 
 export default {
   common,
@@ -55,4 +56,5 @@ export default {
   skills,
   workflow,
   memory,
+  mcpLibrary,
 };

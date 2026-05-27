@@ -1,0 +1,43 @@
+{
+  "install": {
+    "button": "설치",
+    "installed": "설치됨",
+    "installing": "설치 중…",
+    "signIn": "{{vendor}}(으)로 로그인",
+    "errorNoTarget": "이 항목에는 설치 가능한 대상이 없습니다.",
+    "errorFailed": "설치 실패: {{error}}",
+    "successAdded": "{{name}}이(가) 라이브러리에 추가되었습니다.",
+    "oauthRequired": "도구를 활성화하려면 이 서버를 승인하세요.",
+    "oauthSuccess": "승인되었습니다.",
+    "oauthFailed": "승인 실패: {{error}}"
+  },
+  "installed": {
+    "title": "MCP 라이브러리 — 설치됨",
+    "addCustom": "+ 사용자 지정 MCP 추가",
+    "browseLibrary": "+ 라이브러리 둘러보기",
+    "customEmpty": "사용자 지정 MCP가 없습니다.",
+    "customNoDetail": "사용자 지정 서버에는 아직 상세 페이지가 없습니다.",
+    "empty": "아직 설치된 MCP가 없습니다. 라이브러리를 둘러보고 추가하세요.",
+    "fromLibrary": "라이브러리에서",
+    "custom": "사용자 지정",
+    "actionToggle": "활성화 / 비활성화",
+    "actionReauth": "재인증",
+    "actionSettings": "설정",
+    "actionLogs": "로그 보기",
+    "actionRemove": "제거",
+    "removeConfirm": "라이브러리에서 {{name}}을(를) 제거할까요? 모든 CLI 에이전트에서도 제거됩니다.",
+    "statusRunning": "실행 중",
+    "statusWarn": "재인증 필요",
+    "statusError": "오류",
+    "statusStopped": "비활성화됨",
+    "statusToolCount": "{{count}}개의 도구 사용 가능",
+    "statusToolCountLabel": "개 도구 사용 가능",
+    "statusReauthCount": "{{count}}개 재인증 필요",
+    "statusReauthCountLabel": "재인증 필요",
+    "statusErrorCount": "{{count}}개의 오류",
+    "statusErrorCountLabel": "오류",
+    "statusRunningCount": "{{count}}개 실행 중",
+    "statusRunningCountLabel": "실행 중",
+    "logsToast": "로그 뷰어가 곧 제공됩니다."
+  }
+}
