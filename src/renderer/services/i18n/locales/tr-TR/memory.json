@@ -5,12 +5,25 @@
   },
   "pitch": {
     "headline": "Sizi takip eden bellek",
-    "lede": "Wayland; üzerinde çalıştığınız, karar verdiğiniz ve yayınladığınız şeyleri hatırlar. Her asistan bağlamı alır -- yeniden açıklamanıza gerek kalmaz.",
+    "lede": "Wayland; üzerinde çalıştığınız, karar verdiğiniz ve yayınladığınız şeyleri hatırlar. Her asistan bağlamı alır -- yeniden açıklamanıza gerek kalmaz. Ferrox Labs tarafından geliştirilen açık kaynaklı bellek motoru IJFW ile çalışır.",
     "bullet1": "Sohbetler, projeler ve CLI'lar arasında kalıcı",
     "bullet2": "Aranabilir, dışa aktarılabilir, size ait",
     "bullet3": "Kurulumdan sonra sıfır ayar",
     "install_cta": "Belleği yükle",
+    "enable_cta": "Belleği etkinleştir",
     "settings_link": "İstemiyor musunuz? Ayarlar'dan devre dışı bırakabilirsiniz"
+  },
+  "setting_up": {
+    "title": "Bellek kuruluyor",
+    "subtitle": "Bu yalnızca bir kez, arka planda gerçekleşir. Çalışmaya devam edebilirsiniz.",
+    "brand_line": "IJFW Memory by Ferrox Labs",
+    "taking_longer": "Kurulum hâlâ sürüyor... yavaş bağlantılarda bir dakika kadar sürebilir.",
+    "help": "Sorun mu var? Ayarlar'dan elle yeniden deneyin."
+  },
+  "brand": {
+    "tagline": "IJFW Memory by Ferrox Labs",
+    "footer": "IJFW (açık kaynak) tarafından sağlanmıştır, Ferrox Labs",
+    "github_link": "github.com/FerroxLabs/ijfw"
   },
   "installing": {
     "title": "Bellek yükleniyor",
@@ -31,7 +44,8 @@
     "title": "Kurulum tamamlanamadı",
     "retry": "Yeniden dene",
     "details_toggle": "Ayrıntıları göster",
-    "details_hide": "Ayrıntıları gizle"
+    "details_hide": "Ayrıntıları gizle",
+    "support_link": "Yardım için github.com/FerroxLabs/ijfw adresini ziyaret edin"
   },
   "error": {
     "spawn_error": "Yükleyici başlatılamadı. npm'in PATH'inizde olduğundan emin olun.",
@@ -64,6 +78,7 @@
   },
   "panel": {
     "header_breadcrumb": "Bellek",
+    "subtitle": "IJFW Memory by Ferrox Labs",
     "button_drop": "Bırak",
     "button_history": "Geçmiş",
     "button_add": "Bellek ekle",
@@ -80,10 +95,12 @@
     "banner": "Bellek şu anda düşük performans modunda -- sohbet çalışmaya devam ediyor ancak zenginleştirme kapalı"
   },
   "settings": {
-    "panel_title": "IJFW Bellek",
+    "panel_title": "IJFW Memory (Ferrox Labs)",
     "skip_label": "IJFW otomatik kurulumu atla",
     "skip_description": "Etkin olduğunda Wayland, IJFW'yi yüklemez veya yükseltmez. Daha sonra Bellek sayfası üzerinden elle yükleyebilirsiniz.",
-    "manual_install_hint": "Elle yüklemek için bir terminalde `npx -y @ijfw/install@latest` komutunu çalıştırın"
+    "manual_install_hint": "Elle yüklemek için bir terminalde `npx -y @ijfw/install@latest` komutunu çalıştırın",
+    "about_title": "IJFW Memory",
+    "about_body": "Ferrox Labs tarafından geliştirilen açık kaynaklı kalıcı bellek motoru."
   },
   "prelude": {
     "installing_notice": "IJFW yükleniyor. Harici CLI'lar (Claude Code, Codex, Gemini CLI) kurulum tamamlandıktan sonra bunu algılayacak.",

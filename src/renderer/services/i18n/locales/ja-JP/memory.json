@@ -5,12 +5,25 @@
   },
   "pitch": {
     "headline": "あなたについてくるメモリ",
-    "lede": "Wayland は、これまで取り組んだこと、決定したこと、リリースしたことを記憶しています。すべてのアシスタントが文脈を共有するため、説明し直す必要はありません。",
+    "lede": "Wayland は、これまで取り組んだこと、決定したこと、リリースしたことを記憶しています。すべてのアシスタントが文脈を共有するため、説明し直す必要はありません。Ferrox Labs によるオープンソースのメモリエンジン IJFW を搭載しています。",
     "bullet1": "チャット、プロジェクト、CLI をまたいで持続します",
     "bullet2": "検索可能、エクスポート可能、あなたのものです",
     "bullet3": "インストール後の設定は不要です",
     "install_cta": "メモリをインストール",
+    "enable_cta": "メモリを有効化",
     "settings_link": "不要な場合は設定から無効化できます"
+  },
+  "setting_up": {
+    "title": "メモリをセットアップ中",
+    "subtitle": "一度だけバックグラウンドで実行されます。作業はそのまま続けられます。",
+    "brand_line": "IJFW Memory by Ferrox Labs",
+    "taking_longer": "セットアップを続行中... 通信環境によっては最大 1 分ほどかかります。",
+    "help": "問題が起きましたか？ 設定画面から手動で再試行できます。"
+  },
+  "brand": {
+    "tagline": "IJFW Memory by Ferrox Labs",
+    "footer": "Powered by IJFW（オープンソース）by Ferrox Labs",
+    "github_link": "github.com/FerroxLabs/ijfw"
   },
   "installing": {
     "title": "メモリをインストール中",
@@ -31,7 +44,8 @@
     "title": "インストールを完了できませんでした",
     "retry": "再試行",
     "details_toggle": "詳細を表示",
-    "details_hide": "詳細を隠す"
+    "details_hide": "詳細を隠す",
+    "support_link": "サポートは github.com/FerroxLabs/ijfw をご覧ください"
   },
   "error": {
     "spawn_error": "インストーラーを起動できませんでした。npm が PATH に含まれているか確認してください。",
@@ -64,6 +78,7 @@
   },
   "panel": {
     "header_breadcrumb": "メモリ",
+    "subtitle": "IJFW Memory by Ferrox Labs",
     "button_drop": "ドロップ",
     "button_history": "履歴",
     "button_add": "メモリを追加",
@@ -80,10 +95,12 @@
     "banner": "メモリは現在縮退モードで動作しています。チャットは引き続き利用できますが、補強機能はオフです"
   },
   "settings": {
-    "panel_title": "IJFW メモリ",
+    "panel_title": "IJFW Memory（Ferrox Labs）",
     "skip_label": "IJFW の自動セットアップをスキップ",
     "skip_description": "有効にすると、Wayland は IJFW をインストールまたはアップグレードしません。後でメモリページから手動でインストールできます。",
-    "manual_install_hint": "手動でインストールするには、ターミナルで `npx -y @ijfw/install@latest` を実行してください"
+    "manual_install_hint": "手動でインストールするには、ターミナルで `npx -y @ijfw/install@latest` を実行してください",
+    "about_title": "IJFW Memory",
+    "about_body": "Ferrox Labs によるオープンソースの永続メモリエンジンです。"
   },
   "prelude": {
     "installing_notice": "IJFW のインストールが進行中です。外部 CLI（Claude Code、Codex、Gemini CLI）はインストール完了後に連携します。",

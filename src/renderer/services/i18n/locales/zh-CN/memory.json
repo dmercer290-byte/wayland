@@ -5,12 +5,25 @@
   },
   "pitch": {
     "headline": "跟着你走的记忆",
-    "lede": "Wayland 记得你做过什么、决定过什么、发布过什么。每个助手都能拿到这些上下文 -- 不用再解释一遍。",
+    "lede": "Wayland 记得你做过什么、决定过什么、发布过什么。每个助手都能拿到这些上下文 -- 不用再解释一遍。由 Ferrox Labs 出品的开源记忆引擎 IJFW 提供支持。",
     "bullet1": "在聊天、项目和命令行之间持续保留",
     "bullet2": "可搜索、可导出，完全属于你",
     "bullet3": "安装后无需任何设置",
     "install_cta": "安装记忆",
+    "enable_cta": "启用记忆",
     "settings_link": "不想要？可以在设置中关闭"
+  },
+  "setting_up": {
+    "title": "正在设置记忆",
+    "subtitle": "只会发生一次，并在后台完成。你可以继续工作。",
+    "brand_line": "IJFW Memory by Ferrox Labs",
+    "taking_longer": "仍在设置中... 网络较慢时最多可能需要一分钟。",
+    "help": "遇到问题？前往设置手动重试。"
+  },
+  "brand": {
+    "tagline": "IJFW Memory by Ferrox Labs",
+    "footer": "由 IJFW（开源）提供支持，出品方：Ferrox Labs",
+    "github_link": "github.com/FerroxLabs/ijfw"
   },
   "installing": {
     "title": "正在安装记忆",
@@ -31,7 +44,8 @@
     "title": "安装未能完成",
     "retry": "重试",
     "details_toggle": "显示详情",
-    "details_hide": "隐藏详情"
+    "details_hide": "隐藏详情",
+    "support_link": "需要帮助？访问 github.com/FerroxLabs/ijfw"
   },
   "error": {
     "spawn_error": "无法启动安装程序。请确认 npm 在你的 PATH 中。",
@@ -64,6 +78,7 @@
   },
   "panel": {
     "header_breadcrumb": "记忆",
+    "subtitle": "IJFW Memory by Ferrox Labs",
     "button_drop": "丢弃",
     "button_history": "历史",
     "button_add": "添加记忆",
@@ -80,10 +95,12 @@
     "banner": "记忆当前处于降级模式 -- 聊天仍可用，但增强功能已关闭"
   },
   "settings": {
-    "panel_title": "IJFW 记忆",
+    "panel_title": "IJFW Memory（Ferrox Labs）",
     "skip_label": "跳过 IJFW 自动设置",
     "skip_description": "启用后，Wayland 将不会安装或升级 IJFW。你之后可以通过记忆页面手动安装。",
-    "manual_install_hint": "手动安装：在终端中运行 `npx -y @ijfw/install@latest`"
+    "manual_install_hint": "手动安装：在终端中运行 `npx -y @ijfw/install@latest`",
+    "about_title": "IJFW Memory",
+    "about_body": "由 Ferrox Labs 出品的开源持久化记忆引擎。"
   },
   "prelude": {
     "installing_notice": "IJFW 正在安装。外部命令行工具（Claude Code、Codex、Gemini CLI）会在安装完成后识别它。",

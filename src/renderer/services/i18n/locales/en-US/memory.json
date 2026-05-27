@@ -5,12 +5,25 @@
   },
   "pitch": {
     "headline": "Memory that follows you",
-    "lede": "Wayland remembers what you've worked on, decided, and shipped. Every assistant gets the context -- no re-explaining.",
+    "lede": "Wayland remembers what you've worked on, decided, and shipped. Every assistant gets the context -- no re-explaining. Powered by IJFW, an open-source memory engine by Ferrox Labs.",
     "bullet1": "Persistent across chats, projects, and CLIs",
     "bullet2": "Searchable, exportable, yours",
     "bullet3": "Zero setup after install",
     "install_cta": "Install Memory",
+    "enable_cta": "Enable Memory",
     "settings_link": "Don't want this? You can disable in Settings"
+  },
+  "setting_up": {
+    "title": "Setting up Memory",
+    "subtitle": "This happens once, in the background. You can keep working.",
+    "brand_line": "IJFW Memory by Ferrox Labs",
+    "taking_longer": "Still setting up... this can take up to a minute on slow connections.",
+    "help": "Trouble? Visit Settings to retry manually."
+  },
+  "brand": {
+    "tagline": "IJFW Memory by Ferrox Labs",
+    "footer": "Powered by IJFW (open source) by Ferrox Labs",
+    "github_link": "github.com/FerroxLabs/ijfw"
   },
   "installing": {
     "title": "Installing Memory",
@@ -31,7 +44,8 @@
     "title": "Install couldn't complete",
     "retry": "Retry",
     "details_toggle": "Show details",
-    "details_hide": "Hide details"
+    "details_hide": "Hide details",
+    "support_link": "Visit github.com/FerroxLabs/ijfw for help"
   },
   "error": {
     "spawn_error": "Couldn't start the installer. Check that npm is on your PATH.",
@@ -64,6 +78,7 @@
   },
   "panel": {
     "header_breadcrumb": "Memory",
+    "subtitle": "IJFW Memory by Ferrox Labs",
     "button_drop": "Drop",
     "button_history": "History",
     "button_add": "Add memory",
@@ -80,10 +95,12 @@
     "banner": "Memory is currently in degraded mode -- chat still works, but enrichment is off"
   },
   "settings": {
-    "panel_title": "IJFW Memory",
+    "panel_title": "IJFW Memory (Ferrox Labs)",
     "skip_label": "Skip IJFW automatic setup",
     "skip_description": "When enabled, Wayland will not install or upgrade IJFW. You can install manually later via the Memory page.",
-    "manual_install_hint": "To install manually: run `npx -y @ijfw/install@latest` in a terminal"
+    "manual_install_hint": "To install manually: run `npx -y @ijfw/install@latest` in a terminal",
+    "about_title": "IJFW Memory",
+    "about_body": "An open-source persistent memory engine by Ferrox Labs."
   },
   "prelude": {
     "installing_notice": "IJFW is being installed. External CLIs (Claude Code, Codex, Gemini CLI) will pick it up after install completes.",
