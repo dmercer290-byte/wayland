@@ -1,0 +1,37 @@
+import { test, expect } from 'vitest';
+import { renderHook } from '@testing-library/react';
+import { useMcpLibrary } from '@renderer/pages/settings/McpLibrary/hooks/useMcpLibrary';
+
+test('returns 47 entries sorted by popularityRank', () => {
+  const { result } = renderHook(() => useMcpLibrary());
+  expect(result.current.entries.length).toBe(47);
+  expect(result.current.entries[0].popularityRank).toBeLessThanOrEqual(result.current.entries[1].popularityRank);
+});
+
+test('recommended returns first 6 by rank', () => {
+  const { result } = renderHook(() => useMcpLibrary());
+  expect(result.current.recommended.length).toBe(6);
+  expect(result.current.recommended[0].id).toContain('google-workspace');
+});
+
+test('byTier groups correctly', () => {
+  const { result } = renderHook(() => useMcpLibrary());
+  expect(result.current.byTier.core.length).toBe(12);
+  expect(result.current.byTier.worker.length).toBe(18);
+  expect(result.current.byTier.builder.length).toBe(17);
+});
+
+test('getEntry returns full detail for a known id', () => {
+  const { result } = renderHook(() => useMcpLibrary());
+  const entry = result.current.getEntry('io.github.taylorwilsdon/google-workspace-mcp');
+  expect(entry?.title).toBe('Google Workspace');
+  expect(entry?.['x-wayland'].auth.method).toBe('oauth2-byo');
+});
+
+test('getGuide parses frontmatter steps', () => {
+  const { result } = renderHook(() => useMcpLibrary());
+  const guide = result.current.getGuide('io.github.taylorwilsdon/google-workspace-mcp');
+  expect(guide.steps.length).toBe(4);
+  expect(guide.steps[0].id).toBe('install');
+  expect(guide.steps[2].inputs?.[0].name).toBe('GOOGLE_OAUTH_CLIENT_ID');
+});
