@@ -43,7 +43,7 @@ export const BUILTIN_TAB_IDS = [
   // INTEGRATIONS
   'webui',
   'channels',
-  'mcp',
+  'mcp-library',
   // APPEARANCE
   'theme',
   'editor',
@@ -62,7 +62,10 @@ export const BUILTIN_TAB_IDS = [
  */
 export const LEGACY_ANCHOR_REMAP: Record<string, string> = {
   'skills-hub': 'skills',
-  tools: 'mcp',
+  // Legacy `tools` and `mcp` anchors now point at the new MCP Library —
+  // pre-library extensions that anchored to them still resolve.
+  tools: 'mcp-library',
+  mcp: 'mcp-library',
   capabilities: 'skills',
   // Legacy `providers` / `gemini` / `model` all point at the new Models page —
   // the redesigned `ModelsSettings` page replaces both the legacy Providers
@@ -219,11 +222,11 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         icon: <Radio />,
         path: 'channels',
       },
-      mcp: {
-        id: 'mcp',
-        label: t('settings.sider.mcp', { defaultValue: 'MCP Servers' }),
+      'mcp-library': {
+        id: 'mcp-library',
+        label: t('settings.sider.mcpLibrary', { defaultValue: 'MCP Library' }),
         icon: <Server />,
-        path: 'mcp',
+        path: 'mcp-library/browse',
       },
       theme: {
         id: 'theme',

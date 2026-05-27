@@ -99,11 +99,11 @@ export function getBuiltinSettingsNavItems(isDesktop: boolean, t: TranslateFn): 
       icon: <Radio size={16} />,
       path: 'channels',
     },
-    mcp: {
-      id: 'mcp',
-      label: t('settings.sider.mcp', { defaultValue: 'MCP Servers' }),
+    'mcp-library': {
+      id: 'mcp-library',
+      label: t('settings.sider.mcpLibrary', { defaultValue: 'MCP Library' }),
       icon: <Server size={16} />,
-      path: 'mcp',
+      path: 'mcp-library/browse',
     },
     theme: {
       id: 'theme',
