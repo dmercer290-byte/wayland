@@ -9,6 +9,8 @@ interface Props {
   envValues: Record<string, string>;
   onEnvChange: (name: string, value: string) => void;
   onPrimary: (action: string) => void;
+  /** Step ids the parent has determined are complete (e.g. install done, OAuth authorized). */
+  completedStepIds?: ReadonlySet<string>;
 }
 
 function StepCard({
@@ -17,8 +19,9 @@ function StepCard({
   envValues,
   onEnvChange,
   onPrimary,
+  completedStepIds,
 }: Props & { step: SetupStep; idx: number }) {
-  const done = !!step.autoCompletedByInstall;
+  const done = !!step.autoCompletedByInstall || (completedStepIds?.has(step.id) ?? false);
   return (
     <div className={`mcp-step ${done ? 'is-done' : ''}`} data-step-id={step.id}>
       <div className="mcp-step-num">{done ? <Check size={14} /> : idx + 1}</div>

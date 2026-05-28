@@ -102,7 +102,7 @@ export function DetailPage() {
   const { mcpServers, saveMcpServers } = useMcpServers();
   const { setAgentInstallStatus, checkSingleServerInstallStatus } = useMcpAgentStatus();
   const { syncMcpToAgents, removeMcpFromAgents } = useMcpOperations(mcpServers, message);
-  const { login, loggingIn } = useMcpOAuth();
+  const { login, loggingIn, oauthStatus } = useMcpOAuth();
   const crud = useMcpServerCRUD(
     mcpServers,
     saveMcpServers,
@@ -181,7 +181,16 @@ export function DetailPage() {
       );
       return;
     }
-    message.success(t('mcpLibrary.install.oauthSuccess', 'Authorized.'));
+    // Auto-enable the server once OAuth succeeded — there's no second click;
+    // the user finished consent in the browser, that's the affirmative action.
+    if (!server.enabled) {
+      try {
+        await crud.handleToggleMcpServer(server.id, true);
+      } catch (err) {
+        console.error('[mcp-library] auto-enable after OAuth failed:', err);
+      }
+    }
+    message.success(t('mcpLibrary.install.oauthSuccess', 'Connected to {{name}}.', { name: entry.title }));
   };
 
   const installLabel = installed
@@ -191,6 +200,27 @@ export function DetailPage() {
       : t('mcpLibrary.install.button', 'Install');
 
   const oauthInFlight = installedServer ? !!loggingIn[installedServer.id] : false;
+
+  // Steps the user has completed (beyond static autoCompletedByInstall):
+  // - any step whose primaryAction is 'oauth-flow' when the server has a
+  //   valid token and isn't asking for re-login.
+  const completedStepIds = useMemo(() => {
+    const done = new Set<string>();
+    if (!guide || !installedServer) return done;
+    const oauth = oauthStatus[installedServer.id];
+    const oauthDone = installedServer.enabled === true && oauth?.needsLogin !== true;
+    if (oauthDone) {
+      for (const step of guide.steps) {
+        if (step.primaryAction?.action === 'oauth-flow') done.add(step.id);
+      }
+    }
+    return done;
+  }, [guide, installedServer, oauthStatus]);
+
+  // After install + (for OAuth entries) successful auth, surface a clear
+  // "you're done" banner so the user knows the setup is complete.
+  const isOauth = w.auth.method === 'oauth2-byo';
+  const isReady = installed && (!isOauth || (installedServer?.enabled === true && oauthStatus[installedServer.id]?.needsLogin !== true));
 
   return (
     <div className="mcp-detail-page">
@@ -271,14 +301,29 @@ export function DetailPage() {
 
       <div className="mcp-detail-body">
         {tab === 'setup-guide' && guide && (
-          <SetupGuide
-            guide={guide}
-            envValues={env}
-            onEnvChange={(name, value) =>
-              setEnv((prev) => ({ ...prev, [name]: value }))
-            }
-            onPrimary={(action) => void onPrimary(action)}
-          />
+          <>
+            {isReady && (
+              <div className="mcp-setup-success" role="status">
+                <Check size={16} />
+                <span>
+                  {t(
+                    'mcpLibrary.install.setupComplete',
+                    "{{name}} is connected and ready. Ask any chat to use it.",
+                    { name: entry.title },
+                  )}
+                </span>
+              </div>
+            )}
+            <SetupGuide
+              guide={guide}
+              envValues={env}
+              onEnvChange={(name, value) =>
+                setEnv((prev) => ({ ...prev, [name]: value }))
+              }
+              onPrimary={(action) => void onPrimary(action)}
+              completedStepIds={completedStepIds}
+            />
+          </>
         )}
         {tab === 'tools' && (
           <ul className="mcp-tool-groups">
