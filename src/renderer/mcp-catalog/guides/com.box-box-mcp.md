@@ -8,8 +8,9 @@ steps:
     autoCompletedByInstall: true
     body: |
       Wayland connects to Box's hosted MCP at `https://mcp.box.com` —
-      nothing runs locally. Box handles the OAuth flow for personal accounts;
-      no developer app registration is needed for end users.
+      nothing runs locally. Box doesn't support automatic OAuth client
+      registration, so you'll register a Box Custom App once (the next step
+      walks you through it) and Wayland reuses your credentials.
   - id: authorize
     title: Sign in with Box
     estSeconds: 60
@@ -20,10 +21,14 @@ steps:
       Integrations → Box MCP server → Configure** before personal OAuth will
       succeed. Hit that error and you'll need to ask them first.
     body: |
-      Click **Sign in with Box** below. A browser tab opens to
-      `account.box.com` and prompts you to sign in.
+      The first time you click **Sign in with Box** Wayland opens a dialog for
+      your own Box Custom App's **Client ID** and **Client Secret**. The dialog
+      walks you through creating the app at **app.box.com/developers/console**
+      and shows the redirect URI to paste in.
 
-      Box shows a **Grant access** consent screen requesting three scopes:
+      After you save the credentials, Wayland opens a browser tab to
+      `account.box.com` and prompts you to sign in. Box then shows a **Grant
+      access** consent screen requesting three scopes:
 
       - `root_readwrite` — read and write files and folders you select.
       - `ai.readwrite` — use Box AI to summarize and analyze content.

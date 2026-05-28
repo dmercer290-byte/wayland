@@ -19,9 +19,14 @@ steps:
       paid Figma plan. Free / Starter accounts cannot connect — you'll see an
       "access denied" page in the OAuth tab if your seat doesn't qualify.
     body: |
-      Click **Sign in with Figma** below. A browser tab opens to
-      `figma.com` — pick the account whose files you want Wayland to read.
+      Figma's hosted MCP doesn't allow automatic client registration, so the
+      first time you click **Sign in with Figma** Wayland opens a dialog for
+      your own Figma app's **Client ID** and **Client Secret**. The dialog
+      walks you through creating an app at **figma.com/developers/apps** and
+      shows the callback URL to paste in.
 
+      After you save the credentials, Wayland opens a browser tab to
+      `figma.com` — pick the account whose files you want Wayland to read.
       Figma shows an **Allow access** consent screen listing your team /
       project access. Approve it and the tab redirects back to Wayland; the
       server status flips to Running.

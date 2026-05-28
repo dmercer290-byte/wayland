@@ -15,8 +15,14 @@ steps:
     estSeconds: 30
     primaryAction: { label: "Sign in with Zoom", action: "oauth-flow" }
     body: |
-      Click **Sign in with Zoom** below. A browser tab opens to Zoom's
-      OAuth consent screen.
+      Zoom requires every integration to be a registered Zoom App, so the
+      first time you click **Sign in with Zoom** Wayland opens a dialog for
+      your own app's **Client ID** and **Client Secret**. The dialog walks you
+      through creating a User-managed OAuth app in the Zoom Marketplace and
+      shows the redirect URL to paste in.
+
+      After you save the credentials, Wayland opens a browser tab to Zoom's
+      OAuth consent screen:
 
       1. Sign in with the Zoom account whose meetings, recordings, and chat
          you want Wayland to access.
