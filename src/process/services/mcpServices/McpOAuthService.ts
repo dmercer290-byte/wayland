@@ -7,6 +7,7 @@
 import { MCPOAuthProvider, OAUTH_DISPLAY_MESSAGE_EVENT } from '@office-ai/aioncli-core/dist/src/mcp/oauth-provider.js';
 import { MCPOAuthTokenStorage } from '@office-ai/aioncli-core/dist/src/mcp/oauth-token-storage.js';
 import type { MCPOAuthConfig } from '@office-ai/aioncli-core/dist/src/mcp/oauth-provider.js';
+import { coreEvents, CoreEvent } from '@office-ai/aioncli-core/dist/src/utils/events.js';
 import { EventEmitter } from 'node:events';
 import type { IMcpServer } from '@/common/config/storage';
 
@@ -37,6 +38,21 @@ export class McpOAuthService {
       console.log('[McpOAuthService] OAuth Message:', message);
       // Can be forwarded to the frontend over WebSocket
     });
+
+    // Auto-confirm OAuth consent prompts. The MCPOAuthProvider in
+    // @office-ai/aioncli-core fires a ConsentRequest event before opening the
+    // browser; in a Gemini-CLI TTY it prompts on stdin, but in Electron's
+    // main process stdin is non-interactive and the call falls through to a
+    // FatalAuthenticationError ("Interactive consent could not be obtained.
+    // Please run Gemini CLI in an interactive terminal...").
+    //
+    // The user clicking "Sign in with <vendor>" in the renderer IS the
+    // consent — there's no reason to surface a second prompt. Wire a
+    // listener that auto-confirms.
+    coreEvents.on(CoreEvent.ConsentRequest, (payload: { prompt: string; onConfirm: (confirmed: boolean) => void }) => {
+      console.log('[McpOAuthService] Auto-confirming OAuth consent:', payload.prompt);
+      payload.onConfirm(true);
+    });
   }
 
   /**
@@ -45,8 +61,13 @@ export class McpOAuthService {
    */
   async checkOAuthStatus(server: IMcpServer): Promise<OAuthStatus> {
     try {
-      // Only HTTP/SSE transport types support OAuth
-      if (server.transport.type !== 'http' && server.transport.type !== 'sse') {
+      // OAuth applies to all HTTP-family transports (http, sse, streamable_http).
+      // stdio servers spawn locally and use API keys / env vars instead.
+      if (
+        server.transport.type !== 'http' &&
+        server.transport.type !== 'sse' &&
+        server.transport.type !== 'streamable_http'
+      ) {
         return {
           isAuthenticated: true,
           needsLogin: false,
@@ -118,11 +139,16 @@ export class McpOAuthService {
    */
   async login(server: IMcpServer, oauthConfig?: MCPOAuthConfig): Promise<{ success: boolean; error?: string }> {
     try {
-      // Only HTTP/SSE transport types support OAuth
-      if (server.transport.type !== 'http' && server.transport.type !== 'sse') {
+      // OAuth applies to all HTTP-family transports (http, sse, streamable_http).
+      // stdio servers spawn locally and use API keys / env vars instead.
+      if (
+        server.transport.type !== 'http' &&
+        server.transport.type !== 'sse' &&
+        server.transport.type !== 'streamable_http'
+      ) {
         return {
           success: false,
-          error: 'OAuth only supported for HTTP/SSE transport',
+          error: `OAuth requires an HTTP-family transport (http / sse / streamable_http), got '${server.transport.type}'`,
         };
       }
 
