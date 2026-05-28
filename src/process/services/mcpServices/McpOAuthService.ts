@@ -40,16 +40,16 @@ const originalBuildResourceParameter = OAuthUtils.buildResourceParameter.bind(OA
 
 // Mirror the canonicalization on the inbound side. discoverOAuthConfig compares
 // `resourceMetadata.resource !== expectedResource` with strict equality — both
-// sides must be canonicalized for the slash variants to match.
+// sides must be canonicalized for the slash variants to match. This handles the
+// root-URL vendors (Slack, Box, Calendly, Miro, Vercel...) where the only
+// difference is a trailing slash.
 //
-// Second canonicalization: when the server advertises a SHORTER resource than
-// what we requested (e.g. Linear's mcp.linear.app/sse endpoint advertises
-// `resource: https://mcp.linear.app`), accept that as a legitimate
-// "OAuth resource is the API boundary, not the specific HTTP endpoint"
-// deployment pattern. We mutate metadata.resource to the longer expected form
-// so RFC 9728 §7.3's strict-equality compare passes. This is broader than
-// RFC 9728 strictly allows, but Linear, GitHub Copilot, and a few others
-// deploy this way — without it those vendors break entirely.
+// NOTE: do NOT do path-prefix widening here. fetchProtectedResourceMetadata
+// receives the well-known METADATA url (https://host/.well-known/oauth-protected-resource[/path]),
+// NOT the MCP server url, so this function has no way to know the requested
+// endpoint path. Path-vs-base mismatches (Linear: requests /mcp, advertises the
+// bare host) are handled in the discoverOAuthConfig wrapper below, which DOES
+// have the server url in scope.
 const originalFetchProtectedResourceMetadata =
   OAuthUtils.fetchProtectedResourceMetadata.bind(OAuthUtils);
 (
@@ -58,35 +58,64 @@ const originalFetchProtectedResourceMetadata =
   }
 ).fetchProtectedResourceMetadata = async (url: string) => {
   const metadata = await originalFetchProtectedResourceMetadata(url);
-  if (!metadata || typeof metadata.resource !== 'string') return metadata;
-  metadata.resource = canonicalizeRootResource(metadata.resource);
-
-  // If our request URL is a path-extension of the advertised resource (same
-  // origin, requested path starts with metadata path), rewrite metadata.resource
-  // to the requested form so the upstream === comparison passes.
-  try {
-    const reqU = new URL(url);
-    const advU = new URL(metadata.resource);
-    const sameOrigin = reqU.protocol === advU.protocol && reqU.host === advU.host;
-    const advPath = advU.pathname === '/' ? '' : advU.pathname.replace(/\/$/, '');
-    const reqPath = reqU.pathname === '/' ? '' : reqU.pathname.replace(/\/$/, '');
-    if (
-      sameOrigin &&
-      reqPath !== advPath &&
-      (advPath === '' || reqPath.startsWith(`${advPath}/`) || reqPath === advPath)
-    ) {
-      // The request hits a deeper endpoint than the advertised resource —
-      // safe to widen the metadata resource to match what we asked for.
-      // Strip the well-known suffix that fetchProtectedResourceMetadata's
-      // discovery URL applied — it'll be redundant here.
-      metadata.resource = canonicalizeRootResource(
-        `${reqU.protocol}//${reqU.host}${reqU.pathname}`,
-      );
-    }
-  } catch {
-    /* fall through */
+  if (metadata && typeof metadata.resource === 'string') {
+    metadata.resource = canonicalizeRootResource(metadata.resource);
   }
   return metadata;
+};
+
+// Wrap discoverOAuthConfig to recover from a ResourceMismatchError when the
+// server advertises a resource that is a same-origin PREFIX of the URL we
+// requested. Linear is the canonical case: we connect to
+// https://mcp.linear.app/mcp but its protected-resource metadata advertises
+// `resource: https://mcp.linear.app` (the OAuth boundary is the API root, not
+// the transport endpoint). RFC 9728 §7.3's strict-equality check rejects this,
+// but it's a legitimate deployment pattern. On mismatch, re-run discovery with
+// a temporary buildResourceParameter override that returns the advertised form,
+// so the comparison passes. Only applies when advertised is a genuine prefix —
+// any other mismatch still throws.
+const originalDiscoverOAuthConfig = OAuthUtils.discoverOAuthConfig.bind(OAuthUtils);
+function isSameOriginPrefix(advertised: string, requested: string): boolean {
+  try {
+    const a = new URL(advertised);
+    const r = new URL(requested);
+    if (a.protocol !== r.protocol || a.host !== r.host) return false;
+    const aPath = a.pathname === '/' ? '' : a.pathname.replace(/\/$/, '');
+    const rPath = r.pathname === '/' ? '' : r.pathname.replace(/\/$/, '');
+    return aPath === '' || rPath === aPath || rPath.startsWith(`${aPath}/`);
+  } catch {
+    return false;
+  }
+}
+(
+  OAuthUtils as unknown as {
+    discoverOAuthConfig: (serverUrl: string) => Promise<unknown>;
+  }
+).discoverOAuthConfig = async (serverUrl: string) => {
+  try {
+    return await originalDiscoverOAuthConfig(serverUrl);
+  } catch (err) {
+    const advertised =
+      err && typeof err === 'object' && 'message' in err
+        ? String((err as { message: string }).message).match(/Protected resource (\S+)/)?.[1]
+        : undefined;
+    const isMismatch =
+      err instanceof Error && err.name === 'ResourceMismatchError' && !!advertised;
+    if (!isMismatch || !isSameOriginPrefix(advertised!, serverUrl)) {
+      throw err;
+    }
+    // Temporarily override buildResourceParameter to return the advertised
+    // (prefix) form so the strict compare inside discoverOAuthConfig passes.
+    const saved = OAuthUtils.buildResourceParameter;
+    const advForced = canonicalizeRootResource(advertised!);
+    (OAuthUtils as unknown as { buildResourceParameter: (u: string) => string }).buildResourceParameter =
+      () => advForced;
+    try {
+      return await originalDiscoverOAuthConfig(serverUrl);
+    } finally {
+      (OAuthUtils as unknown as { buildResourceParameter: typeof saved }).buildResourceParameter = saved;
+    }
+  }
 };
 
 // Pin the OAuth callback server port. Upstream picks a random OS-assigned port
