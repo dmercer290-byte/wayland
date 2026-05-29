@@ -641,7 +641,11 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
 
     async curatedForAgent({ agentKey }): Promise<CuratedModel[]> {
       try {
-        if (agentKey === 'wcore') {
+        // `gemini` is included here because its backend is AionCLI, a
+        // multi-provider fork that can run any connected provider (not just
+        // Google) — so it unions every provider exactly like wcore. Vendor
+        // locked CLIs (claude, codex) stay scoped in the branch below.
+        if (agentKey === 'wcore' || agentKey === 'gemini') {
           // wcore proxies every connected provider — union their curated text
           // models. The Curator already drops non-text kinds. Dedup by
           // `(providerId, id)`: a model id can legitimately appear under
