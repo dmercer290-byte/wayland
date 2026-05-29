@@ -13,7 +13,7 @@ import { openExternalUrl } from '@renderer/utils/platform';
 import type { ConnectError } from '@process/providers/types';
 import styles from './OnboardingOverlay.module.css';
 
-const FLUX_DOWNLOADS_URL = 'https://fluxrouter.ai/downloads';
+const FLUX_KEY_URL = 'https://fluxrouter.ai/home/api-keys';
 
 const ERROR_KEYS: Record<ConnectError, string> = {
   unauthorized: 'onboarding.connect.errorUnauthorized',
@@ -65,7 +65,7 @@ const ConnectFluxStep: React.FC<ConnectFluxStepProps> = ({ onConnected, onBack }
   }, [key, connecting, connect, onConnected]);
 
   const handleGetKey = useCallback(() => {
-    void openExternalUrl(FLUX_DOWNLOADS_URL);
+    void openExternalUrl(FLUX_KEY_URL);
   }, []);
 
   return (

@@ -80,7 +80,7 @@
 .recommendedTag {
   display: inline-block;
   background: var(--brand);
-  color: #fff;
+  color: var(--text-white);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;

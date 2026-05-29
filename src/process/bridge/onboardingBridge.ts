@@ -9,6 +9,11 @@ import { fetchFluxMetrics, runOnboardingDetection } from '@process/onboarding/de
 
 /**
  * Register the onboarding IPC handlers. Called once from initAllBridges.
+ *
+ * These intentionally use raw `ipcMain.handle` rather than the typed `ipcBridge`
+ * adapter (same as `constitutionBridge` / `webui-direct-*`): both handlers are
+ * zero-argument, read-only, and return no sensitive data, so the typed
+ * allowlist buys nothing material here.
  */
 export function initOnboardingBridge(): void {
   ipcMain.handle('onboarding:detect', () => runOnboardingDetection());

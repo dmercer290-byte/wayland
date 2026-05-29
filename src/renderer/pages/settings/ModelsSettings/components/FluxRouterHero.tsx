@@ -15,8 +15,8 @@ import { openExternalUrl } from '@renderer/utils/platform';
 import FluxRouterMark from '@renderer/components/icons/FluxRouterMark';
 import styles from './FluxRouterHero.module.css';
 
-/** External link to grab a Flux Router key. */
-const FLUX_KEY_URL = 'https://fluxrouter.ai';
+/** External link to grab a Flux Router API key (BYO key flow). */
+const FLUX_KEY_URL = 'https://fluxrouter.ai/home/api-keys';
 
 /** Total models Flux Router routes across (locked product figure). */
 const FLUX_MODEL_COUNT = 86;
