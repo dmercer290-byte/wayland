@@ -273,7 +273,9 @@
     "electron-winstaller": "^5.4.0"
   },
   "trustedDependencies": [
-    "officecli"
+    "officecli",
+    "better-sqlite3",
+    "electron"
   ],
   "resolutions": {
     "@xmldom/xmldom": "^0.8.13",
