@@ -8,12 +8,16 @@ import { ipcBridge } from '@/common';
 import type { IProject } from '@/common/types/project';
 import type { TChatConversation } from '@/common/config/storage';
 import { Button, Message, Modal } from '@arco-design/web-react';
-import { ChevronLeft, Folder, FolderOpen, MessageSquarePlus, Pencil } from 'lucide-react';
+import { BookOpen, ChevronLeft, Folder, FolderOpen, MessageSquare, MessageSquarePlus, Pencil } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjects } from './hooks/useProjects';
 import CreateProjectModal from './components/CreateProjectModal';
+import ProjectKnowledgePanel from './components/ProjectKnowledgePanel';
+import ChatWorkspace from '@/renderer/pages/conversation/Workspace';
+
+type ProjectTab = 'chats' | 'files' | 'knowledge';
 
 /**
  * Per-project workspace. The umbrella view: every chat under this project, plus
@@ -30,6 +34,7 @@ const ProjectWorkspacePage: React.FC = () => {
   const [project, setProject] = useState<IProject | null>(null);
   const [conversations, setConversations] = useState<TChatConversation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ProjectTab>('chats');
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -130,69 +135,138 @@ const ProjectWorkspacePage: React.FC = () => {
         </Button>
       </div>
 
-      {/* Knowledge hint */}
-      {project?.workspace && (
-        <div className='flex items-center gap-8px px-24px py-8px text-12px text-t-tertiary bg-fill-1 flex-shrink-0'>
-          <FolderOpen size={13} />
-          <span className='truncate' title={project.workspace}>
-            {t('projects.workspace.knowledgeHint', { path: project.workspace })}
-          </span>
-        </div>
-      )}
+      {/* Tab bar: Chats / Files / Knowledge */}
+      <div
+        className='flex items-center gap-2px px-20px flex-shrink-0'
+        style={{ borderBottom: '1px solid var(--color-border-2)' }}
+      >
+        {(
+          [
+            {
+              key: 'chats',
+              label: t('projects.workspace.tabChats'),
+              icon: <MessageSquare size={15} />,
+              count: conversations.length,
+            },
+            { key: 'files', label: t('projects.workspace.tabFiles'), icon: <FolderOpen size={15} /> },
+            { key: 'knowledge', label: t('projects.workspace.tabKnowledge'), icon: <BookOpen size={15} /> },
+          ] as Array<{ key: ProjectTab; label: string; icon: React.ReactNode; count?: number }>
+        ).map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type='button'
+              onClick={() => setActiveTab(tab.key)}
+              className='flex items-center gap-6px px-14px py-12px bg-transparent border-none cursor-pointer text-13px transition-colors'
+              style={{
+                color: active ? 'var(--color-text-1)' : 'var(--color-text-3)',
+                fontWeight: active ? 600 : 400,
+                borderBottom: `2px solid ${active ? 'var(--color-primary-6)' : 'transparent'}`,
+                marginBottom: -1,
+              }}
+            >
+              {tab.icon}
+              {tab.label}
+              {typeof tab.count === 'number' && tab.count > 0 && (
+                <span className='text-11px text-t-tertiary'>{tab.count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-      {/* Conversations */}
-      <div className='flex-1 overflow-auto px-24px py-16px'>
-        {!loading && conversations.length === 0 ? (
-          <div className='flex flex-col items-center justify-center gap-16px h-full text-center'>
-            <div className='flex items-center justify-center w-56px h-56px rd-14px bg-fill-1 text-t-tertiary'>
-              <MessageSquarePlus size={26} />
-            </div>
-            <div className='flex flex-col gap-4px'>
-              <div className='text-15px font-600 text-t-primary'>{t('projects.workspace.emptyTitle')}</div>
-              <div className='text-13px text-t-secondary max-w-360px'>{t('projects.workspace.emptyBody')}</div>
-            </div>
-            <Button type='primary' onClick={startNewChat}>
-              <span className='flex items-center gap-6px'>
-                <MessageSquarePlus size={16} />
-                {t('projects.workspace.newChat')}
-              </span>
-            </Button>
-          </div>
-        ) : (
-          <div className='flex flex-col gap-8px max-w-720px mx-auto'>
-            {conversations.map((c) => {
-              const backend = (c.extra as { backend?: string } | undefined)?.backend || c.type;
-              return (
-                <div
-                  key={c.id}
-                  role='button'
-                  tabIndex={0}
-                  onClick={() => navigate(`/conversation/${c.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') navigate(`/conversation/${c.id}`);
-                  }}
-                  className='group flex items-center gap-12px px-14px py-12px rd-10px bg-fill-1 border border-solid border-border-2 cursor-pointer hover:border-border-3 transition-all'
-                >
-                  <div className='flex flex-col gap-2px min-w-0 flex-1'>
-                    <div className='text-14px font-500 text-t-primary truncate'>
-                      {c.name || t('projects.workspace.untitledChat')}
-                    </div>
-                    <div className='text-11px text-t-tertiary uppercase tracking-wide'>{backend}</div>
-                  </div>
-                  <Button
-                    type='text'
-                    size='mini'
-                    className='opacity-0 group-hover:opacity-100 transition-opacity'
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeFromProject(c.id);
-                    }}
-                  >
-                    {t('projects.workspace.removeChat')}
-                  </Button>
+      {/* Tab content */}
+      <div className='flex-1 overflow-hidden'>
+        {activeTab === 'chats' && (
+          <div className='h-full overflow-auto px-24px py-16px'>
+            {!loading && conversations.length === 0 ? (
+              <div className='flex flex-col items-center justify-center gap-16px h-full text-center'>
+                <div className='flex items-center justify-center w-56px h-56px rd-14px bg-fill-1 text-t-tertiary'>
+                  <MessageSquarePlus size={26} />
                 </div>
-              );
-            })}
+                <div className='flex flex-col gap-4px'>
+                  <div className='text-15px font-600 text-t-primary'>{t('projects.workspace.emptyTitle')}</div>
+                  <div className='text-13px text-t-secondary max-w-360px'>{t('projects.workspace.emptyBody')}</div>
+                </div>
+                <Button type='primary' onClick={startNewChat}>
+                  <span className='flex items-center gap-6px'>
+                    <MessageSquarePlus size={16} />
+                    {t('projects.workspace.newChat')}
+                  </span>
+                </Button>
+              </div>
+            ) : (
+              <div className='flex flex-col gap-8px max-w-720px mx-auto'>
+                {conversations.map((c) => {
+                  const backend = (c.extra as { backend?: string } | undefined)?.backend || c.type;
+                  return (
+                    <div
+                      key={c.id}
+                      role='button'
+                      tabIndex={0}
+                      onClick={() => navigate(`/conversation/${c.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') navigate(`/conversation/${c.id}`);
+                      }}
+                      className='group flex items-center gap-12px px-14px py-12px rd-10px bg-fill-1 border border-solid border-border-2 cursor-pointer hover:border-border-3 transition-all'
+                    >
+                      <div className='flex flex-col gap-2px min-w-0 flex-1'>
+                        <div className='text-14px font-500 text-t-primary truncate'>
+                          {c.name || t('projects.workspace.untitledChat')}
+                        </div>
+                        <div className='text-11px text-t-tertiary uppercase tracking-wide'>{backend}</div>
+                      </div>
+                      <Button
+                        type='text'
+                        size='mini'
+                        className='opacity-0 group-hover:opacity-100 transition-opacity'
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFromProject(c.id);
+                        }}
+                      >
+                        {t('projects.workspace.removeChat')}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'files' &&
+          (project?.workspace ? (
+            <div className='h-full'>
+              <ChatWorkspace
+                workspace={project.workspace}
+                conversation_id={`project:${projectId}`}
+                messageApi={Message}
+              />
+            </div>
+          ) : (
+            <div className='flex flex-col items-center justify-center gap-12px h-full text-center px-20px'>
+              <div className='flex items-center justify-center w-48px h-48px rd-12px bg-fill-1 text-t-tertiary'>
+                <FolderOpen size={22} />
+              </div>
+              <div className='text-14px font-600 text-t-primary'>{t('projects.knowledge.noWorkspaceTitle')}</div>
+              <div className='text-12px text-t-secondary max-w-320px leading-relaxed'>
+                {t('projects.knowledge.noWorkspaceBody')}
+              </div>
+              <Button type='outline' onClick={() => modalCtrl.open({ project: project ?? undefined })}>
+                {t('projects.knowledge.setWorkspace')}
+              </Button>
+            </div>
+          ))}
+
+        {activeTab === 'knowledge' && (
+          <div className='h-full overflow-auto px-24px py-18px'>
+            <ProjectKnowledgePanel
+              projectId={projectId || ''}
+              hasWorkspace={!!project?.workspace}
+              onSetWorkspace={() => modalCtrl.open({ project: project ?? undefined })}
+            />
           </div>
         )}
       </div>

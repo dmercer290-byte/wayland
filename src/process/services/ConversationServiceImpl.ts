@@ -9,6 +9,8 @@ import type { IConversationRepository } from '@process/services/database/IConver
 import type { TChatConversation } from '@/common/config/storage';
 import { uuid } from '@/common/utils';
 import { cronService } from './cron/cronServiceSingleton';
+import { SqliteProjectRepository } from '@process/services/database/SqliteProjectRepository';
+import { loadProjectKnowledgeBlock } from '@process/services/projectKnowledge/knowledge';
 import {
   createGeminiAgent,
   createAcpAgent,
@@ -121,8 +123,44 @@ export class ConversationServiceImpl implements IConversationService {
     return conv;
   }
 
+  /**
+   * Resolve the project's `.wayland/` knowledge and append it to this
+   * conversation's system-rules channel, in place on `params.extra`. No-op when
+   * the chat is not in a project, the project has no workspace, or the knowledge
+   * docs are still empty (unedited boilerplate injects nothing). Failures are
+   * logged and swallowed so chat creation is never blocked by knowledge IO.
+   */
+  private async injectProjectKnowledge(params: CreateConversationParams): Promise<void> {
+    const extra = params.extra as Record<string, unknown> | undefined;
+    const projectId = extra?.projectId as string | undefined;
+    if (!extra || !projectId) return;
+    try {
+      const project = await new SqliteProjectRepository().getProject(projectId);
+      const workspace = project?.workspace;
+      if (!workspace) return;
+      const block = await loadProjectKnowledgeBlock(workspace);
+      if (!block) return;
+      const merge = (existing: unknown): string =>
+        [existing as string | undefined, block].filter(Boolean).join('\n\n---\n\n');
+      // gemini + wcore read presetRules; acp reads presetContext. Set both so the
+      // active backend picks it up; the others harmlessly ignore the unused field.
+      extra.presetRules = merge(extra.presetRules);
+      extra.presetContext = merge(extra.presetContext);
+    } catch (err) {
+      console.error('[ConversationServiceImpl] project knowledge injection failed:', err);
+    }
+  }
+
   async createConversation(params: CreateConversationParams): Promise<TChatConversation> {
     let conversation: TChatConversation;
+
+    // Project knowledge auto-injection. When a chat is created inside a project
+    // (extra.projectId), append that project's substantive .wayland/ knowledge to
+    // THIS conversation's system-rules channel. Per-conversation, never global,
+    // so it can never leak into non-project chats. Covers gemini + wcore
+    // (presetRules) and acp/Claude Code/Codex/Qwen (presetContext); backends with
+    // no system-rules channel (openclaw/nanobot/remote) are a documented follow-up.
+    await this.injectProjectKnowledge(params);
 
     switch (params.type) {
       case 'gemini': {

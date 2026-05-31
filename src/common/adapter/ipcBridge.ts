@@ -2080,9 +2080,10 @@ export const wiki = {
  * existing chat by mutating `extra.projectId`.
  */
 export const project = {
-  create: buildProvider<import('@/common/types/project').IProject, import('@/common/types/project').ICreateProjectParams>(
-    'project.create'
-  ),
+  create: buildProvider<
+    import('@/common/types/project').IProject,
+    import('@/common/types/project').ICreateProjectParams
+  >('project.create'),
   get: buildProvider<import('@/common/types/project').IProject | null, { id: string }>('project.get'),
   list: buildProvider<import('@/common/types/project').IProject[], void>('project.list'),
   update: buildProvider<void, { id: string; updates: import('@/common/types/project').IUpdateProjectParams }>(
@@ -2097,6 +2098,41 @@ export const project = {
   assignConversation: buildProvider<void, { conversationId: string; projectId: string }>('project.assign-conversation'),
   /** Detach a conversation from its project (clears extra.projectId). */
   removeConversation: buildProvider<void, { conversationId: string }>('project.remove-conversation'),
+  /** Read the project's editable .wayland/ knowledge docs (instructions/rules/decisions). */
+  readKnowledge: buildProvider<{ context: string; rules: string; decisions: string }, { id: string }>(
+    'project.read-knowledge'
+  ),
+  /** Write one knowledge doc; injected into every new chat in the project. */
+  writeKnowledge: buildProvider<void, { id: string; kind: 'context' | 'rules' | 'decisions'; content: string }>(
+    'project.write-knowledge'
+  ),
+  /** List files dropped into .wayland/reference/. */
+  listReference: buildProvider<Array<{ name: string; path: string; size: number }>, { id: string }>(
+    'project.list-reference'
+  ),
+  /** Copy dropped files into .wayland/reference/; returns the updated list. */
+  addReference: buildProvider<Array<{ name: string; path: string; size: number }>, { id: string; filePaths: string[] }>(
+    'project.add-reference'
+  ),
+  /** Remove one reference file by name; returns the updated list. */
+  removeReference: buildProvider<Array<{ name: string; path: string; size: number }>, { id: string; name: string }>(
+    'project.remove-reference'
+  ),
+  /** Read the editable one-line summaries for each knowledge doc. */
+  readSummaries: buildProvider<{ context?: string; rules?: string; decisions?: string }, { id: string }>(
+    'project.read-summaries'
+  ),
+  /** Write one doc's one-line summary. */
+  writeSummary: buildProvider<void, { id: string; kind: 'context' | 'rules' | 'decisions'; summary: string }>(
+    'project.write-summary'
+  ),
+  /** Generate a one-line summary of a knowledge doc with a cheap fast model; persists + returns it. Never rejects. */
+  generateSummary: buildProvider<
+    { summary: string; error?: 'no-model' | 'failed' },
+    { id: string; kind: 'context' | 'rules' | 'decisions' }
+  >('project.generate-summary'),
+  /** True if the user has any configured model usable for cheap summaries. */
+  hasUsableModel: buildProvider<boolean, void>('project.has-usable-model'),
   /** Fired whenever the project list or a project's membership changes. */
   changed: buildEmitter<void>('project.changed'),
 };
