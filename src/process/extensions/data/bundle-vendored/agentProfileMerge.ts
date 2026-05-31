@@ -31,8 +31,12 @@
 
 import path from 'path';
 import { existsSync, readFileSync } from 'fs';
+import agentProfileSkills from './agentProfileSkills.json';
 
 const TAG = '[AgentProfileMerge]';
+
+/** Curated skill set per agent-profile slug (BM25-derived, hand-audited). */
+const AGENT_PROFILE_SKILLS = agentProfileSkills as Record<string, string[]>;
 
 type VendoredAgentProfile = {
   id: string;
@@ -47,6 +51,13 @@ type VendoredAgentProfile = {
   prompts: { system: string };
   isPreset: true;
   kind: 'specialist';
+  /**
+   * Curated skills pre-attached to this agent-profile's workspace. Without
+   * this, the 25 agent-profiles ran on persona prompt alone — the full
+   * library stayed reachable only on-demand via `wayland_search_skills`, so
+   * they never had their core toolkit in hand. BM25-derived + hand-audited.
+   */
+  enabledSkills?: string[];
   /** Provenance tag so downstream code can identify these vs hand-curated. */
   _source: 'vendored-agent-profile';
   /**
@@ -90,7 +101,32 @@ function resolveSkillsLibraryDir(): string | null {
 function toDisplayName(slug: string): string {
   // Mirror the renderer's displayName.ts logic so the names look the same on
   // both sides without sharing a renderer dep (renderer/process boundary).
-  const ACRONYMS = new Set(['AI', 'API', 'CLI', 'CSS', 'HTML', 'HTTP', 'ID', 'IP', 'JS', 'JSON', 'ML', 'OS', 'PR', 'QA', 'SDK', 'SEO', 'SQL', 'SSH', 'TS', 'UI', 'URL', 'UX', 'VPN', 'XML']);
+  const ACRONYMS = new Set([
+    'AI',
+    'API',
+    'CLI',
+    'CSS',
+    'HTML',
+    'HTTP',
+    'ID',
+    'IP',
+    'JS',
+    'JSON',
+    'ML',
+    'OS',
+    'PR',
+    'QA',
+    'SDK',
+    'SEO',
+    'SQL',
+    'SSH',
+    'TS',
+    'UI',
+    'URL',
+    'UX',
+    'VPN',
+    'XML',
+  ]);
   let label = slug
     .split('-')
     .filter(Boolean)
@@ -254,6 +290,7 @@ function buildOverlay(): VendoredAgentProfile[] {
       prompts: { system: body },
       isPreset: true,
       kind: 'specialist',
+      enabledSkills: AGENT_PROFILE_SKILLS[name],
       _source: 'vendored-agent-profile',
       _kickoffsExcluded: true,
     });
@@ -271,9 +308,7 @@ function buildOverlay(): VendoredAgentProfile[] {
  * - Always returns the input array's contents plus any non-colliding overlays.
  * - The input is never mutated.
  */
-export function mergeVendoredAgentProfiles(
-  liveAssistants: Record<string, unknown>[],
-): Record<string, unknown>[] {
+export function mergeVendoredAgentProfiles(liveAssistants: Record<string, unknown>[]): Record<string, unknown>[] {
   const overlay = buildOverlay();
   if (overlay.length === 0) return liveAssistants;
 

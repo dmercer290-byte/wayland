@@ -9,7 +9,13 @@
     "enabledSkills": [
       "research-jtbd-interviews",
       "research-audience-discovery",
-      "research-competitive-scan"
+      "research-competitive-scan",
+      "user-research-plan",
+      "customer-discovery-interview",
+      "market-researcher",
+      "market-research-brief",
+      "customer-persona",
+      "competitive-analysis"
     ],
     "prompts": [
       "Find me the real customer for [product] - I'm tired of guessing.",
@@ -238,7 +244,11 @@
     "enabledSkills": [
       "forge-value-pricing",
       "forge-offer-construction",
-      "forge-packaging-tiers"
+      "forge-packaging-tiers",
+      "pricing-strategy",
+      "pricing-strategist",
+      "pricing-strategy-audit",
+      "sales-proposal"
     ],
     "prompts": [
       "Price my [product] based on the outcome the buyer actually pays for.",
@@ -392,7 +402,14 @@
     "enabledSkills": [
       "beacon-channel-strategy",
       "beacon-seo-organic",
-      "beacon-paid-acquisition"
+      "beacon-paid-acquisition",
+      "traction-channel-analysis",
+      "seo-content-strategy",
+      "marketing-strategy",
+      "paid-ad-copy",
+      "social-media-strategy",
+      "go-to-market-strategy",
+      "community-led-growth"
     ],
     "prompts": [
       "Pick the right channel mix for a [budget/stage] business.",
@@ -464,7 +481,12 @@
     "enabledSkills": [
       "patch-operating-rhythm",
       "patch-crm-hygiene",
-      "patch-process-design"
+      "patch-process-design",
+      "sop-creation",
+      "pipeline-review",
+      "ops-metrics-dashboard",
+      "cold-outreach-sequence",
+      "follow-up-sequences"
     ],
     "prompts": [
       "Install a weekly operating rhythm for a 5-person team.",
@@ -536,7 +558,12 @@
     "enabledSkills": [
       "spark-curriculum-architecture",
       "spark-long-form-narrative",
-      "spark-learner-engagement"
+      "spark-learner-engagement",
+      "online-course-design",
+      "lesson-plan-design",
+      "learning-path-designer",
+      "online-academy-builder",
+      "curriculum-designer"
     ],
     "prompts": [
       "Outline a course that delivers a specific learner transformation.",
@@ -766,7 +793,13 @@
     "enabledSkills": [
       "stage-pitch-deck",
       "stage-narrative-shift",
-      "stage-demo-day-and-q-a"
+      "stage-demo-day-and-q-a",
+      "fundraising-narrative",
+      "sales-pitch-deck",
+      "pitch-deck-creator",
+      "startup-pitch-narrative",
+      "business-plan",
+      "brand-storytelling"
     ],
     "prompts": [
       "Name the macro-trend shift that makes my company inevitable.",
@@ -838,7 +871,14 @@
     "enabledSkills": [
       "helm-decision-frames",
       "helm-founder-cadence",
-      "helm-stuck-and-unstuck"
+      "helm-stuck-and-unstuck",
+      "second-order-thinking",
+      "decision-making-framework",
+      "mental-model-toolkit",
+      "strategic-thinker",
+      "goal-setting-architect",
+      "okr-builder",
+      "scenario-planning"
     ],
     "prompts": [
       "What am I avoiding right now?",
@@ -907,7 +947,16 @@
     "avatar": "icons/quiet-money.svg",
     "presetAgentType": "claude",
     "contextFile": "assistants/roles/quiet-money.md",
-    "enabledSkills": [],
+    "enabledSkills": [
+      "tax-optimization-strategist",
+      "spending-analysis",
+      "budget-planning",
+      "financial-model-structure",
+      "estate-planning-architect",
+      "net-worth-tracker",
+      "financial-kpis",
+      "compensation-benchmarking"
+    ],
     "prompts": [
       "Run me through the 6-question intake and tell me where I stand.",
       "Score my Boring Path - how far have I actually gotten?",
@@ -975,7 +1024,18 @@
     "avatar": "icons/quiet-money-position-auditor.svg",
     "presetAgentType": "claude",
     "contextFile": "assistants/roles/quiet-money-position-auditor.md",
-    "enabledSkills": [],
+    "enabledSkills": [
+      "financial-wellness-scorecard",
+      "net-worth-tracker",
+      "fifty-thirty-twenty-budget",
+      "budget-planning",
+      "spending-analysis",
+      "financial-goal-setting",
+      "budget-reset-guide",
+      "year-end-tax-checklist",
+      "savings-planner",
+      "insurance-needs-assessment"
+    ],
     "category": "office",
     "kind": "specialist"
   },
@@ -986,7 +1046,18 @@
     "avatar": "icons/quiet-money-career-strategist.svg",
     "presetAgentType": "claude",
     "contextFile": "assistants/roles/quiet-money-career-strategist.md",
-    "enabledSkills": [],
+    "enabledSkills": [
+      "salary-negotiator",
+      "career-trajectory-analyzer",
+      "compensation-benchmarking",
+      "negotiation-coach",
+      "debt-payoff-strategist",
+      "freelance-rate-calculator",
+      "salary-negotiation-script",
+      "promotion-case-builder",
+      "career-change-resume",
+      "career-pivot-advisor"
+    ],
     "category": "office",
     "kind": "specialist"
   },
@@ -997,7 +1068,18 @@
     "avatar": "icons/quiet-money-spending-auditor.svg",
     "presetAgentType": "claude",
     "contextFile": "assistants/roles/quiet-money-spending-auditor.md",
-    "enabledSkills": [],
+    "enabledSkills": [
+      "expense-analyzer",
+      "spending-analysis",
+      "expense-tracking-setup",
+      "zero-based-budget",
+      "fifty-thirty-twenty-budget",
+      "budget-planning",
+      "variable-income-budget",
+      "subscription-audit",
+      "gift-budget-calculator",
+      "major-purchase-decision"
+    ],
     "category": "office",
     "kind": "specialist"
   },
@@ -1008,7 +1090,18 @@
     "avatar": "icons/quiet-money-windfall-navigator.svg",
     "presetAgentType": "claude",
     "contextFile": "assistants/roles/quiet-money-windfall-navigator.md",
-    "enabledSkills": [],
+    "enabledSkills": [
+      "spending-analysis",
+      "fifty-thirty-twenty-budget",
+      "budget-builder",
+      "budget-planning",
+      "budget-reset-guide",
+      "self-employment-tax",
+      "compound-growth-explainer",
+      "insurance-needs-assessment",
+      "variable-income-budget",
+      "expense-analyzer"
+    ],
     "category": "office",
     "kind": "specialist"
   },
@@ -1019,7 +1112,16 @@
     "avatar": "icons/quiet-money-generational-planner.svg",
     "presetAgentType": "claude",
     "contextFile": "assistants/roles/quiet-money-generational-planner.md",
-    "enabledSkills": [],
+    "enabledSkills": [
+      "insurance-needs-assessment",
+      "savings-planner",
+      "self-employment-tax",
+      "budget-reset-guide",
+      "retirement-planner",
+      "fire-planner",
+      "spending-analysis",
+      "estate-planning-architect"
+    ],
     "category": "office",
     "kind": "specialist"
   },
@@ -1030,7 +1132,17 @@
     "avatar": "icons/quiet-money-time-coach.svg",
     "presetAgentType": "claude",
     "contextFile": "assistants/roles/quiet-money-time-coach.md",
-    "enabledSkills": [],
+    "enabledSkills": [
+      "freelance-rate-calculator",
+      "compound-growth-explainer",
+      "self-employment-tax",
+      "tax-optimization-strategist",
+      "investment-fee-analyzer",
+      "budget-reset-guide",
+      "subscription-audit",
+      "net-worth-tracker",
+      "retirement-savings-calculator"
+    ],
     "category": "office",
     "kind": "specialist"
   },
@@ -1128,9 +1240,18 @@
     "teammates": ["quiet-money"],
     "standing": true,
     "rituals": [
-      { "name": "weekly-friday-question",   "cadence": "weekly:friday:17:00" },
-      { "name": "quarterly-enough-defense", "cadence": "quarterly:09:00" },
-      { "name": "annual-spending-audit",    "cadence": "annual:1:1:10:00" }
+      {
+        "name": "weekly-friday-question",
+        "cadence": "weekly:friday:17:00"
+      },
+      {
+        "name": "quarterly-enough-defense",
+        "cadence": "quarterly:09:00"
+      },
+      {
+        "name": "annual-spending-audit",
+        "cadence": "annual:1:1:10:00"
+      }
     ],
     "kickoffs": [
       {
@@ -1205,7 +1326,11 @@
     "enabledSkills": [
       "probe-fake-door-tests",
       "probe-mvp-design",
-      "probe-validation-rubric"
+      "probe-validation-rubric",
+      "research-methodology",
+      "data-collection-plan",
+      "research-question",
+      "rubric-creation"
     ],
     "prompts": [
       "Design a fake-door test for [hypothesis].",
@@ -1278,7 +1403,11 @@
       "vault-storefront-foundation",
       "vault-agentic-geo",
       "vault-marketplace-ops",
-      "commerce-ugc-prompts"
+      "commerce-ugc-prompts",
+      "marketplace-builder",
+      "ecommerce-advisor",
+      "conversion-rate-optimizer",
+      "digital-product-launcher"
     ],
     "prompts": [
       "Optimize my PDP for AI-shopping discovery (GEO).",
@@ -1350,7 +1479,13 @@
     "enabledSkills": [
       "smith-shape-and-spec",
       "smith-architecture-decisions",
-      "smith-agent-handoff"
+      "smith-agent-handoff",
+      "ai-agent-builder",
+      "ai-agent-patterns",
+      "feature-spec",
+      "monorepo-architect",
+      "scalability-architect",
+      "search-system-architect"
     ],
     "prompts": [
       "Shape this feature - my appetite is 6 weeks.",
@@ -1423,7 +1558,11 @@
       "mend-ticket-triage",
       "mend-onboarding-flow",
       "mend-churn-prevention",
-      "support"
+      "support",
+      "onboarding-plan",
+      "membership-manager",
+      "process-mapping",
+      "sop-creation"
     ],
     "prompts": [
       "Design the onboarding flow - the Desired Outcome path.",
@@ -1502,7 +1641,14 @@
     "enabledSkills": [
       "lens-funnel-diagnosis",
       "lens-cohort-and-retention",
-      "lens-north-star-and-experiments"
+      "lens-north-star-and-experiments",
+      "cohort-analysis",
+      "marketing-funnel-diagnosis",
+      "funnel-analysis",
+      "segmentation-design",
+      "metric-framework",
+      "saas-metrics-analyst",
+      "conversion-rate-optimizer"
     ],
     "prompts": [
       "Diagnose where my funnel drops - start with the leading indicator.",
@@ -1574,7 +1720,11 @@
     "enabledSkills": [
       "verdict-score-and-rank",
       "verdict-flag-and-fix",
-      "verdict-the-one-edit"
+      "verdict-the-one-edit",
+      "content-strategy-evaluation",
+      "copy-editing",
+      "proofreading",
+      "weighted-decision-matrix"
     ],
     "prompts": [
       "Score this draft on the 8 dimensions and name the one edit.",
@@ -1725,7 +1875,13 @@
     "enabledSkills": [
       "voiceprint-voice-interview",
       "voiceprint-voice-compile",
-      "voiceprint-voice-maintenance"
+      "voiceprint-voice-maintenance",
+      "voice-tone-guide",
+      "tone-adjustment",
+      "line-editor",
+      "ghostwriter",
+      "audience-analysis",
+      "voiceover-script"
     ],
     "prompts": [
       "Build my voice profile - I have 5 writing samples ready (full path, ~1 hr).",
@@ -1801,11 +1957,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "research",
-      "copy",
-      "sales"
-    ],
+    "teammates": ["research", "copy", "sales"],
     "standing": false,
     "kickoffs": [
       {
@@ -1874,13 +2026,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "research",
-      "mira",
-      "copy",
-      "beacon",
-      "sales"
-    ],
+    "teammates": ["research", "mira", "copy", "beacon", "sales"],
     "standing": false,
     "kickoffs": [
       {
@@ -1949,11 +2095,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "research",
-      "sales",
-      "forge"
-    ],
+    "teammates": ["research", "sales", "forge"],
     "standing": false,
     "kickoffs": [
       {
@@ -2022,12 +2164,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "spark",
-      "copy",
-      "mira",
-      "beacon"
-    ],
+    "teammates": ["spark", "copy", "mira", "beacon"],
     "standing": false,
     "kickoffs": [
       {
@@ -2096,11 +2233,7 @@
     ],
     "category": "research",
     "kind": "team",
-    "teammates": [
-      "probe",
-      "research",
-      "forge"
-    ],
+    "teammates": ["probe", "research", "forge"],
     "standing": false,
     "kickoffs": [
       {
@@ -2170,12 +2303,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "research",
-      "sales",
-      "copy",
-      "beacon"
-    ],
+    "teammates": ["research", "sales", "copy", "beacon"],
     "standing": false,
     "kickoffs": [
       {
@@ -2244,12 +2372,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "stage",
-      "coin",
-      "mira",
-      "copy"
-    ],
+    "teammates": ["stage", "coin", "mira", "copy"],
     "standing": false,
     "kickoffs": [
       {
@@ -2318,12 +2441,7 @@
     ],
     "category": "run",
     "kind": "team",
-    "teammates": [
-      "sentry",
-      "coin",
-      "mira",
-      "patch"
-    ],
+    "teammates": ["sentry", "coin", "mira", "patch"],
     "standing": false,
     "kickoffs": [
       {
@@ -2392,12 +2510,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "coin",
-      "forge",
-      "beacon",
-      "sales"
-    ],
+    "teammates": ["coin", "forge", "beacon", "sales"],
     "standing": false,
     "kickoffs": [
       {
@@ -2466,12 +2579,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "research",
-      "copy",
-      "beacon",
-      "lens"
-    ],
+    "teammates": ["research", "copy", "beacon", "lens"],
     "standing": false,
     "kickoffs": [
       {
@@ -2540,11 +2648,7 @@
     ],
     "category": "run",
     "kind": "team",
-    "teammates": [
-      "mend",
-      "patch",
-      "copy"
-    ],
+    "teammates": ["mend", "patch", "copy"],
     "standing": false,
     "kickoffs": [
       {
@@ -2613,11 +2717,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "lens",
-      "research",
-      "beacon"
-    ],
+    "teammates": ["lens", "research", "beacon"],
     "standing": false,
     "kickoffs": [
       {
@@ -2686,12 +2786,7 @@
     ],
     "category": "write",
     "kind": "team",
-    "teammates": [
-      "copy",
-      "mira",
-      "beacon",
-      "spark"
-    ],
+    "teammates": ["copy", "mira", "beacon", "spark"],
     "standing": false,
     "kickoffs": [
       {
@@ -2767,13 +2862,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "vault",
-      "copy",
-      "beacon",
-      "mira",
-      "mend"
-    ],
+    "teammates": ["vault", "copy", "beacon", "mira", "mend"],
     "standing": false,
     "kickoffs": [
       {
@@ -2842,12 +2931,7 @@
     ],
     "category": "build",
     "kind": "team",
-    "teammates": [
-      "smith",
-      "probe",
-      "copy",
-      "mira"
-    ],
+    "teammates": ["smith", "probe", "copy", "mira"],
     "standing": false,
     "kickoffs": [
       {
@@ -2917,12 +3001,7 @@
     ],
     "category": "write",
     "kind": "team",
-    "teammates": [
-      "beacon",
-      "copy",
-      "mira",
-      "verdict"
-    ],
+    "teammates": ["beacon", "copy", "mira", "verdict"],
     "standing": false,
     "kickoffs": [
       {
@@ -2991,12 +3070,7 @@
     ],
     "category": "run",
     "kind": "team",
-    "teammates": [
-      "research",
-      "sales",
-      "forge",
-      "patch"
-    ],
+    "teammates": ["research", "sales", "forge", "patch"],
     "standing": false,
     "kickoffs": [
       {
@@ -3065,16 +3139,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "research",
-      "mira",
-      "forge",
-      "beacon",
-      "coin",
-      "copy",
-      "lens",
-      "verdict"
-    ],
+    "teammates": ["research", "mira", "forge", "beacon", "coin", "copy", "lens", "verdict"],
     "standing": false,
     "kickoffs": [
       {
@@ -3143,12 +3208,7 @@
     ],
     "category": "run",
     "kind": "team",
-    "teammates": [
-      "research",
-      "sentry",
-      "copy",
-      "mira"
-    ],
+    "teammates": ["research", "sentry", "copy", "mira"],
     "standing": false,
     "kickoffs": [
       {
@@ -3217,9 +3277,7 @@
     "avatar": "icons/marketing-agency.svg",
     "presetAgentType": "gemini",
     "contextFile": "assistants/launchers/marketing-agency.md",
-    "enabledSkills": [
-      "cron"
-    ],
+    "enabledSkills": ["cron"],
     "prompts": [
       "Set up my standing marketing agency - first run.",
       "Open the agency - what's new since last week?",
@@ -3227,13 +3285,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "research",
-      "mira",
-      "beacon",
-      "copy",
-      "lens"
-    ],
+    "teammates": ["research", "mira", "beacon", "copy", "lens"],
     "standing": true,
     "rituals": [
       {
@@ -3302,9 +3354,7 @@
     "avatar": "icons/sales-org.svg",
     "presetAgentType": "gemini",
     "contextFile": "assistants/launchers/sales-org.md",
-    "enabledSkills": [
-      "cron"
-    ],
+    "enabledSkills": ["cron"],
     "prompts": [
       "Set up my standing sales org - first run.",
       "Open the sales org - what's on the pipeline this week?",
@@ -3312,12 +3362,7 @@
     ],
     "category": "sell",
     "kind": "team",
-    "teammates": [
-      "sales",
-      "research",
-      "forge",
-      "lens"
-    ],
+    "teammates": ["sales", "research", "forge", "lens"],
     "standing": true,
     "rituals": [
       {
@@ -3386,9 +3431,7 @@
     "avatar": "icons/customer-success-org.svg",
     "presetAgentType": "gemini",
     "contextFile": "assistants/launchers/customer-success-org.md",
-    "enabledSkills": [
-      "cron"
-    ],
+    "enabledSkills": ["cron"],
     "prompts": [
       "Set up my standing CS org - first run.",
       "Open CS - any at-risk accounts since last week?",
@@ -3396,12 +3439,7 @@
     ],
     "category": "run",
     "kind": "team",
-    "teammates": [
-      "mend",
-      "sales",
-      "lens",
-      "patch"
-    ],
+    "teammates": ["mend", "sales", "lens", "patch"],
     "standing": true,
     "rituals": [
       {
@@ -3470,9 +3508,7 @@
     "avatar": "icons/editorial-newsroom.svg",
     "presetAgentType": "gemini",
     "contextFile": "assistants/launchers/editorial-newsroom.md",
-    "enabledSkills": [
-      "cron"
-    ],
+    "enabledSkills": ["cron"],
     "prompts": [
       "Set up my standing newsroom - first run.",
       "Open the newsroom - what's queued for this week?",
@@ -3480,13 +3516,7 @@
     ],
     "category": "write",
     "kind": "team",
-    "teammates": [
-      "copy",
-      "research",
-      "mira",
-      "beacon",
-      "lens"
-    ],
+    "teammates": ["copy", "research", "mira", "beacon", "lens"],
     "standing": true,
     "rituals": [
       {
@@ -3555,9 +3585,7 @@
     "avatar": "icons/dev-shop.svg",
     "presetAgentType": "gemini",
     "contextFile": "assistants/launchers/dev-shop.md",
-    "enabledSkills": [
-      "cron"
-    ],
+    "enabledSkills": ["cron"],
     "prompts": [
       "Set up my standing dev shop - first run.",
       "Open the dev shop - what's shipping this week?",
@@ -3565,12 +3593,7 @@
     ],
     "category": "build",
     "kind": "team",
-    "teammates": [
-      "smith",
-      "patch",
-      "verdict",
-      "sentry"
-    ],
+    "teammates": ["smith", "patch", "verdict", "sentry"],
     "standing": true,
     "rituals": [
       {
@@ -3665,7 +3688,12 @@
     "enabledSkills": [
       "humanizer-tell-detector",
       "humanizer-rewrite-pass",
-      "humanizer-voice-match"
+      "humanizer-voice-match",
+      "voice-tone-guide",
+      "line-editor",
+      "passive-voice-fix",
+      "tone-adjustment",
+      "audience-analysis"
     ],
     "prompts": [
       "Scan this draft for AI tells - give me a score.",
