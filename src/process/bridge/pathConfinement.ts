@@ -90,6 +90,19 @@ function addRoot(dir: string | undefined | null): void {
   } catch {
     // Root may not exist yet; the resolved form is still registered.
   }
+  // Also register the OS-canonical (libuv) form. On Windows, candidate paths are
+  // canonicalized with fs/promises.realpath (GetFinalPathNameByHandle), which
+  // expands 8.3 short names (e.g. `RUNNER~1` -> `runneradmin`) to the long form;
+  // the pure-JS `realpathSync` above does NOT, so a root seeded from the short
+  // form would never match a candidate resolved to the long form. realpathSync.native
+  // uses the same libuv canonicalization as the candidate side, closing that gap.
+  // Same real directory, different name encoding — no widening of the authorized set.
+  try {
+    const realNative = realpathSync.native(resolved);
+    authorizedRoots.add(realNative);
+  } catch {
+    // Root may not exist yet, or native realpath is unavailable; the forms above apply.
+  }
 }
 
 /**
