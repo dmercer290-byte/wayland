@@ -243,8 +243,12 @@ afterPack: scripts/afterPack.js
 afterSign: scripts/afterSign.js
 
 linux:
+  # XP-BUILD-LINUX-01: ship distro-agnostic AppImage + rpm alongside deb so
+  # Fedora/RHEL/openSUSE and non-Debian users get an installable artifact.
   target:
+    - AppImage
     - deb
+    - rpm
   icon: resources/app.png
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
   category: Utility
