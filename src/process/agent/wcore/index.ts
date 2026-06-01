@@ -65,7 +65,7 @@ export class WCoreAgent {
   private _onPong: WCoreAgentOptions['onPong'];
   private options: WCoreAgentOptions;
   private activeMsgId: string | null = null;
-  private configBackup: { path: string; content: string | null } | null = null;
+  private configBackup: { path: string; content: string | null; written: string | null } | null = null;
   private mcpReadyPromise: Promise<void>;
   private mcpReadyResolve!: () => void;
   public sessionId?: string;
@@ -395,9 +395,7 @@ export class WCoreAgent {
         });
         this.onStreamEvent({
           type: 'error',
-          data: `Computer-use policy denied: ${event.reason} (op=${event.op}${
-            event.app ? `, app=${event.app}` : ''
-          })`,
+          data: `Computer-use policy denied: ${event.reason} (op=${event.op}${event.app ? `, app=${event.app}` : ''})`,
           msg_id: event.msg_id,
         });
         break;
@@ -606,8 +604,7 @@ export class WCoreAgent {
       // when the engine ships a new variant before this host learns it).
       default: {
         const unknownEvent = event as { type?: unknown };
-        const typeStr =
-          typeof unknownEvent.type === 'string' ? unknownEvent.type : '<non-string>';
+        const typeStr = typeof unknownEvent.type === 'string' ? unknownEvent.type : '<non-string>';
         console.warn(`[WCoreAgent] unknown event type "${typeStr}" — dropping`, event);
         break;
       }
@@ -716,29 +713,48 @@ export class WCoreAgent {
   private writeProjectConfig(content: string): void {
     const configPath = join(this.options.workspace, WCORE_PROJECT_CONFIG);
     const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : null;
-    this.configBackup = { path: configPath, content: existing };
 
     // If a project config already exists, only append lines that are not yet present.
     // This prevents duplicate TOML sections when restore failed on a previous run.
+    let written: string;
     if (existing) {
       const missingLines = content.split('\n').filter((line) => line.trim() && !existing.includes(line.trim()));
+      written = missingLines.length > 0 ? `${existing}\n${missingLines.join('\n')}\n` : existing;
       if (missingLines.length > 0) {
-        writeFileSync(configPath, `${existing}\n${missingLines.join('\n')}\n`, 'utf-8');
+        writeFileSync(configPath, written, 'utf-8');
       }
     } else {
-      writeFileSync(configPath, content, 'utf-8');
+      written = content;
+      writeFileSync(configPath, written, 'utf-8');
     }
+
+    // Track the exact bytes this agent left on disk so restore can detect
+    // whether a sibling agent (same workspace, concurrent chat) has since
+    // overwritten the file — see restoreProjectConfig for the TOCTOU guard.
+    this.configBackup = { path: configPath, content: existing, written };
   }
 
   /**
    * Restore or remove the .wcore.toml written by writeProjectConfig.
+   *
+   * Multiple agents in the same workspace share one config path, so restore
+   * is a read-modify-write race: the last writer wins and earlier agents must
+   * not clobber it. We only act when the on-disk content still matches what
+   * this agent wrote — otherwise a sibling agent owns the file and is
+   * responsible for its own restore.
    */
   private restoreProjectConfig(): void {
     if (!this.configBackup) return;
-    const { path, content } = this.configBackup;
+    const { path, content, written } = this.configBackup;
     this.configBackup = null;
 
     try {
+      const current = existsSync(path) ? readFileSync(path, 'utf-8') : null;
+      // A sibling agent has rewritten the file since we wrote it; leave it
+      // alone so we don't delete/clobber config another live agent depends on.
+      if (current !== written) {
+        return;
+      }
       if (content === null) {
         unlinkSync(path);
       } else {
