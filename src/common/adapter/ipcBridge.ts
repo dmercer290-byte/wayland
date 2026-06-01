@@ -2155,6 +2155,11 @@ export const project = {
   >('project.generate-knowledge-draft'),
   /** Append one dated decision to .wayland/decisions.md; returns the updated doc. */
   appendDecision: buildProvider<{ decisions: string }, { id: string; text: string }>('project.append-decision'),
+  /** Read IJFW's own per-project memory ({workspace}/.ijfw/memory/*.md) if present — read-only, attributed. */
+  readIjfwMemory: buildProvider<
+    { available: boolean; files: Array<{ name: string; content: string }> },
+    { id: string }
+  >('project.read-ijfw-memory'),
   /** Fired whenever the project list or a project's membership changes. */
   changed: buildEmitter<void>('project.changed'),
 };

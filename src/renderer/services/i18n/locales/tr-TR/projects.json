@@ -154,7 +154,13 @@
     "placeholder": "What was decided, and why?",
     "addFailed": "Could not save the decision.",
     "emptyTitle": "No decisions yet",
-    "emptyBody": "Record decisions as you make them. They ride into every chat in this project so nothing gets relitigated."
+    "emptyBody": "Record decisions as you make them. They ride into every chat in this project so nothing gets relitigated.",
+    "ijfwTitle": "Discovered by IJFW",
+    "ijfwSubtitle": "IJFW's own project memory, surfaced read-only. Add anything important as a decision above.",
+    "ijfwBadge": "IJFW",
+    "ijfwReadonly": "Read-only · from IJFW",
+    "ijfwJournal": "Activity log",
+    "ijfwHandoff": "Handoff"
   },
   "wizard": {
     "titleInstructions": "Instructions wizard",

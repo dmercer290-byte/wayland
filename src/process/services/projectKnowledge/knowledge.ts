@@ -171,6 +171,43 @@ export async function appendProjectDecision(workspace: string, text: string): Pr
   return next;
 }
 
+const IJFW_MEMORY_DIR = path.join('.ijfw', 'memory');
+const IJFW_FILE_CHAR_CAP = 24_000;
+
+export type IjfwMemoryFile = { name: string; content: string };
+
+/**
+ * Read IJFW's own per-project memory (`{workspace}/.ijfw/memory/*.md`) when IJFW
+ * has actually run in this project's workspace. This is IJFW's record (its
+ * progress journal / handoffs), surfaced READ-ONLY and clearly attributed in the
+ * project Memory tab — never edited here and never auto-injected into chats.
+ * Returns `{ available: false }` when the folder is absent.
+ */
+export async function readProjectIjfwMemory(
+  workspace: string
+): Promise<{ available: boolean; files: IjfwMemoryFile[] }> {
+  if (!workspace || !workspace.trim()) return { available: false, files: [] };
+  const dir = path.join(workspace, IJFW_MEMORY_DIR);
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch {
+    return { available: false, files: [] };
+  }
+  const mdFiles = entries.filter((n) => n.toLowerCase().endsWith('.md')).sort();
+  const files: IjfwMemoryFile[] = [];
+  for (const name of mdFiles) {
+    try {
+      const raw = await fs.readFile(path.join(dir, name), 'utf-8');
+      const content = raw.length > IJFW_FILE_CHAR_CAP ? `${raw.slice(0, IJFW_FILE_CHAR_CAP)}\n\n…(truncated)` : raw;
+      files.push({ name, content });
+    } catch {
+      // unreadable file — skip
+    }
+  }
+  return { available: files.length > 0, files };
+}
+
 /** List files dropped into the project's `.wayland/reference/` folder. */
 export async function listProjectReference(workspace: string): Promise<ReferenceFile[]> {
   if (!workspace || !workspace.trim()) return [];
