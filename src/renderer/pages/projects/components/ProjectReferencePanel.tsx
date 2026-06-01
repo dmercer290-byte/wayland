@@ -10,6 +10,7 @@ import { FileText, FolderOpen, Paperclip, X } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWorkspaceDragImport } from '@/renderer/pages/conversation/Workspace/hooks/useWorkspaceDragImport';
+import styles from './projectCards.module.css';
 
 type ReferenceFile = { name: string; path: string; size: number };
 
@@ -128,7 +129,7 @@ const ProjectReferencePanel: React.FC<{
           {refs.map((f) => (
             <div
               key={f.name}
-              className='group flex flex-col gap-8px rd-10px border border-solid border-2 bg-fill-1 px-14px py-13px'
+              className={`group flex flex-col gap-8px px-14px py-13px ${styles.card}`}
             >
               <div className='flex items-start justify-between'>
                 <div className='flex items-center justify-center w-32px h-32px rd-8px bg-fill-2 text-t-secondary'>

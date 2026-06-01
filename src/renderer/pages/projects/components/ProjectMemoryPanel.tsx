@@ -11,6 +11,7 @@ import { FolderOpen, Pencil, Plus } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import KnowledgeEditDrawer from './KnowledgeEditDrawer';
+import styles from './projectCards.module.css';
 
 /** Drop the seeded heading/blockquote boilerplate for the "is it empty" check. */
 const substantive = (raw: string): string =>
@@ -149,7 +150,7 @@ const ProjectMemoryPanel: React.FC<{
           </div>
         </div>
       ) : (
-        <div className='rd-12px border border-solid border-2 bg-fill-1 px-16px py-14px text-13px text-t-primary'>
+        <div className={`px-16px py-14px text-13px text-t-primary ${styles.surface}`}>
           <Markdown>{decisions}</Markdown>
         </div>
       )}
