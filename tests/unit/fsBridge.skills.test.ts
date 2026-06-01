@@ -27,10 +27,13 @@ describe('fsBridge skills functionality', () => {
       },
     }));
 
-    // Mock os
+    // Mock os. Path confinement (pathConfinement.ts) and NodePlatformServices
+    // both read os.tmpdir()/os.homedir() when seeding static authorized roots,
+    // so both must be present on the mock.
     vi.doMock('os', () => ({
-      default: { homedir: vi.fn(() => '/mock/home') },
+      default: { homedir: vi.fn(() => '/mock/home'), tmpdir: vi.fn(() => '/mock/tmp') },
       homedir: vi.fn(() => '/mock/home'),
+      tmpdir: vi.fn(() => '/mock/tmp'),
     }));
 
     // Mock fs/promises
@@ -247,6 +250,13 @@ describe('fsBridge skills functionality', () => {
         },
       };
     });
+
+    // vi.resetModules() above reset the platform-services singleton in the fresh
+    // module graph; re-register Node services so path getters used by confinement
+    // resolve instead of throwing "[Platform] Services not registered".
+    const { registerPlatformServices } = await import('@/common/platform');
+    const { NodePlatformServices } = await import('@/common/platform/NodePlatformServices');
+    registerPlatformServices(new NodePlatformServices());
   });
 
   afterEach(() => {
@@ -296,23 +306,25 @@ describe('fsBridge skills functionality', () => {
 
   describe('readFile ENOENT handling (Fixes ELECTRON-6W)', () => {
     it('returns null when file does not exist instead of throwing', async () => {
+      // Path is inside the authorized temp root so confinement accepts it and the
+      // ENOENT-handling branch (not the confinement reject) is what returns null.
       const handler = await getProvider('readFile');
-      const result = await handler({ path: '/nonexistent/gemini-temp-123/README.md' });
+      const result = await handler({ path: '/mock/tmp/gemini-temp-123/README.md' });
       expect(result).toBeNull();
     });
 
     it('still throws for non-ENOENT errors (e.g., EISDIR)', async () => {
-      // Create a directory entry so readFile throws EISDIR
-      mockFsStore[path.resolve('/mock/some-dir')] = { isDirectory: true };
+      // Create a directory entry (inside the authorized temp root) so readFile throws EISDIR
+      mockFsStore[path.resolve('/mock/tmp/some-dir')] = { isDirectory: true };
       const handler = await getProvider('readFile');
-      await expect(handler({ path: '/mock/some-dir' })).rejects.toThrow('EISDIR');
+      await expect(handler({ path: '/mock/tmp/some-dir' })).rejects.toThrow('EISDIR');
     });
   });
 
   describe('readFileBuffer ENOENT handling', () => {
     it('returns null when file does not exist instead of throwing', async () => {
       const handler = await getProvider('readFileBuffer');
-      const result = await handler({ path: '/nonexistent/temp-workspace/file.bin' });
+      const result = await handler({ path: '/mock/tmp/temp-workspace/file.bin' });
       expect(result).toBeNull();
     });
   });
