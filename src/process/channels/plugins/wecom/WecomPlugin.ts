@@ -5,7 +5,7 @@
  */
 
 import { BasePlugin } from '../BasePlugin';
-import { decryptPayloadFull, encryptPayload, sha1Sign } from './WecomCrypto';
+import { decryptPayloadFull, encryptPayload, sha1Sign, verifySignature as verifyWecomSignature } from './WecomCrypto';
 import {
   consumeResponseUrl,
   finishStream,
@@ -179,7 +179,7 @@ export class WecomPlugin extends BasePlugin {
 
   verifySignature(signature: string, timestamp: string, nonce: string, encrypted: string): boolean {
     if (!this.token) return false;
-    return sha1Sign(this.token, timestamp, nonce, encrypted) === signature;
+    return verifyWecomSignature(this.token, timestamp, nonce, encrypted, signature);
   }
 
   /**
