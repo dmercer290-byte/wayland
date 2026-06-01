@@ -50,7 +50,7 @@ vi.mock('../../src/common/adapter/constant', () => ({
 (globalThis as any).window = { dispatchEvent: vi.fn() };
 
 function emit(channel: string, payload?: unknown) {
-  for (const l of [...(listeners[channel] ?? [])]) {
+  for (const l of (listeners[channel] ?? []).slice()) {
     l({}, payload);
   }
 }

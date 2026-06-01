@@ -26,8 +26,7 @@ function resolveFuseTarget(electronPlatformName, appOutDir, packager) {
   // Linux: electron-builder exposes the final (sanitized) executable filename on the
   // packager. It only lowercases when no executableName is configured, so don't force
   // lowercase here — fall back to the lowercased sanitizedName only when unavailable.
-  const executableName =
-    packager?.executableName || packager?.appInfo?.sanitizedName?.toLowerCase() || productFilename;
+  const executableName = packager?.executableName || packager?.appInfo?.sanitizedName?.toLowerCase() || productFilename;
   return path.join(appOutDir, executableName);
 }
 
