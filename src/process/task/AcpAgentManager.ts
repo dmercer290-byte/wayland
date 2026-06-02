@@ -390,6 +390,32 @@ ${collectedResponses.join('\n')}`;
       const result = await this.agent.sendMessage(data);
       this.promptInFlight = false;
 
+      // The agent turn failed (provider 5xx/429/disconnect after the backend's
+      // internal retries, auth error, etc.). Surface it to the conversation so
+      // the user sees what went wrong instead of a spinner that silently clears
+      // with no answer, then synthesize a finish to release the loading state.
+      if (!result.success) {
+        const turnError = (result as { error?: { message?: string } }).error;
+        this.emitTurnError(turnError, (data as { msg_id?: string }).msg_id);
+        // Release the loading state. The backend may already have emitted a
+        // finish (consumeTrackedTurnFinished) — only synthesize one if not, to
+        // avoid a double finish.
+        if (!this.consumeTrackedTurnFinished(turnId)) {
+          this.clearTrackedTurn(turnId);
+          await this.handleFinishSignal(
+            {
+              type: 'finish',
+              conversation_id: this.conversation_id,
+              msg_id: (data as { msg_id?: string }).msg_id || uuid(),
+              data: null,
+            },
+            this.options.backend,
+            { trackActiveTurn: false }
+          );
+        }
+        return result;
+      }
+
       if (this.consumeTrackedTurnFinished(turnId)) {
         return result;
       }
@@ -423,6 +449,24 @@ ${collectedResponses.join('\n')}`;
       this.clearTrackedTurn(turnId);
       throw error;
     }
+  }
+
+  /**
+   * Surface a failed agent turn to the conversation (and any bound channels) as
+   * a visible error message. Without this, a provider 5xx/429/auth/disconnect
+   * failure that the backend returns (rather than throws) leaves the user with a
+   * spinner that clears and no answer.
+   */
+  private emitTurnError(error: { message?: string } | undefined, msgId?: string): void {
+    const detail = error?.message ? String(error.message) : 'The agent could not complete this request.';
+    const message = {
+      type: 'error' as const,
+      conversation_id: this.conversation_id,
+      msg_id: msgId ? `${msgId}_error` : `turn_error_${uuid()}`,
+      data: detail,
+    };
+    ipcBridge.acpConversation.responseStream.emit(message);
+    channelEventBus.emitAgentMessage(this.conversation_id, message);
   }
 
   /**
