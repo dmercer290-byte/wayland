@@ -1,4 +1,5 @@
 const { execSync } = require('child_process');
+const path = require('path');
 
 exports.default = async function afterSign(context) {
   const { electronPlatformName, appOutDir } = context;
@@ -7,11 +8,7 @@ exports.default = async function afterSign(context) {
     return;
   }
 
-  // Lazy-load notarize because @electron/notarize is ESM-only
-  const { notarize } = await import('@electron/notarize');
-
   const appName = context.packager.appInfo.productFilename;
-  const appBundleId = context.packager.appInfo.id;
   const appPath = `${appOutDir}/${appName}.app`;
 
   // Check if app is actually signed before attempting notarization
@@ -30,52 +27,63 @@ exports.default = async function afterSign(context) {
   }
 
   // Skip notarization if credentials are not provided
-  if (!process.env.appleId || !process.env.appleIdPassword) {
+  const appleId = process.env.appleId;
+  const appleIdPassword = process.env.appleIdPassword;
+  const teamId = process.env.teamId;
+  if (!appleId || !appleIdPassword || !teamId) {
     console.log('Skipping notarization - missing Apple ID credentials');
     return;
   }
 
-  console.log(`Starting notarization for ${appName} (${appBundleId})...`);
+  console.log(`Starting notarization for ${appName}...`);
 
-  // Notarization must never hang or hard-fail the release. Apple's notary queue
-  // can stall for hours, and notarytool's `--wait` then blocks indefinitely so
-  // the build never returns (observed: a release job stuck for hours). Race the
-  // submission against a hard timeout and treat ANY timeout/failure as
-  // best-effort: the app stays Developer-ID signed (just not stapled), which
-  // installs with a one-time Gatekeeper prompt and can be re-released to staple
-  // once Apple recovers. This keeps the whole multi-platform release from being
-  // held hostage to Apple's queue.
-  const NOTARIZE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-  let timeoutHandle;
-  const timeout = new Promise((_, reject) => {
-    timeoutHandle = setTimeout(
-      () => reject(new Error(`notarization timed out after ${NOTARIZE_TIMEOUT_MS / 60000} minutes`)),
-      NOTARIZE_TIMEOUT_MS
-    );
-  });
-
+  // We notarize via `xcrun notarytool` DIRECTLY instead of @electron/notarize so
+  // we can pass `--timeout`. notarytool's `--wait` blocks until Apple finishes;
+  // `--timeout` makes notarytool ITSELF give up and exit cleanly when Apple's
+  // queue stalls. That matters because a JS-level timeout (Promise.race) only
+  // stops *awaiting* — it can't kill the spawned notarytool process, which then
+  // keeps the build's Node process alive and hangs the whole release (observed:
+  // a release job stuck for hours on Apple's queue). Letting notarytool own the
+  // timeout means the child always exits.
+  //
+  // Any failure/timeout is non-fatal on purpose: the app stays Developer-ID
+  // signed (just not stapled), which installs with a one-time Gatekeeper prompt
+  // and can be re-released to staple once Apple's notary service recovers.
+  const zipPath = path.join(appOutDir, `${appName}-notarize.zip`);
   try {
-    await Promise.race([
-      notarize({
-        tool: 'notarytool',
-        appBundleId,
-        appPath: appPath,
-        appleId: process.env.appleId,
-        appleIdPassword: process.env.appleIdPassword,
-        teamId: process.env.teamId,
-      }),
-      timeout,
-    ]);
-    console.log('Notarization completed successfully');
+    // notarytool requires an archive (zip/pkg/dmg), not a raw .app bundle.
+    execSync(`ditto -c -k --keepParent "${appPath}" "${zipPath}"`, { stdio: 'inherit' });
+
+    // Pass the password through the environment ($NOTARYTOOL_PWD) so it never
+    // appears in this script's command string or logs.
+    const submitCmd = [
+      'xcrun notarytool submit',
+      `"${zipPath}"`,
+      `--apple-id "${appleId}"`,
+      `--team-id "${teamId}"`,
+      '--password "$NOTARYTOOL_PWD"',
+      '--wait',
+      '--timeout 20m',
+    ].join(' ');
+    execSync(submitCmd, {
+      stdio: 'inherit',
+      env: { ...process.env, NOTARYTOOL_PWD: appleIdPassword },
+    });
+
+    // Staple the ticket to the .app so Gatekeeper validates offline.
+    execSync(`xcrun stapler staple "${appPath}"`, { stdio: 'inherit' });
+    console.log('Notarization + stapling completed successfully');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // Non-fatal on purpose — see the comment above. Surface it loudly so a
-    // stalled queue is visible in the build summary, but let the build finish.
     console.warn(`::warning title=Notarization not completed::${message}`);
     console.warn(
       `⚠️ Continuing with a signed-but-unstapled build for ${appName}. Re-release to staple once Apple's notary service recovers.`
     );
   } finally {
-    clearTimeout(timeoutHandle);
+    try {
+      execSync(`rm -f "${zipPath}"`);
+    } catch {
+      // best-effort cleanup
+    }
   }
 };
