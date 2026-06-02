@@ -176,25 +176,27 @@ win:
   # Alternatively, electron-builder reads WIN_CSC_LINK + CSC_KEY_PASSWORD from
   # the environment automatically for a .pfx-based OV cert; leaving those set
   # also works without touching this file.
-  signtoolOptions:
-    # electron-builder 26 nests Windows signing options under signtoolOptions;
-    # certificateSubjectName and publisherName were rejected at the win.* level.
-    # Subject-name signing drives signtool against an OV/EV certificate imported
-    # into the Windows cert store. Empty WIN_CSC_SUBJECT_NAME => signing skipped.
-    certificateSubjectName: ${env.WIN_CSC_SUBJECT_NAME}
-    # Timestamp every signature so binaries stay valid after the cert expires.
-    timeStampServer: ${env.WIN_TIMESTAMP_URL}
-    rfc3161TimeStampServer: ${env.WIN_TIMESTAMP_URL}
-    signingHashAlgorithms:
-      - sha256
-    # Pin the publisher identity electron-updater enforces on the Windows
-    # auto-update path. Without this, the publisher check is a no-op even on a
-    # signed installer. Must match the CN of the signing certificate exactly.
-    publisherName:
-      - ${env.WIN_PUBLISHER_NAME}
-  # Make electron-updater REQUIRE a valid, matching Authenticode signature on
-  # every downloaded Windows update before it is applied — closes UPD-01.
-  verifyUpdateCodeSignature: true
+  # Windows code signing is DISABLED until the OV/EV certificate is available
+  # (waiting on Microsoft). NOTE: electron-builder's `${env.WIN_CSC_SUBJECT_NAME}`
+  # macro does NOT collapse to '' when the env var is undefined — it stays
+  # literal, so signtool engages and fails with
+  #   ⨯ Cannot find certificate ${env.WIN_CSC_SUBJECT_NAME}
+  # With no signtoolOptions, electron-builder produces an unsigned (but valid)
+  # Windows build. RESTORE this block (nested under signtoolOptions for
+  # electron-builder 26) once the WIN_CSC_SUBJECT_NAME / WIN_PUBLISHER_NAME /
+  # WIN_TIMESTAMP_URL secrets exist, and flip verifyUpdateCodeSignature back on:
+  #   signtoolOptions:
+  #     certificateSubjectName: ${env.WIN_CSC_SUBJECT_NAME}
+  #     timeStampServer: ${env.WIN_TIMESTAMP_URL}
+  #     rfc3161TimeStampServer: ${env.WIN_TIMESTAMP_URL}
+  #     signingHashAlgorithms:
+  #       - sha256
+  #     publisherName:
+  #       - ${env.WIN_PUBLISHER_NAME}
+  # Unsigned builds can't satisfy an Authenticode check, so the Windows
+  # auto-update signature gate stays OFF until signing is restored above
+  # (Windows install still works; Windows auto-update lands with the cert).
+  verifyUpdateCodeSignature: false
 
 nsis:
   oneClick: false
