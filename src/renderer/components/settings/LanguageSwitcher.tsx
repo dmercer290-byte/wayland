@@ -29,6 +29,11 @@ const LanguageSwitcher: React.FC = () => {
   return (
     <div className='flex items-center gap-8px'>
       <WaylandSelect ref={selectRef} className='w-160px' value={i18n.language} onChange={handleLanguageChange}>
+        <WaylandSelect.Option value='en-US'>English</WaylandSelect.Option>
+        <WaylandSelect.Option value='es-ES'>Español</WaylandSelect.Option>
+        <WaylandSelect.Option value='pt-BR'>Português (Brasil)</WaylandSelect.Option>
+        <WaylandSelect.Option value='de-DE'>Deutsch</WaylandSelect.Option>
+        <WaylandSelect.Option value='fr-FR'>Français</WaylandSelect.Option>
         <WaylandSelect.Option value='zh-CN'>简体中文</WaylandSelect.Option>
         <WaylandSelect.Option value='zh-TW'>繁體中文</WaylandSelect.Option>
         <WaylandSelect.Option value='ja-JP'>日本語</WaylandSelect.Option>
@@ -36,7 +41,6 @@ const LanguageSwitcher: React.FC = () => {
         <WaylandSelect.Option value='tr-TR'>Türkçe</WaylandSelect.Option>
         <WaylandSelect.Option value='ru-RU'>Русский</WaylandSelect.Option>
         <WaylandSelect.Option value='uk-UA'>Українська</WaylandSelect.Option>
-        <WaylandSelect.Option value='en-US'>English</WaylandSelect.Option>
       </WaylandSelect>
     </div>
   );
