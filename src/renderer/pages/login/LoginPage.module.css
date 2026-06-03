@@ -411,14 +411,21 @@
  *
  * Reset all three layers so only the outermost .login-page__input border
  * + background shows. */
+/* The app ships a GLOBAL `.arco-input-inner-wrapper { background: var(--fill-2)
+ * !important }` rule, and the Web UI renders pre-auth in Arco's LIGHT theme
+ * (where that token is white). A plain (even more-specific) override loses to
+ * that `!important`, so the inner-wrapper reads as a bright white box on the dark
+ * card — the field's intended border-only "flush on card" look is destroyed.
+ * These overrides must therefore also be `!important` to win the cascade. */
 .login-page__input-wrapper :global(.arco-input-inner-wrapper),
 .login-page__input-wrapper :global(.arco-input-inner-wrapper:hover),
-.login-page__input-wrapper :global(.arco-input-inner-wrapper:focus-within) {
-  border: none;
-  background: transparent;
+.login-page__input-wrapper :global(.arco-input-inner-wrapper:focus-within),
+.login-page__input-wrapper :global(.arco-input-inner-wrapper.arco-input-inner-wrapper-focus) {
+  border: none !important;
+  background: transparent !important;
   padding: 0;
   border-radius: 0;
-  box-shadow: none;
+  box-shadow: none !important;
 }
 .login-page__input-wrapper :global(.arco-input),
 .login-page__input-wrapper :global(.arco-input:hover),
@@ -449,4 +456,27 @@
   color: #777;
   display: flex;
   align-items: center;
+}
+
+/* Language picker is an Arco <Select>, not a native <select>: the visible box is
+ * `.arco-select-view`, which (same as the inputs) inherits Arco's light-theme
+ * white background pre-auth. The `.login-page__lang-select` rules above land on
+ * the outer `.arco-select` wrapper and never reach this inner element, so it
+ * renders as a white box on the dark card. Force it dark to match the field
+ * styling. `!important` for the same global-`!important` cascade reason as the
+ * inputs. */
+.login-page__lang-select :global(.arco-select-view) {
+  background-color: rgba(22, 22, 22, 0.85) !important;
+  border: 1px solid #2a2a2a !important;
+  border-radius: 8px;
+  color: #f0f0f0 !important;
+  box-shadow: none !important;
+}
+.login-page__lang-select :global(.arco-select-view-value),
+.login-page__lang-select :global(.arco-select-view-input) {
+  color: #f0f0f0 !important;
+}
+.login-page__lang-select :global(.arco-select-suffix),
+.login-page__lang-select :global(.arco-select-arrow-icon) {
+  color: #aaa !important;
 }
