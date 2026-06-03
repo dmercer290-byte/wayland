@@ -76,4 +76,46 @@ describe('sanitizeGeminiSchema', () => {
     expect(sanitizeGeminiSchema(null)).toEqual({ type: 'object', properties: {} });
     expect(sanitizeGeminiSchema(undefined)).toEqual({ type: 'object', properties: {} });
   });
+
+  // Regression: a tool whose schema has a property literally named "properties"
+  // (e.g. Notion's notion-create-pages) must NOT gain a bogus "type":"object"
+  // property injected into the properties map. The naive "has properties → add
+  // type:object" heuristic corrupts this into an invalid subschema → API 400.
+  it('does not inject a bogus type into a properties map that contains a "properties" field', () => {
+    const out = sanitizeGeminiSchema({
+      type: 'object',
+      properties: {
+        pages: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              properties: { type: 'object', description: 'page props' },
+              content: { type: 'string' },
+              icon: { type: 'string' },
+            },
+          },
+        },
+      },
+    }) as any;
+    const itemProps = out.properties.pages.items.properties;
+    expect(Object.keys(itemProps).sort()).toEqual(['content', 'icon', 'properties']);
+    expect(itemProps).not.toHaveProperty('type');
+    // additionalProperties stripped; the real subschemas survive intact.
+    expect(out.properties.pages.items).not.toHaveProperty('additionalProperties');
+    expect(out.properties.pages.items.type).toBe('object');
+    expect(itemProps.properties.type).toBe('object');
+  });
+
+  it('preserves a property literally named "type" as a subschema (not the type keyword)', () => {
+    const out = sanitizeGeminiSchema({
+      type: 'object',
+      properties: {
+        type: { type: 'string', description: 'a field called type' },
+      },
+    }) as any;
+    // The child "type" must remain its own subschema object, not be collapsed.
+    expect(out.properties.type).toEqual({ type: 'string', description: 'a field called type' });
+  });
 });

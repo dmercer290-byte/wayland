@@ -1,0 +1,24 @@
+diff --git a/dist/src/core/openaiContentGenerator.js b/dist/src/core/openaiContentGenerator.js
+index 2bdb1c5b9306902dabe47a5aedcf0e49bb954db6..549e8b9834e317770e26644660ed646bb591fea8 100644
+--- a/dist/src/core/openaiContentGenerator.js
++++ b/dist/src/core/openaiContentGenerator.js
+@@ -644,6 +644,19 @@ export class OpenAIContentGenerator {
+                         result[key] = value;
+                     }
+                 }
++                else if (key === 'properties' && value && typeof value === 'object' && !Array.isArray(value)) {
++                    // `properties` is a name->subschema MAP, not a schema node. Recurse
++                    // each child schema, but never run the map itself through convertTypes:
++                    // its trailing "has properties -> add type:object" guard would inject a
++                    // bogus `"type":"object"` property when a tool has a field literally
++                    // named "properties" (e.g. Notion's notion-create-pages), producing an
++                    // invalid subschema and a `400 Invalid schema for function` from the API.
++                    const props = {};
++                    for (const [pName, pSchema] of Object.entries(value)) {
++                        props[pName] = convertTypes(pSchema);
++                    }
++                    result[key] = props;
++                }
+                 else if (typeof value === 'object') {
+                     result[key] = convertTypes(value);
+                 }

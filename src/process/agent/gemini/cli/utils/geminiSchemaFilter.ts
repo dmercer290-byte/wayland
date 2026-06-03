@@ -5,17 +5,19 @@
  * OpenAI/Anthropic it rejects:
  *   - union `type` arrays (e.g. `['object','boolean']`) — must be a single string type
  *   - the structural keywords `oneOf` / `anyOf` / `allOf` / `not`
- *   - `$ref` / `$defs` / `definitions` / `$schema` / `additionalProperties` / `patternProperties`
+ *   - `$ref` / `$defs` / `definitions` / `$schema` / `patternProperties`
  *
- * MCP servers (e.g. Notion's `notion-create-pages`) routinely emit these, so every
- * Gemini request 400s with `Invalid schema for function '<tool>'` while that MCP is
- * connected. The OpenAI-compatible path already normalizes types
- * (openaiContentGenerator.convertGeminiParametersToOpenAI); this is the equivalent for
- * the Gemini-native path.
+ * This is a JSON-Schema-AWARE walker: it recurses through the keywords that hold
+ * subschemas (`properties` values, `items`) and treats everything else as data.
  *
- * Stripped keywords loosen validation at the Gemini layer only — the MCP server still
- * validates the actual tool-call arguments. A hard 400 on every request is the
- * alternative, so this is the correct trade-off.
+ * Critically it must NOT use the naive "if a node has `properties` but no `type`,
+ * add `type:'object'`" heuristic. That heuristic mis-fires when a tool's schema
+ * has a property literally named `properties` (e.g. Notion's `notion-create-pages`,
+ * whose page objects carry a `properties` field): the recursion lands on the
+ * `properties` MAP, sees a child named `properties`, and injects a bogus
+ * `"type":"object"` *property* into the map — producing `"type":"object"` where a
+ * subschema is expected and a `400 Invalid schema for function ...` from the API.
+ * Walking by structure instead of by key-name presence avoids that entirely.
  */
 
 // Keywords Gemini's function-calling schema does not support. Removed wholesale.
@@ -32,14 +34,21 @@ const UNSUPPORTED_KEYWORDS = new Set([
   'patternProperties',
 ]);
 
-function collapseTypeArray(value: unknown[]): string {
-  const primary = value.find((t) => typeof t === 'string' && t.toLowerCase() !== 'null');
-  return primary ? String(primary).toLowerCase() : 'object';
+function collapseType(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const primary = value.find((t) => typeof t === 'string' && t.toLowerCase() !== 'null');
+    return primary ? String(primary).toLowerCase() : 'object';
+  }
+  if (typeof value === 'string') {
+    return value.toLowerCase();
+  }
+  return value;
 }
 
-function sanitize(node: unknown): unknown {
+/** Recurse a single SCHEMA node. */
+function sanitizeSchema(node: unknown): unknown {
   if (Array.isArray(node)) {
-    return node.map(sanitize);
+    return node.map(sanitizeSchema);
   }
   if (typeof node !== 'object' || node === null) {
     return node;
@@ -50,22 +59,24 @@ function sanitize(node: unknown): unknown {
       continue;
     }
     if (key === 'type') {
-      if (Array.isArray(value)) {
-        result[key] = collapseTypeArray(value);
-      } else if (value === null || value === undefined) {
-        result[key] = 'object';
-      } else if (typeof value === 'string') {
-        result[key] = value.toLowerCase();
-      } else {
-        result[key] = value;
+      result.type = collapseType(value);
+    } else if (key === 'properties' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      // `properties` is a MAP of name -> subschema. Recurse each VALUE as a
+      // schema; never treat the map itself as a schema node.
+      const props: Record<string, unknown> = {};
+      for (const [propName, propSchema] of Object.entries(value as Record<string, unknown>)) {
+        props[propName] = sanitizeSchema(propSchema);
       }
-      continue;
+      result.properties = props;
+    } else if (key === 'items' || key === 'additionalItems') {
+      // A subschema, or (tuple form) an array of subschemas.
+      result[key] = Array.isArray(value) ? value.map(sanitizeSchema) : sanitizeSchema(value);
+    } else {
+      // Data keywords (description, required, enum, default, format, min/max...).
+      // Leave untouched — union `type` arrays only ever appear under `type`,
+      // which is handled above via the properties/items recursion.
+      result[key] = value;
     }
-    result[key] = typeof value === 'object' && value !== null ? sanitize(value) : value;
-  }
-  // A schema with properties but no (or an invalid) type is still 'object' to Gemini.
-  if (result.properties && (result.type === undefined || Array.isArray(result.type))) {
-    result.type = 'object';
   }
   return result;
 }
@@ -79,5 +90,5 @@ export function sanitizeGeminiSchema(schema: unknown): unknown {
   if (typeof schema !== 'object' || schema === null) {
     return { type: 'object', properties: {} };
   }
-  return sanitize(JSON.parse(JSON.stringify(schema)));
+  return sanitizeSchema(JSON.parse(JSON.stringify(schema)));
 }

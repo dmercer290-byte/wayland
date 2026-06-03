@@ -379,23 +379,7 @@ export class GeminiAgent {
         await mcpMgr.startConfiguredMcpServers();
       }
 
-      // Gemini's function-calling validator is far stricter than OpenAI/Anthropic:
-      // it rejects union `type` arrays and structural keywords (anyOf/$ref/...).
-      // MCP tools (e.g. Notion's notion-create-pages) routinely emit these, which
-      // 400s every Gemini request while that MCP is connected. Normalize each
-      // discovered MCP tool's schema in place now that discovery has completed.
-      // (Built-in tools have hand-written schemas and carry no serverName.)
-      try {
-        const registry = this.config.getToolRegistry?.();
-        for (const tool of registry?.getAllTools?.() ?? []) {
-          const mcpTool = tool as { serverName?: string; parameterSchema?: unknown };
-          if (typeof mcpTool.serverName === 'string') {
-            mcpTool.parameterSchema = sanitizeGeminiSchema(mcpTool.parameterSchema);
-          }
-        }
-      } catch (err) {
-        console.error('[GeminiAgent] Failed to sanitize MCP tool schemas:', err);
-      }
+      this.sanitizeMcpToolSchemas();
     }
 
     // aioncli-core's SkillManager.discoverSkills() reloads all skills from user directory,
@@ -709,6 +693,34 @@ export class GeminiAgent {
     }
   }
 
+  /**
+   * Collapse union `type` arrays and strip Gemini/OpenAI-unsupported schema
+   * keywords on every discovered MCP tool's parameterSchema, in place.
+   *
+   * Why per-turn and not once at init: MCP servers such as Notion register tools
+   * asynchronously and push tool-list *updates* after initialize ("supports tool
+   * updates. Listening for changes…"), each re-registering the tool with its raw
+   * schema. The request builder reads `tool.parameterSchema` live on every send
+   * (GeminiChat's per-turn tool-refresh callback → getFunctionDeclarations), so an
+   * init-only sweep is silently undone by a later update and the raw union reaches
+   * the API → `400 Invalid schema for function 'notion-create-pages'`. Running this
+   * immediately before each send guarantees the sanitized schema is what ships.
+   * Built-in tools carry no serverName and are left untouched.
+   */
+  private sanitizeMcpToolSchemas(): void {
+    try {
+      const registry = this.config?.getToolRegistry?.();
+      for (const tool of registry?.getAllTools?.() ?? []) {
+        const mcpTool = tool as { serverName?: string; parameterSchema?: unknown };
+        if (typeof mcpTool.serverName === 'string') {
+          mcpTool.parameterSchema = sanitizeGeminiSchema(mcpTool.parameterSchema);
+        }
+      }
+    } catch (err) {
+      console.error('[GeminiAgent] Failed to sanitize MCP tool schemas:', err);
+    }
+  }
+
   submitQuery(
     query: unknown,
     msg_id: string,
@@ -720,6 +732,9 @@ export class GeminiAgent {
   ): string | undefined {
     try {
       this.activeMsgId = msg_id;
+      // Re-sanitize MCP tool schemas right before the request builds its tools —
+      // async MCP tool-updates may have re-registered raw union schemas since init.
+      this.sanitizeMcpToolSchemas();
       let prompt_id = options?.prompt_id;
       if (!prompt_id) {
         prompt_id = this.config.getSessionId() + '########' + getPromptCount();
