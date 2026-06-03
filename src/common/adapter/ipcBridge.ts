@@ -408,6 +408,16 @@ export const skills = {
   /** Pin or unpin a skill by name. */
   setPinned: buildProvider<void, { name: string; pinned: boolean }>('skills.set-pinned'),
   /**
+   * Add a skill to a single conversation from the chat composer. The skill's
+   * body is injected once on that conversation's next turn (persisted in
+   * conversation.extra.sessionSkills) and shown in the loaded-skills chip.
+   * Rejects unknown or blocked (quarantined) skills.
+   */
+  addToConversation: buildProvider<
+    { ok: true } | { ok: false; error: string },
+    { conversationId: string; name: string }
+  >('skills.add-to-conversation'),
+  /**
    * Read / write the opt-in flag for CLI skill discovery
    * (`skills.cliDiscovery.enabled`). Toggling takes effect on the next
    * app restart — there's no live re-scan yet, so the renderer surfaces

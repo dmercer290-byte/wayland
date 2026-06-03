@@ -46,6 +46,7 @@ import {
   prepareFirstMessageWithSkillsIndex,
   buildTurnSkillContext,
   mergeLoadedSkillsExtra,
+  consumePendingSessionSkills,
 } from '@process/task/agentUtils';
 import { composePrompt } from '@process/services/constitution/composePrompt';
 import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapability.ts';
@@ -1188,9 +1189,15 @@ ${collectedResponses.join('\n')}`;
         // session start. Skipped for hidden/silent system feedback turns.
         if (!data.hidden && !data.silent) {
           try {
-            const rawUserText = contentToSend.includes(WAYLAND_FILES_MARKER)
-              ? contentToSend.split(WAYLAND_FILES_MARKER)[0]
+            // Rank against the original user text (not the rules-wrapped / augmented content).
+            const rawUserText = data.content.includes(WAYLAND_FILES_MARKER)
+              ? data.content.split(WAYLAND_FILES_MARKER)[0]
               : data.content;
+            // Skills the user added to this chat from the composer — inject once.
+            const pending = await consumePendingSessionSkills(this.conversation_id);
+            if (pending) {
+              contentToSend = `${pending}\n\n${contentToSend}`;
+            }
             const turnSkill = await buildTurnSkillContext(rawUserText, {
               alwaysOnNames: this.options.enabledSkills,
             });

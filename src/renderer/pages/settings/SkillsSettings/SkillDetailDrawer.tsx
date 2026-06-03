@@ -17,6 +17,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onTogglePin: (name: string, pinned: boolean) => void;
+  /** Whether this skill is currently installed for all chats (pinned/always-on). */
+  pinned: boolean;
 };
 
 type MetaRowProps = { label: string; value: React.ReactNode };
@@ -32,7 +34,7 @@ const MetaRow: React.FC<MetaRowProps> = ({ label, value }) => (
   </div>
 );
 
-const SkillDetailDrawer: React.FC<Props> = ({ entry, open, onClose, onTogglePin }) => {
+const SkillDetailDrawer: React.FC<Props> = ({ entry, open, onClose, onTogglePin, pinned }) => {
   const { t } = useTranslation(undefined, { keyPrefix: 'skills' });
 
   // Load the skill's markdown body so the user can actually read what the skill
@@ -281,31 +283,35 @@ const SkillDetailDrawer: React.FC<Props> = ({ entry, open, onClose, onTogglePin 
           )}
         </div>
 
-        {/* When Wayland loads this */}
+        {/* Install / availability */}
         <div>
           <Typography.Text
             className='block mb-6px text-11px uppercase font-semibold'
             style={{ color: 'var(--color-text-3)', letterSpacing: '0.06em' }}
           >
-            {t('detail.whenLoaded')}
+            {t('detail.installation', { defaultValue: 'Availability' })}
           </Typography.Text>
           <Typography.Text className='text-12px' style={{ color: 'var(--text-secondary)' }}>
-            Pinned skills are always injected into every assistant. Unpinned skills are available on-demand via{' '}
-            <code>wayland_search_skills</code>.
+            {t('detail.installExplain', {
+              defaultValue:
+                'Installed skills are loaded into every chat. Skills that are not installed are still found on-demand — relevant ones are surfaced automatically each turn, or via wayland_search_skills.',
+            })}
           </Typography.Text>
         </div>
 
-        {/* Quarantine alert or pin button */}
+        {/* Quarantine alert or install-for-all-chats toggle */}
         {isBlocked ? (
           <Alert type='error' content={t('detail.quarantined')} />
         ) : (
           <Button
-            type='outline'
-            icon={<Star />}
-            onClick={() => onTogglePin(entry.name, true)}
+            type={pinned ? 'primary' : 'outline'}
+            icon={<Star size={15} fill={pinned ? 'currentColor' : 'none'} />}
+            onClick={() => onTogglePin(entry.name, !pinned)}
             style={{ alignSelf: 'flex-start' }}
           >
-            {t('actions.pin')}
+            {pinned
+              ? t('actions.installedForAll', { defaultValue: 'Installed for all chats' })
+              : t('actions.installForAll', { defaultValue: 'Install for all chats' })}
           </Button>
         )}
       </div>

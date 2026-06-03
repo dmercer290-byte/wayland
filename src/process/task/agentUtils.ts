@@ -145,6 +145,48 @@ export async function buildTurnSkillContext(
 }
 
 /**
+ * Inject the bodies of any skills the user added to this conversation from the
+ * chat composer (conversation.extra.sessionSkills) that haven't been injected
+ * yet. One-time per skill (tracked via extra.injectedSessionSkills), persisted
+ * across restart, backend-agnostic. Returns the injection text ('' when none).
+ */
+export async function consumePendingSessionSkills(conversationId: string): Promise<string> {
+  try {
+    const db = await getDatabase();
+    const res = db.getConversation(conversationId);
+    if (!res.success || !res.data) return '';
+    const conversation = res.data;
+    const extra = (conversation.extra ?? {}) as { sessionSkills?: string[]; injectedSessionSkills?: string[] };
+    const wanted = extra.sessionSkills ?? [];
+    if (wanted.length === 0) return '';
+    const injected = new Set(extra.injectedSessionSkills ?? []);
+    const pending = wanted.filter((n) => !injected.has(n));
+    if (pending.length === 0) return '';
+
+    const lib = SkillLibrary.getInstance();
+    const blocks: string[] = [];
+    const nowInjected = [...injected];
+    for (const name of pending) {
+      nowInjected.push(name); // mark attempted regardless, so we never re-try a bad name
+      const entry = await lib.get(name);
+      if (!entry || entry.security?.verdict === 'blocked') continue;
+      const body = await lib.loadBody(name);
+      if (!body) continue;
+      const capped =
+        body.length > AUTOLOAD_BODY_CHAR_CAP ? `${body.slice(0, AUTOLOAD_BODY_CHAR_CAP)}\n…[truncated]` : body;
+      blocks.push(`[Skill added to this chat: ${name}]\n${capped}`);
+    }
+
+    const updatedExtra = { ...conversation.extra, injectedSessionSkills: nowInjected };
+    db.updateConversation(conversationId, { extra: updatedExtra } as Partial<typeof conversation>);
+    return blocks.join('\n\n');
+  } catch (error) {
+    mainWarn('[agentUtils]', 'consumePendingSessionSkills failed', error);
+    return '';
+  }
+}
+
+/**
  * Merge skills into conversation.extra.loadedSkills so the loaded-skills chip
  * surfaces them. Backend-agnostic; deduped by name; a no-op when nothing new.
  */
