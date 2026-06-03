@@ -115,7 +115,7 @@ const CLI_UNDERLYING_PROVIDER: Record<CliAgentKey, ProviderId> = {
 // ─── Injectable dependencies ──────────────────────────────────────────────────
 
 /** A catalog source built from a connected cloud provider's registry slice. */
-class CloudRegistrySource implements CatalogSource {
+export class CloudRegistrySource implements CatalogSource {
   readonly kind = 'api' as const;
   readonly providerId: ProviderId;
 
@@ -123,7 +123,13 @@ class CloudRegistrySource implements CatalogSource {
 
   constructor(providerId: ProviderId, registry: ModelsDevRegistry) {
     this.providerId = providerId;
-    const devKey = CLOUD_MODELS_DEV_KEY[providerId];
+    // `CLOUD_MODELS_DEV_KEY` only covers cloud providers. A google-auth Gemini
+    // connection routes here too (it can't be HTTP-probed), but its providerId
+    // is `google-gemini` — a normal API-key provider NOT in CLOUD_PROVIDERS — so
+    // the cloud-only map returns undefined and the catalog comes back EMPTY
+    // ("Connected · No models"). Fall back to the full provider→models.dev key
+    // map so OAuth-connected Gemini synthesizes its catalog from the registry.
+    const devKey = CLOUD_MODELS_DEV_KEY[providerId] ?? MODELS_DEV_PROVIDER_KEY[providerId];
     const entry = devKey ? registry[devKey] : undefined;
     this.models = entry ? Object.keys(entry.models).map((id) => ({ id, providerId })) : [];
   }
