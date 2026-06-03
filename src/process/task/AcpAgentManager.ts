@@ -42,7 +42,11 @@ import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher'
 import { extractAndStripThinkTags } from './ThinkTagDetector';
 import type { AgentKillReason } from './IAgentManager';
 import { hasNativeSkillSupport } from '@/common/types/acpTypes';
-import { prepareFirstMessageWithSkillsIndex } from '@process/task/agentUtils';
+import {
+  prepareFirstMessageWithSkillsIndex,
+  buildTurnSkillContext,
+  mergeLoadedSkillsExtra,
+} from '@process/task/agentUtils';
 import { composePrompt } from '@process/services/constitution/composePrompt';
 import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapability.ts';
 import { extractTextFromMessage, processCronInMessage } from './MessageMiddleware';
@@ -1175,6 +1179,29 @@ ${collectedResponses.join('\n')}`;
               presetAssistantId: this.options.presetAssistantId || this.options.customAgentId,
             });
             contentToSend = injectedContent;
+          }
+        }
+
+        // Per-turn skill auto-load (every genuine user turn, all backends).
+        // Proactively surfaces the most relevant skills for this message and
+        // inline-injects the single clear winner — works mid-chat, not just at
+        // session start. Skipped for hidden/silent system feedback turns.
+        if (!data.hidden && !data.silent) {
+          try {
+            const rawUserText = contentToSend.includes(WAYLAND_FILES_MARKER)
+              ? contentToSend.split(WAYLAND_FILES_MARKER)[0]
+              : data.content;
+            const turnSkill = await buildTurnSkillContext(rawUserText, {
+              alwaysOnNames: this.options.enabledSkills,
+            });
+            if (turnSkill.advert) {
+              contentToSend = `${turnSkill.advert}\n\n${contentToSend}`;
+            }
+            if (turnSkill.autoLoaded.length > 0) {
+              await mergeLoadedSkillsExtra(this.conversation_id, turnSkill.autoLoaded);
+            }
+          } catch (error) {
+            mainWarn('[AcpAgentManager]', 'per-turn skill context failed', error);
           }
         }
 
