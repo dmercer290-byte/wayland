@@ -157,14 +157,29 @@ export class WorkerTaskManagerJobExecutor implements ICronJobExecutor {
     this.emitCronTriggerMessage(conversationId, job.id, job.name, triggeredAt);
 
     // Pass both content and input — each agent type picks the field it uses.
-    await task.sendMessage({
-      content: messageText,
-      input: messageText,
-      msg_id: msgId,
-      files: workspaceFiles,
-      cronMeta,
-      hidden,
-    });
+    try {
+      await task.sendMessage({
+        content: messageText,
+        input: messageText,
+        msg_id: msgId,
+        files: workspaceFiles,
+        cronMeta,
+        hidden,
+      });
+    } catch (err) {
+      // A session-start timeout / crash leaves the agent half-started. Kill the
+      // task so the NEXT cron fire rebuilds a fully fresh one instead of reusing
+      // a poisoned task and crash-looping (BUG-5). AcpAgentManager's bootstrap
+      // reset already self-heals the cached promise; this additionally tears down
+      // any half-spawned child process. Re-throw so CronService records the error.
+      console.warn(`[CronExecutor] sendMessage failed for job ${job.id}; killing task ${conversationId}`, err);
+      try {
+        this.taskManager.kill(conversationId);
+      } catch (killErr) {
+        console.warn(`[CronExecutor] kill after sendMessage failure also failed for ${conversationId}:`, killErr);
+      }
+      throw err;
+    }
 
     if (needsSkillSuggest) {
       // Defensively unregister first in case a previous execution left a stale entry

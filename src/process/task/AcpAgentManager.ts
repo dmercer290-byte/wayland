@@ -1010,7 +1010,7 @@ ${collectedResponses.join('\n')}`;
     if (this.bootstrap) return this.bootstrap;
 
     this.bootstrapping = true;
-    this.bootstrap = (async () => {
+    const bootstrapPromise = (async () => {
       const { cliPath, customArgs, customEnv, yoloMode } = await this.resolveAgentCliConfig(data);
 
       const agentConfig = {
@@ -1062,6 +1062,19 @@ ${collectedResponses.join('\n')}`;
         return this.agent;
       });
     })();
+    // If bootstrap rejects (e.g. session-start timeout on a slow cold start),
+    // clear the cached promise so the NEXT sendMessage re-inits a fresh agent
+    // instead of re-throwing the poisoned promise forever. Without this, one
+    // timeout permanently bricks the task — every later cron fire / user turn
+    // immediately re-throws the original error (BUG-5 crash loop). Guard on
+    // identity so a newer bootstrap is never clobbered.
+    bootstrapPromise.catch(() => {
+      if (this.bootstrap === bootstrapPromise) {
+        this.bootstrap = undefined;
+        this.bootstrapping = false;
+      }
+    });
+    this.bootstrap = bootstrapPromise;
     return this.bootstrap;
   }
 
@@ -1244,11 +1257,18 @@ ${collectedResponses.join('\n')}`;
     } catch (e) {
       this.flushBufferedStreamTextMessages();
       this.clearBusyState();
+      // Turn the raw session-start timeout into something a user can act on, so a
+      // cron-fired (or interactive) run that hits a slow cold start surfaces a
+      // clear, non-cryptic message instead of leaving the surface dead (BUG-5).
+      const errorData =
+        e instanceof Error && e.message === 'Session start timed out'
+          ? 'The agent took too long to start (startup timed out). This usually means a slow cold start — it will retry on the next run.'
+          : parseError(e);
       const message: IResponseMessage = {
         type: 'error',
         conversation_id: this.conversation_id,
         msg_id: data.msg_id || uuid(),
-        data: parseError(e),
+        data: errorData,
       };
 
       // Backend handles persistence before emitting to frontend
@@ -1269,6 +1289,21 @@ ${collectedResponses.join('\n')}`;
         data: null,
       };
       ipcBridge.acpConversation.responseStream.emit(finishMessage);
+
+      // Emit a TERMINAL turn-completed event with state:'error'. Without this, a
+      // crashed/disconnected/timed-out turn never fires `turnCompleted`, so any
+      // autonomous workflow step dispatched onto this conversation hangs forever
+      // (BUG-6 GAP-B) and cron-fired runs leave the surface dead with no terminal
+      // signal (BUG-5). The initBridge listener treats state:'error' as terminal
+      // and flips the parent workflow step to `errored`. The service dedupes a
+      // double-emit within 1s, so this is safe alongside any later finish.
+      void ConversationTurnCompletionService.getInstance().notifyPotentialCompletion(this.conversation_id, {
+        status: 'finished',
+        state: 'error',
+        detail: errorData,
+        workspace: this.workspace,
+        backend: this.options.backend,
+      });
 
       return new Promise((_, reject) => {
         nextTickToLocalFinish(() => {
