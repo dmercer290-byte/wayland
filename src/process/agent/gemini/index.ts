@@ -36,6 +36,7 @@ import fs from 'fs';
 import { ApiKeyManager } from '@/common/api/ApiKeyManager';
 import { handleAtCommand } from './cli/atCommandProcessor';
 import { loadCliConfig } from './cli/config';
+import { sanitizeGeminiSchema } from './cli/utils/geminiSchemaFilter';
 import { loadExtensions } from './cli/extension';
 import { getGlobalTokenManager } from './cli/oauthTokenManager';
 import type { Settings } from './cli/settings';
@@ -376,6 +377,24 @@ export class GeminiAgent {
       const mcpMgr = this.config.getMcpClientManager?.();
       if (mcpMgr) {
         await mcpMgr.startConfiguredMcpServers();
+      }
+
+      // Gemini's function-calling validator is far stricter than OpenAI/Anthropic:
+      // it rejects union `type` arrays and structural keywords (anyOf/$ref/...).
+      // MCP tools (e.g. Notion's notion-create-pages) routinely emit these, which
+      // 400s every Gemini request while that MCP is connected. Normalize each
+      // discovered MCP tool's schema in place now that discovery has completed.
+      // (Built-in tools have hand-written schemas and carry no serverName.)
+      try {
+        const registry = this.config.getToolRegistry?.();
+        for (const tool of registry?.getAllTools?.() ?? []) {
+          const mcpTool = tool as { serverName?: string; parameterSchema?: unknown };
+          if (typeof mcpTool.serverName === 'string') {
+            mcpTool.parameterSchema = sanitizeGeminiSchema(mcpTool.parameterSchema);
+          }
+        }
+      } catch (err) {
+        console.error('[GeminiAgent] Failed to sanitize MCP tool schemas:', err);
       }
     }
 
