@@ -1,5 +1,10 @@
 # Release Please workflow
-# Runs on push to main to create/update release PRs.
+#
+# MANUAL-ONLY (workflow_dispatch). The real release path is the manual
+# release.yml (tag -> build -> publish). This workflow is kept available but
+# does NOT auto-run on push, to avoid stray release PRs/branches. Its manifest
+# (.release-please-manifest.json) is kept in sync with the shipped version.
+#
 # When a release PR is merged, creates a GitHub Release + tag,
 # then calls the Release workflow to build and upload assets.
 #
@@ -17,9 +22,7 @@
 name: Release Please
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
