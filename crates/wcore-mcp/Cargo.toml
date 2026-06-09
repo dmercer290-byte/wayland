@@ -34,3 +34,5 @@ test-utils = []
 # against a slow transport to confirm the cancel race returns promptly.
 wcore-mcp = { path = ".", features = ["test-utils"] }
 tokio-util.workspace = true
+tempfile.workspace = true
+serial_test.workspace = true

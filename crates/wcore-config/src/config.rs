@@ -1681,6 +1681,39 @@ pub fn app_config_dir() -> Option<PathBuf> {
     Some(wayland_config_dir())
 }
 
+/// Canonical `~/.wayland` profile home.
+///
+/// This is the stable dot-directory that plugins and their helper processes
+/// (e.g. the IJFW MCP memory server) agree on for profile-scoped state. It is
+/// distinct from [`wayland_config_dir`], which resolves the platform-native
+/// config dir (`~/Library/Application Support/wayland-core` on macOS,
+/// `%APPDATA%\wayland-core` on Windows). Plugin installers write under
+/// `~/.wayland`, so the host must expose the same root to launched servers.
+///
+/// Resolution order:
+///   1. `$WAYLAND_HOME`            (explicit sandbox / hermetic override)
+///   2. `dirs::home_dir()/.wayland` (default, cross-platform)
+///
+/// Never hardcodes a leading `/` — `dirs::home_dir()` keeps it correct on
+/// Windows. Falls back to a relative `.wayland` only if the home dir cannot
+/// be resolved at all (headless CI without `$HOME`).
+///
+/// This lives in `wcore-config` (the lowest crate the others can depend on) to
+/// be the canonical resolver. NOTE: the same `$WAYLAND_HOME`-or-`~/.wayland`
+/// pattern is currently re-implemented in several call sites (e.g.
+/// `wcore_tools::tirith_security::wayland_home`, `wcore-cron`, `wcore-pricing`,
+/// `wcore-cli`, `wcore-agent::bootstrap`). Migrating those onto this function is
+/// a follow-up consolidation, deliberately out of scope here to keep the change
+/// surgical and avoid colliding with concurrent work on those crates.
+pub fn profile_home() -> PathBuf {
+    if let Ok(wh) = std::env::var("WAYLAND_HOME") {
+        return PathBuf::from(wh);
+    }
+    dirs::home_dir()
+        .map(|h| h.join(".wayland"))
+        .unwrap_or_else(|| PathBuf::from(".wayland"))
+}
+
 // --- Config file loading and merging ---
 
 pub fn global_config_path() -> PathBuf {
@@ -4034,6 +4067,51 @@ skills_lifecycle = true
             "expected path ending in wayland-core, got {}",
             dir.display()
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // profile_home() — canonical ~/.wayland resolution (B1)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    #[serial_test::serial(wayland_home_env)]
+    fn profile_home_uses_wayland_home_override() {
+        let key = "WAYLAND_HOME";
+        let prev = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, "/tmp/test-profile-home");
+        }
+        let home = profile_home();
+        match prev {
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        assert_eq!(home, std::path::PathBuf::from("/tmp/test-profile-home"));
+    }
+
+    #[test]
+    #[serial_test::serial(wayland_home_env)]
+    fn profile_home_defaults_to_home_dot_wayland() {
+        let key = "WAYLAND_HOME";
+        let prev = std::env::var_os(key);
+        unsafe {
+            std::env::remove_var(key);
+        }
+        let home = profile_home();
+        match prev {
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        // Default ends in ".wayland" and is anchored at the user's home dir,
+        // never a hardcoded absolute root.
+        assert!(
+            home.ends_with(".wayland"),
+            "expected path ending in .wayland, got {}",
+            home.display()
+        );
+        if let Some(h) = dirs::home_dir() {
+            assert_eq!(home, h.join(".wayland"));
+        }
     }
 
     // -------------------------------------------------------------------------

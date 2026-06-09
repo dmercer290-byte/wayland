@@ -340,6 +340,17 @@ impl StdioTransport {
                 cmd.env(var, val);
             }
         }
+        // Profile-home handshake: expose the canonical `~/.wayland` profile root
+        // (honouring `WAYLAND_HOME`) so plugin MCP servers route their state to
+        // the same directory the host and the plugin installer agree on. The host
+        // contract is the vendor-neutral `WAYLAND_PROFILE_HOME`; a plugin whose
+        // server reads a differently-named var maps it on its own side (the host
+        // must not bake in any one plugin's variable name). Set after the
+        // allowlist but before per-server `env`, so an explicit operator override
+        // in mcp-servers.toml still wins.
+        if let Some(home) = wcore_config::config::profile_home().to_str() {
+            cmd.env("WAYLAND_PROFILE_HOME", home);
+        }
         // Per-server env entries from mcp-servers.toml layered last.
         cmd.envs(env);
 
@@ -995,6 +1006,70 @@ mod tests {
         assert!(
             !buf.contains("WAYLAND_TEST_SECRET_CANARY"),
             "canary appeared unexpectedly: {buf}"
+        );
+    }
+
+    /// B1 — the profile-home handshake reaches the spawned MCP child.
+    ///
+    /// Drives the real `StdioTransport::spawn` path against a tiny sh "server"
+    /// that writes `$WAYLAND_PROFILE_HOME` and a marker carrying any
+    /// `$IJFW_WAYLAND_PROFILE_HOME` to a file on its first stdin line. We pin
+    /// `WAYLAND_HOME` to a tempdir so the expected value is deterministic, then
+    /// assert the child saw the vendor-neutral var (proving the injection
+    /// survives `env_clear()`) AND that the host did NOT bake in any plugin's
+    /// `IJFW_*` alias — the host stays vendor-neutral.
+    #[tokio::test]
+    #[serial_test::serial(wayland_home_env)]
+    async fn b1_profile_home_reaches_spawned_child() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let out_path = tmp.path().join("env-dump");
+        let wh = tmp.path().join("profile-root");
+
+        let prev = std::env::var_os("WAYLAND_HOME");
+        unsafe {
+            std::env::set_var("WAYLAND_HOME", &wh);
+        }
+
+        // Server: on the first stdin line, dump the neutral profile-home var plus
+        // a bracketed marker for the (expected-absent) IJFW alias, emit one
+        // JSON-RPC-shaped line so the transport's reader is satisfied, then exit.
+        let script = format!(
+            "read line; printf '%s\\n[ijfw:%s]\\n' \"$WAYLAND_PROFILE_HOME\" \"$IJFW_WAYLAND_PROFILE_HOME\" > {dump}; \
+             printf '{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{}}}}\\n'",
+            dump = out_path.display()
+        );
+
+        let transport = StdioTransport::spawn("sh", &["-c".to_string(), script], &no_env())
+            .await
+            .expect("spawn profile-home fixture");
+
+        // Kick the server with one request so it reads its stdin line and dumps.
+        let _ = transport
+            .request(&JsonRpcRequest::new(1, "ping", None))
+            .await;
+        let _ = transport.close().await;
+
+        let restore = || match &prev {
+            Some(v) => unsafe { std::env::set_var("WAYLAND_HOME", v) },
+            None => unsafe { std::env::remove_var("WAYLAND_HOME") },
+        };
+
+        let dumped = std::fs::read_to_string(&out_path);
+        restore();
+        let dumped = dumped.expect("child should have written env dump");
+
+        let expected = wh.to_string_lossy();
+        let mut lines = dumped.lines();
+        assert_eq!(
+            lines.next().unwrap_or_default(),
+            expected,
+            "WAYLAND_PROFILE_HOME not seen by child: {dumped:?}"
+        );
+        // The host must NOT set any plugin-specific alias — the marker is empty.
+        assert_eq!(
+            lines.next().unwrap_or_default(),
+            "[ijfw:]",
+            "host leaked a plugin-specific profile-home alias: {dumped:?}"
         );
     }
 }
