@@ -21,7 +21,8 @@
 
 import { ipcBridge } from '@/common';
 import coworkSvg from '@/renderer/assets/icons/cowork.svg';
-import { LibraryPageHeader, LibrarySectionHeader } from '@/renderer/components/layout/library';
+import { LibrarySectionHeader } from '@/renderer/components/layout/library';
+import PageShell from '@/renderer/components/layout/PageShell';
 import {
   useAssistantEditor,
   useAssistantList,
@@ -36,7 +37,7 @@ import DeleteAssistantModal from '@/renderer/pages/settings/AssistantSettings/De
 import SkillConfirmModals from '@/renderer/pages/settings/AssistantSettings/SkillConfirmModals';
 import { resolveAvatarImageSrc } from '@/renderer/pages/settings/AssistantSettings/assistantUtils';
 import { Button, Message } from '@arco-design/web-react';
-import { Download, Plus } from 'lucide-react';
+import { Download, LayoutGrid, Plus } from 'lucide-react';
 import React, { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -344,35 +345,16 @@ const AssistantsLibraryPage: React.FC = () => {
   }, [t]);
 
   return (
-    <div className={styles.page} data-testid='assistants-library-page'>
-      {messageContext}
-      <LibraryPageHeader
-        title={t('assistants.title', { defaultValue: 'Assistants' })}
-        countLabel={t('assistants.totalCount', {
-          count: typeCounts.all,
-          defaultValue: '{{count}} assistants',
-        })}
-        testId='assistants-action-bar'
-        countTestId='assistants-total-count'
-      >
-        <Button
-          type='secondary'
-          icon={<Download size={14} />}
-          onClick={handleImport}
-          data-testid='assistants-import-cta'
-        >
-          {t('assistants.import.cta', { defaultValue: 'Import assistant' })}
-        </Button>
-        <Button
-          type='primary'
-          icon={<Plus size={14} />}
-          onClick={handleBuildMyOwn}
-          data-testid='assistants-build-my-own-cta'
-        >
-          {t('assistants.buildMyOwn.cta', { defaultValue: 'Build my own' })}
-        </Button>
-      </LibraryPageHeader>
-      <div className={styles.layout}>
+    <PageShell
+      title={t('assistants.title', { defaultValue: 'Assistants' })}
+      icon={<LayoutGrid size={20} />}
+      countLabel={t('assistants.totalCount', {
+        count: typeCounts.all,
+        defaultValue: '{{count}} assistants',
+      })}
+      width='full'
+      testId='assistants-library-page'
+      filterRail={
         <FilterRail
           query={query}
           onQueryChange={handleQueryChange}
@@ -385,37 +367,59 @@ const AssistantsLibraryPage: React.FC = () => {
           onReset={handleReset}
           hasActiveFilters={hasActiveFilters}
         />
-        <div className={styles.scroll}>
-          <section className={styles.launchpadSection} data-testid='assistants-launchpad-section'>
-            <div className={styles.launchpadHead}>
-              <span className={styles.launchpadTitle}>
-                {t('assistants.launchpad.title', { defaultValue: 'Your launchpad bar' })}
-              </span>
-              <span className={styles.launchpadHint}>
-                {t('assistants.launchpad.hint', {
-                  defaultValue: 'drag to reorder, click × to remove. Cards below jump in.',
-                })}
-              </span>
-            </div>
-            <LaunchpadBar mode='expanded' onAnchorClick={handleBarAnchorClick} />
-          </section>
-          {isFullyEmpty && !showBuildCardInBuiltins && (
-            <div className={styles.emptyState} data-testid='assistants-empty-state'>
-              {t('assistants.emptyState', { defaultValue: 'No assistants match your filters.' })}
-            </div>
-          )}
-          {renderGroup(
-            t('assistants.group.specialists', { defaultValue: 'Specialists' }),
-            groups.specialists,
-            'assistants-group-specialists'
-          )}
-          {renderGroup(
-            t('assistants.group.builtins', { defaultValue: 'Built-ins' }),
-            groups.builtins,
-            'assistants-group-builtins',
-            showBuildCardInBuiltins
-          )}
-        </div>
+      }
+      actions={
+        <>
+          <Button
+            type='secondary'
+            icon={<Download size={14} />}
+            onClick={handleImport}
+            data-testid='assistants-import-cta'
+          >
+            {t('assistants.import.cta', { defaultValue: 'Import assistant' })}
+          </Button>
+          <Button
+            type='primary'
+            icon={<Plus size={14} />}
+            onClick={handleBuildMyOwn}
+            data-testid='assistants-build-my-own-cta'
+          >
+            {t('assistants.buildMyOwn.cta', { defaultValue: 'Build my own' })}
+          </Button>
+        </>
+      }
+    >
+      {messageContext}
+      <div className={styles.scroll}>
+        <section className={styles.launchpadSection} data-testid='assistants-launchpad-section'>
+          <div className={styles.launchpadHead}>
+            <span className={styles.launchpadTitle}>
+              {t('assistants.launchpad.title', { defaultValue: 'Your launchpad bar' })}
+            </span>
+            <span className={styles.launchpadHint}>
+              {t('assistants.launchpad.hint', {
+                defaultValue: 'drag to reorder, click × to remove. Cards below jump in.',
+              })}
+            </span>
+          </div>
+          <LaunchpadBar mode='expanded' onAnchorClick={handleBarAnchorClick} />
+        </section>
+        {isFullyEmpty && !showBuildCardInBuiltins && (
+          <div className={styles.emptyState} data-testid='assistants-empty-state'>
+            {t('assistants.emptyState', { defaultValue: 'No assistants match your filters.' })}
+          </div>
+        )}
+        {renderGroup(
+          t('assistants.group.specialists', { defaultValue: 'Specialists' }),
+          groups.specialists,
+          'assistants-group-specialists'
+        )}
+        {renderGroup(
+          t('assistants.group.builtins', { defaultValue: 'Built-ins' }),
+          groups.builtins,
+          'assistants-group-builtins',
+          showBuildCardInBuiltins
+        )}
       </div>
 
       <AssistantEditDrawer
@@ -481,7 +485,7 @@ const AssistantsLibraryPage: React.FC = () => {
         customPathValue={skills.customPathValue}
         setCustomPathValue={skills.setCustomPathValue}
       />
-    </div>
+    </PageShell>
   );
 };
 

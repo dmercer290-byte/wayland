@@ -6,8 +6,84 @@
 
 import type { TProviderWithModel } from '@/common/config/storage';
 import { isOpenAIHost } from '@/common/utils/urlValidation';
+import { loadBaselineProviderCatalog } from '@process/providers/catalog/providerCatalogStore';
+import { getEnhancedEnv } from '@process/utils/shellEnv';
 
-type WCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex';
+/**
+ * The four wcore providers Wayland configures natively (each carries its own
+ * auth + base-url handling in {@link buildSpawnConfig}).
+ */
+type NativeWCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex';
+
+/**
+ * A wcore `--provider` value. Either a {@link NativeWCoreProvider} literal or a
+ * catalog provider id (a `providerCatalog.generated.json` slug). The branded
+ * string keeps the union open without collapsing to bare `string`: native
+ * literals still narrow in the `switch` below, while any catalog slug is
+ * assignable. Mirrors `ProviderId` in `src/process/providers/types.ts`.
+ *
+ * COR-2/BL-2: before this, `mapProvider` could only ever return one of the four
+ * native literals, so a catalog id could never reach `--provider` and every
+ * catalog provider collapsed to `--provider openai --base-url <url>`. The engine
+ * owns each catalog id's `base_url`/`api_path`/`env_var` in its bundled
+ * `providers.toml`, so the desktop must pass the id through verbatim and set the
+ * engine's expected scoped env var instead.
+ */
+type WCoreProvider = NativeWCoreProvider | (string & { readonly __brand?: 'catalog' });
+
+/**
+ * Lazily-built `catalogId -> envVar` map from the bundled provider catalog
+ * (T0.2 {@link loadBaselineProviderCatalog}). Used to (a) detect that a provider
+ * id is a real catalog id and (b) resolve the engine's expected scoped key env
+ * var name (e.g. `novita-ai` -> `NOVITA_API_KEY`, `alibaba` -> `DASHSCOPE_API_KEY`).
+ * Built once on first use; the bundled catalog is immutable at runtime.
+ */
+let catalogEnvVarByIdCache: ReadonlyMap<string, string> | null = null;
+function catalogEnvVarById(): ReadonlyMap<string, string> {
+  if (!catalogEnvVarByIdCache) {
+    const map = new Map<string, string>();
+    for (const entry of loadBaselineProviderCatalog()) {
+      map.set(entry.id, entry.envVar);
+    }
+    catalogEnvVarByIdCache = map;
+  }
+  return catalogEnvVarByIdCache;
+}
+
+/**
+ * The catalog id carried by a connected catalog provider, or `undefined` if the
+ * model is not a catalog provider.
+ *
+ * Where the id lives (the crux of T3.5): `legacyModelConfigBridge` persists a
+ * connected catalog provider as an `IProvider` whose `platform` collapses to
+ * `'openai-compatible'` and whose `id` is a random uuid - the ONLY surviving
+ * carrier of the catalog id is the bridge tag
+ * `__waylandModelRegistryBridge: 'v2:<catalogId>'` (that tag is preserved
+ * through `getMergedModelProviders`'s `...v` spread, so it reaches this spawn
+ * path intact). We extract `<catalogId>` from that tag first.
+ *
+ * Forward-compat fallback: if a future connect path stores the catalog id
+ * directly in `platform`, we accept that too.
+ *
+ * In both cases the candidate is validated against the bundled catalog - an id
+ * that is not a real catalog provider returns `undefined` so the caller falls
+ * back to the legacy native/openai path (never emitting a `--provider` the
+ * engine cannot resolve).
+ */
+function catalogIdFor(model: TProviderWithModel): string | undefined {
+  const catalog = catalogEnvVarById();
+
+  const tag = (model as unknown as Record<string, unknown>).__waylandModelRegistryBridge;
+  if (typeof tag === 'string' && tag.startsWith('v2:')) {
+    const tagged = tag.slice('v2:'.length);
+    if (tagged && catalog.has(tagged)) return tagged;
+  }
+
+  // Forward-compat: catalog id stored directly as the platform string.
+  if (model.platform && catalog.has(model.platform)) return model.platform;
+
+  return undefined;
+}
 
 /**
  * Map provider name to wcore provider name.
@@ -15,6 +91,12 @@ type WCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex';
  * Platform values: 'custom' | 'new-api' | 'gemini' | 'gemini-vertex-ai' | 'anthropic' | 'bedrock'
  */
 function mapProvider(model: TProviderWithModel): WCoreProvider {
+  // Catalog provider (one of the ~100): pass the catalog id through verbatim so
+  // the engine resolves base_url/api_path/env_var from its own providers.toml.
+  // Takes precedence over the native platform mapping below.
+  const catalogId = catalogIdFor(model);
+  if (catalogId) return catalogId;
+
   // Special handling for new-api: respect per-model protocol setting
   if (model.platform === 'new-api' && model.useModel && model.modelProtocols) {
     const protocol = model.modelProtocols[model.useModel];
@@ -71,9 +153,7 @@ export function defaultMaxTokensForModel(modelName: string): number | undefined 
   // When OpenAI ships a non-o-prefixed reasoning model (e.g. gpt-5-reasoning), revisit
   // this matcher - see .blackboard/audits/hard-coded-values.md HC-5.
   if (/^o\d+(-mini)?$/i.test(modelName)) return REASONING_MODEL_DEFAULT_MAX_TOKENS;
-  return /(-pro|-preview|-thinking|-reasoning)\b/i.test(modelName)
-    ? REASONING_MODEL_DEFAULT_MAX_TOKENS
-    : undefined;
+  return /(-pro|-preview|-thinking|-reasoning)\b/i.test(modelName) ? REASONING_MODEL_DEFAULT_MAX_TOKENS : undefined;
 }
 
 /**
@@ -110,6 +190,15 @@ export function buildSpawnConfig(
     autoApprove?: boolean;
     sessionId?: string;
     resume?: string;
+    /**
+     * Raw-engine (power-user) mode. When true, the engine runs on its OWN
+     * `config.toml` unmodified: NO `--provider`/`--model`/auth env, no
+     * `--max-tokens`, no `--system-prompt`, no `--auto-approve`. Only the
+     * Desktop↔engine session-protocol args (`--json-stream` + `--session-id`/
+     * `--resume`) are passed, so a wcore conversation behaves exactly like the
+     * standalone CLI would for that session id. The `model` argument is ignored.
+     */
+    rawEngine?: boolean;
   }
 ): {
   args: string[];
@@ -124,6 +213,20 @@ export function buildSpawnConfig(
    */
   resolvedMaxTokens: number | undefined;
 } {
+  // Raw-engine mode: pass ONLY the session-protocol args and let the engine
+  // resolve provider/model/auth/tokens/security from its own config.toml. No
+  // Desktop overrides leak in (mirrors what `WCoreManager` skips on the prompt
+  // side). The `model` argument is intentionally unused here.
+  if (options.rawEngine) {
+    const args = ['--json-stream'];
+    if (options.resume) {
+      args.push('--resume', options.resume);
+    } else if (options.sessionId) {
+      args.push('--session-id', options.sessionId);
+    }
+    return { args, env: {}, projectConfig: '', resolvedMaxTokens: undefined };
+  }
+
   const provider = mapProvider(model);
   const env: Record<string, string> = {};
   const args: string[] = ['--json-stream', '--provider', provider, '--model', model.useModel];
@@ -154,6 +257,19 @@ export function buildSpawnConfig(
   //              --base-url / BASE_URL (NOT OPENAI_BASE_URL)
   // wcore appends `/v1/chat/completions` to base_url, so URLs that already
   // end with `/v1` (e.g. DashScope) must be stripped to avoid double `/v1`.
+  const catalogId = catalogIdFor(model);
+  if (catalogId) {
+    // Catalog provider: set ONLY the engine's expected scoped key env var (e.g.
+    // NOVITA_API_KEY) and let the engine resolve base_url/api_path from its own
+    // providers.toml. Deliberately NO `--base-url` (RES-4: a shared/derived URL
+    // here would override the engine's authority) and NO shared OPENAI_API_KEY
+    // (ghost-key: a catalog provider must use its OWN scoped var).
+    const envVar = catalogEnvVarById().get(catalogId);
+    if (envVar && model.apiKey) env[envVar] = model.apiKey;
+    const projectConfig = buildProjectConfig(model, provider);
+    return { args, env, projectConfig, resolvedMaxTokens };
+  }
+
   switch (provider) {
     case 'anthropic':
       if (model.apiKey) env.ANTHROPIC_API_KEY = model.apiKey;
@@ -222,4 +338,152 @@ function buildProjectConfig(model: TProviderWithModel, provider: WCoreProvider):
 
   if (overrides.length === 0) return '';
   return ['[providers.openai.compat]', ...overrides, ''].join('\n');
+}
+
+/**
+ * Env var NAMES the wcore engine is allowed to inherit from `process.env`
+ * (SEC-1). Everything not on this list is dropped, so channel tokens, the
+ * vault, and unrelated provider/secret material no longer leak into the engine
+ * for its whole lifetime.
+ *
+ * Matching is case-insensitive (see {@link buildEngineSpawnEnv}) so a single
+ * entry covers both `HTTP_PROXY`/`http_proxy` and Windows' mixed-case
+ * `SystemRoot`/`ProgramFiles(x86)`.
+ *
+ * Bias is deliberately fail-safe toward NOT breaking auth/connectivity: when in
+ * doubt a var is kept rather than dropped. Categories:
+ *  - Runtime/home/temp: locate binaries and per-user config (PATH is the
+ *    bundled+merged value from `getEnhancedEnv`, not raw `process.env.PATH`).
+ *  - Windows system: omitting these breaks process spawning / DLL resolution.
+ *  - Locale/terminal/identity: correct text handling; some libs require a user.
+ *  - Proxy + TLS/CA certs: required to reach (and validate) provider API hosts.
+ *  - Provider auth: the engine may read these directly when the user exported
+ *    them in their shell rather than configuring a model in-app. The model's
+ *    own creds are ALSO injected explicitly (and unconditionally) in
+ *    `buildEngineSpawnEnv`, so this list only covers the shell-exported path.
+ *    These names all carry a secret marker, so the engine sandbox still strips
+ *    them from the agent's bash-tool context.
+ */
+const ENGINE_ENV_ALLOWLIST: readonly string[] = [
+  // ── Runtime / home / temp ──────────────────────────────────────────────
+  'PATH',
+  'HOME',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'USERPROFILE',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'PWD',
+  // ── Windows system (load-bearing for spawning + DLL resolution) ─────────
+  'SYSTEMROOT',
+  'SYSTEMDRIVE',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramData',
+  'CommonProgramFiles',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_ARCHITEW6432',
+  // ── Locale / terminal / identity ───────────────────────────────────────
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LC_MESSAGES',
+  'TZ',
+  'TERM',
+  'USER',
+  'LOGNAME',
+  'USERNAME',
+  // ── Proxy (corporate egress to provider APIs) ──────────────────────────
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'ALL_PROXY',
+  // ── TLS / CA certs (HTTPS to provider APIs must validate) ──────────────
+  'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  // ── Provider auth (shell-exported path; see JSDoc) ─────────────────────
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  'GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+  'AWS_REGION',
+  'AWS_DEFAULT_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_PROFILE',
+  'AWS_SHARED_CREDENTIALS_FILE',
+  'AWS_CONFIG_FILE',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+  'GOOGLE_CLOUD_PROJECT',
+];
+
+/**
+ * Build the environment for the wcore engine spawn (SEC-1).
+ *
+ * Replaces the previous `getEnhancedEnv(env)` call, which spread ALL of
+ * `process.env` into the engine. We still run `getEnhancedEnv` to get its
+ * correct PATH/cert/shell handling, then filter the result down to
+ * {@link ENGINE_ENV_ALLOWLIST}, and finally layer on:
+ *  1. `providerEnv` - the model's chosen auth creds from `buildSpawnConfig`.
+ *     Re-applied unconditionally so tightening the allowlist can never break
+ *     provider auth.
+ *  2. `toolKeys` - forwarded tool-backend keys (`ENV_NAME → value`), already
+ *     resolved from the encrypted store. Their names carry a sandbox secret
+ *     marker so the engine keeps them out of the agent's tool context (SEC-5).
+ *  3. `waylandHome` - the active profile's config dir (Design B). Forces the
+ *     engine's `wayland_config_dir()` to that dir, so the spawn reads the
+ *     active profile's OWN config.toml + memory.db + skills. Set explicitly for
+ *     every profile (default -> native dir; named -> `~/.wayland/profiles/<n>`)
+ *     so the live config file the panes edit and the file the engine reads can
+ *     never diverge. Layered last so a stray `process.env.WAYLAND_HOME` can't
+ *     override the resolved profile dir.
+ */
+export function buildEngineSpawnEnv(opts: {
+  providerEnv: Record<string, string>;
+  toolKeys?: Record<string, string>;
+  waylandHome?: string;
+}): Record<string, string> {
+  const full = getEnhancedEnv(opts.providerEnv);
+  const allowed = new Set(ENGINE_ENV_ALLOWLIST.map((name) => name.toUpperCase()));
+
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(full)) {
+    if (typeof value === 'string' && allowed.has(name.toUpperCase())) {
+      out[name] = value;
+    }
+  }
+
+  // Provider auth creds are load-bearing - always present regardless of the
+  // allowlist (the allowlist governs only what is pulled from process.env).
+  for (const [name, value] of Object.entries(opts.providerEnv)) {
+    out[name] = value;
+  }
+
+  // Forwarded tool-backend keys.
+  for (const [name, value] of Object.entries(opts.toolKeys ?? {})) {
+    out[name] = value;
+  }
+
+  // Active-profile config root (Design B). Authoritative - set last.
+  if (opts.waylandHome) {
+    out.WAYLAND_HOME = opts.waylandHome;
+  }
+
+  return out;
 }

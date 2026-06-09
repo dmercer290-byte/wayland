@@ -16,6 +16,8 @@ import { AlertTriangle } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -33,10 +35,11 @@ const PreferenceRow: React.FC<{
 
 export type TwitchConfigFormProps = {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 };
 
-const TwitchConfigForm: React.FC<TwitchConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const TwitchConfigForm: React.FC<TwitchConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [botUsername, setBotUsername] = useState('');
@@ -282,6 +285,8 @@ const TwitchConfigForm: React.FC<TwitchConfigFormProps> = ({ pluginStatus, onSta
           {t('settings.channels.twitch.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='twitch' modelSelection={modelSelection} />
+
     </div>
   );
 };

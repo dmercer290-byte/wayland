@@ -45,6 +45,27 @@ function shouldInjectBuiltinServer(server: IMcpServer): boolean {
   return server.status === undefined || server.status === 'connected';
 }
 
+/**
+ * Whether an MCP server should be injected into the fork Gemini runtime
+ * (@office-ai/aioncli-core via GeminiAgentManager).
+ *
+ * Builtin servers (image generation, skill search) are seeded into mcp.config
+ * with `status: undefined` and are never connection-tested, so they must be
+ * accepted on `undefined` exactly like the ACP session path
+ * (`shouldInjectBuiltinServer`); otherwise the fork Gemini backend silently
+ * drops them while ACP backends (Claude, Codex, Wayland Core) inject them.
+ * User-added servers still require an active `connected` status.
+ */
+export function shouldInjectGeminiMcpServer(server: IMcpServer): boolean {
+  if (!server.enabled) {
+    return false;
+  }
+  if (server.builtin === true) {
+    return server.status === undefined || server.status === 'connected';
+  }
+  return server.status === 'connected';
+}
+
 export function buildBuiltinAcpSessionMcpServers(
   mcpServers: IMcpServer[] | undefined | null,
   capabilities: AcpMcpCapabilities

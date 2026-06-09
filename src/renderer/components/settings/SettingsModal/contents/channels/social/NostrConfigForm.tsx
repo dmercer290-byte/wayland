@@ -15,6 +15,8 @@ import { AlertTriangle } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -32,10 +34,11 @@ const PreferenceRow: React.FC<{
 
 export interface NostrConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 }
 
-const NostrConfigForm: React.FC<NostrConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const NostrConfigForm: React.FC<NostrConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [privateKey, setPrivateKey] = useState('');
@@ -199,6 +202,8 @@ const NostrConfigForm: React.FC<NostrConfigFormProps> = ({ pluginStatus, onStatu
           {t('settings.channels.nostr.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='nostr' modelSelection={modelSelection} />
+
     </div>
   );
 };

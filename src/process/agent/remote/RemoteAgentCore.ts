@@ -24,6 +24,8 @@ export interface RemoteAgentCoreConfig {
   onStreamEvent: (data: IResponseMessage) => void;
   onSignalEvent?: (data: IResponseMessage) => void;
   onSessionKeyUpdate?: (sessionKey: string) => void;
+  /** Per-turn token usage callback (fired only when chat:final carries usage). */
+  onUsage?: (usage: unknown) => void;
 }
 
 /**
@@ -55,6 +57,7 @@ export class RemoteAgentCore {
   private readonly onStreamEvent: (data: IResponseMessage) => void;
   private readonly onSignalEvent?: (data: IResponseMessage) => void;
   private readonly onSessionKeyUpdate?: (sessionKey: string) => void;
+  private readonly onUsage?: (usage: unknown) => void;
 
   constructor(config: RemoteAgentCoreConfig) {
     this.id = config.conversationId;
@@ -63,6 +66,7 @@ export class RemoteAgentCore {
     this.onStreamEvent = config.onStreamEvent;
     this.onSignalEvent = config.onSignalEvent;
     this.onSessionKeyUpdate = config.onSessionKeyUpdate;
+    this.onUsage = config.onUsage;
 
     this.adapter = new AcpAdapter(this.id, 'remote');
   }
@@ -287,6 +291,13 @@ export class RemoteAgentCore {
       }
 
       case 'final': {
+        // Surface any per-turn token usage the gateway attached to this final
+        // event (untyped field; the manager parses it defensively). Fire before
+        // the text-fallback branches so it is reported even when content is
+        // recovered via history fallback.
+        if (event.usage !== undefined && this.onUsage) {
+          this.onUsage(event.usage);
+        }
         if (event.message) {
           const finalText = this.extractTextFromMessage(event.message);
           if (finalText && finalText.length > this.accumulatedAssistantText.length) {

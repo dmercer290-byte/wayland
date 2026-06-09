@@ -830,6 +830,19 @@
   color: var(--mcp-text-muted);
   border: 1px solid var(--mcp-border-bright);
 }
+.mcp-status-pill.mcp-status-checking {
+  background: var(--mcp-bg-2);
+  color: var(--mcp-text-secondary);
+  border: 1px solid var(--mcp-border-bright);
+}
+.mcp-status-pill .mcp-spin {
+  animation: mcp-pill-spin 0.8s linear infinite;
+}
+@keyframes mcp-pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .mcp-server-actions {
   display: flex;
   gap: 4px;

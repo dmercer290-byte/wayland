@@ -7,6 +7,7 @@
 import { ipcBridge } from '@/common';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import { ConfigStorage } from '@/common/config/storage';
+import { DEFAULT_ACCOUNT_ID, resolveAccountId } from '@/common/config/account';
 import { uuid } from '@/common/utils';
 import { MARQUEE_DEFAULT_RULES } from '@renderer/utils/model/marquee';
 import { useGeminiGoogleAuthModels } from '@/renderer/hooks/agent/useGeminiGoogleAuthModels';
@@ -64,7 +65,7 @@ export const isExperimentalProvider = (provider: { platform?: string; name?: str
   EXPERIMENTAL_MODEL_PATTERN.test(provider.platform ?? '') || EXPERIMENTAL_MODEL_PATTERN.test(provider.name ?? '');
 
 type UsageModel = { modelId: string; useCount: number; lastUsedMs: number };
-type ModelChoice = { provider: IProvider; useModel: string };
+type ModelChoice = { provider: IProvider; useModel: string; accountId?: string };
 
 const providerForModelId = (modelList: IProvider[], modelId: string): IProvider | undefined =>
   modelList.find((p) => p.model?.includes(modelId));
@@ -134,14 +135,14 @@ export const resolveFluxAuto = (modelList: IProvider[]): ModelChoice | null => {
  */
 const resolveSavedPin = (savedModel: unknown, modelList: IProvider[]): ModelChoice | null => {
   if (savedModel && typeof savedModel === 'object' && 'id' in savedModel) {
-    const { id, useModel } = savedModel as { id?: string; useModel?: string };
+    const { id, useModel, accountId } = savedModel as { id?: string; useModel?: string; accountId?: string };
     if (!useModel) return null;
     const exactMatch = modelList.find((m) => m.id === id);
     const platformMatch = !exactMatch
       ? modelList.find((m) => m.platform === id && m.model?.includes(useModel))
       : undefined;
     const resolved = exactMatch ?? platformMatch;
-    return resolved?.model?.includes(useModel) ? { provider: resolved, useModel } : null;
+    return resolved?.model?.includes(useModel) ? { provider: resolved, useModel, accountId } : null;
   }
   if (typeof savedModel === 'string') {
     const provider = modelList.find((m) => m.model?.includes(savedModel));
@@ -235,7 +236,14 @@ export const useGuidModelSelection = (agentKey: ProviderAgentKey = 'gemini'): Gu
   const setCurrentModel = useCallback(
     async (modelInfo: TProviderWithModel) => {
       selectedModelKeyRef.current = buildModelKey(modelInfo.id, modelInfo.useModel);
-      await ConfigStorage.set(storageKey, { id: modelInfo.id, useModel: modelInfo.useModel }).catch((error) => {
+      // Persist the account binding alongside the model (multi-account, audit
+      // C2/C5). Defaults to the implicit single-account row, so existing pins
+      // keep working untouched.
+      await ConfigStorage.set(storageKey, {
+        id: modelInfo.id,
+        useModel: modelInfo.useModel,
+        accountId: resolveAccountId(modelInfo),
+      }).catch((error) => {
         console.error('Failed to save default model:', error);
       });
       _setCurrentModel(modelInfo);
@@ -311,6 +319,7 @@ export const useGuidModelSelection = (agentKey: ProviderAgentKey = 'gemini'): Gu
       await setCurrentModel({
         ...defaultModel,
         useModel: resolvedUseModel,
+        accountId: chosen.accountId ?? DEFAULT_ACCOUNT_ID,
       });
     };
 

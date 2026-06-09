@@ -67,6 +67,25 @@ const renderStateBranch = (status: IjfwStatusPayload | null): React.ReactElement
   }
 };
 
+// PageShell migration (M8): the installed_current branch (FullPanelShell) is a
+// full-bleed, height:100% mail-style grid that owns its OWN page header (the
+// "Archive" breadcrumb topbar) and renders edge-to-edge with no centered cap.
+// A standard PageShell wrap would double the page title and break the grid, so
+// it gets a dedicated full-bleed container on the shared black background token
+// (var(--bg-base), the same token PageShell uses) with no inset padding. The
+// other five branches stay full-bleed-centered states inside `.page`.
+const isFullPanel = (status: IjfwStatusPayload | null): boolean =>
+  status?.status === 'installed_current' ||
+  // Mirrors the renderStateBranch default fallback (unknown -> FullPanelShell).
+  (status !== null &&
+    ![
+      'not_installed',
+      'installing',
+      'upgrading',
+      'installed_pending_activation',
+      'install_failed',
+    ].includes(status.status));
+
 const MemoryPage: React.FC = () => {
   const [status, setStatus] = useState<IjfwStatusPayload | null>(null);
 
@@ -127,8 +146,15 @@ const MemoryPage: React.FC = () => {
     };
   }, []);
 
+  const fullPanel = isFullPanel(status);
+
   return (
-    <div className={styles.page} data-testid='memory-page' role='region' aria-label='IJFW Memory'>
+    <div
+      className={fullPanel ? styles.pageFullBleed : styles.page}
+      data-testid='memory-page'
+      role='region'
+      aria-label='IJFW Memory'
+    >
       {renderStateBranch(status)}
     </div>
   );

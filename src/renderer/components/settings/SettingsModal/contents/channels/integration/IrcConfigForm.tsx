@@ -15,6 +15,8 @@ import { AlertTriangle } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -32,10 +34,11 @@ const PreferenceRow: React.FC<{
 
 export interface IrcConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 }
 
-const IrcConfigForm: React.FC<IrcConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const IrcConfigForm: React.FC<IrcConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [server, setServer] = useState('irc.libera.chat');
@@ -291,6 +294,8 @@ const IrcConfigForm: React.FC<IrcConfigFormProps> = ({ pluginStatus, onStatusCha
           {t('settings.channels.irc.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='irc' modelSelection={modelSelection} />
+
     </div>
   );
 };

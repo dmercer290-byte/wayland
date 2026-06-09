@@ -1,0 +1,22 @@
+.card {
+  background-color: var(--bg-1);
+  border: 1px solid var(--color-border-2);
+}
+
+.row {
+  background-color: var(--bg-2);
+  border: 1px solid var(--color-border-1);
+}
+
+.rowPrimary {
+  background-color: var(--brand-light);
+  border-color: var(--brand);
+}
+
+.icon {
+  color: var(--text-secondary);
+}
+
+.iconPrimary {
+  color: var(--brand);
+}

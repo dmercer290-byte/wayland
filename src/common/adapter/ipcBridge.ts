@@ -52,6 +52,7 @@ import type {
   ProviderConnState,
   ConnectError,
 } from '../../process/providers/types';
+import type { CatalogProviderEntry } from '../../process/providers/catalog/catalogProvider';
 
 export type SkillStats = {
   total: number;
@@ -546,6 +547,41 @@ export const onboarding = {
    * connected, with a deterministic keyword fallback for true cold start.
    */
   inferFocus: buildProvider<string[], { work: string }>('onboarding.infer-focus'),
+};
+
+/**
+ * A message held in MAIN-PROCESS memory because the engine had no usable
+ * provider when the user pressed send (the "asleep engine" flow). The body is
+ * never persisted to disk/sessionStorage (SEC-8: message bodies are secrets/PII)
+ * - the renderer keeps only the opaque `id` across an activation/OAuth round
+ * trip and reclaims the message with an exactly-once `take`.
+ */
+export type IPendingSend = {
+  /** Opaque id minted on hold; lets the renderer confirm its own held message. */
+  id: string;
+  conversationId: string;
+  message: string;
+  files: string[];
+  /** Epoch ms the message was held. */
+  createdAt: number;
+};
+
+/**
+ * Asleep-engine pending-send store (SEC-8). HUMAN/RENDERER ONLY - every method
+ * is remote-denied in `bridgeAllowlist.ts`: a remote/agent caller must never
+ * read a held message body (PII/secrets) or inject one into a conversation.
+ */
+export const pendingSend = {
+  /** Hold a message for a conversation; replaces any prior hold. Returns its id. */
+  hold: buildProvider<{ id: string }, { conversationId: string; message: string; files?: string[] }>(
+    'pendingSend.hold'
+  ),
+  /** Atomically remove + return the held message (exactly-once), or null. */
+  take: buildProvider<IPendingSend | null, { conversationId: string }>('pendingSend.take'),
+  /** Non-destructive check used to recover a hold after a renderer remount. */
+  peek: buildProvider<{ hasPending: boolean; id?: string }, { conversationId: string }>('pendingSend.peek'),
+  /** Drop a held message without sending it (user cancelled / left the thread). */
+  clear: buildProvider<{ ok: boolean }, { conversationId: string }>('pendingSend.clear'),
 };
 
 // Subscription check for Gemini models: used to dynamically decide whether to show gemini-3.1-pro-preview
@@ -1475,6 +1511,28 @@ export const channel = {
     { platform: string; pluginInstanceId: string; agentId: string; secret?: string }
   >('channel.rotate-webhook-token'),
 
+  // Resolve the public webhook base URL for a webhook-driven channel.
+  // Precedence: user-supplied URL > opt-in tunnel (cloudflared) > none.
+  // `configured: false` means the channel needs a public URL or the tunnel
+  // opt-in (it stays OFF by default because it opens a public ingress). The
+  // channel keeps verifying its provider signature regardless.
+  getWebhookExposure: buildProvider<
+    IBridgeResponse<{
+      configured: boolean;
+      publicUrl: string | null;
+      source: 'user' | 'tunnel' | 'none';
+      message: string;
+      webhookUrl: string | null;
+    }>,
+    {
+      platform: string;
+      tunnelEnabled: boolean;
+      connectionToken?: string;
+      userPublicUrl?: string;
+      provider?: 'cloudflared' | 'ngrok' | 'tailscale';
+    }
+  >('channel.get-webhook-exposure'),
+
   // Settings Sync
   syncChannelSettings: buildProvider<
     IBridgeResponse,
@@ -1487,6 +1545,10 @@ export const channel = {
 
   // Events
   pairingRequested: buildEmitter<IChannelPairingRequest>('channel.pairing-requested'),
+  // Fired whenever the pending pairing set changes (created / approved / rejected
+  // / expired). Carries the refreshed pending list so subscribers can render
+  // directly without an extra round-trip.
+  pairingRequestsChanged: buildEmitter<IChannelPairingRequest[]>('channel.pairing-requests-changed'),
   pluginStatusChanged: buildEmitter<{ pluginId: string; status: IChannelPluginStatus }>(
     'channel.plugin-status-changed'
   ),
@@ -1622,16 +1684,14 @@ export type IModelRegistryCreds =
   | { useGoogleAuth: true };
 
 /**
- * The chat-start dispatch payload for a curated/catalog model. Built main-side
- * from the model registry so the home picker no longer needs to look the
- * provider up in the legacy `model.config`. Carries the credential material
- * the conversation-create path passes to wcore / Gemini / ACP main-process
- * managers (`apiKey` / `baseUrl` / cloud `bedrockConfig`).
+ * The FULL chat-start dispatch payload for a curated/catalog model, built
+ * main-side from the model registry. Carries the decrypted credential material
+ * (`apiKey` / cloud `bedrockConfig` / `cloudFields`) the spawn path needs.
  *
- * Renderer note: the IPC surface returning this DOES include the decrypted
- * `apiKey` - the legacy `mode.getModelConfig` shape exposes it the same way,
- * and the chat-start dispatch needs to pass it forward to spawn the backend.
- * The plaintext never crosses process boundaries except into this payload.
+ * SECURITY (audit C4): this payload is MAIN-PROCESS ONLY. It must never cross
+ * the IPC boundary to the renderer - `resolveForChatStart` returns the
+ * non-secret {@link IModelRegistryChatStartHandle} instead, and the spawn path
+ * re-resolves the secret in main at dispatch time (`resolveModelSecretsForSpawn`).
  */
 export type IModelRegistryChatStartPayload = {
   /** A canonical, stable id for this provider (always equal to `providerId`). */
@@ -1680,11 +1740,41 @@ export type IModelRegistryChatStartPayload = {
    * Mirrors the legacy `IProvider.modelProtocols` map verbatim.
    */
   modelProtocols?: Record<string, string>;
+  /**
+   * Multi-account (issue #14): which connected account of the provider this
+   * resolution targets. Absent / `'default'` is the single-account case.
+   */
+  accountId?: string;
 };
 
-/** Result of resolving a curated/catalog model for chat-start. */
+/**
+ * The NON-SECRET chat-start handle returned to the renderer (audit C4). Carries
+ * everything the picker needs to bind a conversation to a (provider, account,
+ * model) - but NO decrypted credential material. The main process re-resolves
+ * the real `apiKey` / cloud creds at dispatch time from this handle, so the
+ * plaintext key never crosses IPC to the renderer or a paired WebUI.
+ */
+export type IModelRegistryChatStartHandle = {
+  /** A canonical, stable id for this provider (always equal to `providerId`). */
+  id: string;
+  providerId: ProviderId;
+  /** Short human label, e.g. `'OpenAI'`. */
+  name: string;
+  /** Legacy `IProvider.platform` string the dispatch arm selects on. */
+  platform: string;
+  /** The model id the user picked - written verbatim into `useModel`. */
+  modelId: string;
+  /** API base URL - empty string when the provider uses its canonical default. Non-secret. */
+  baseUrl: string;
+  /** Multi-account: the account this binding targets (`'default'` when single). */
+  accountId?: string;
+  /** Per-model protocol overrides for multi-protocol gateways. Non-secret. */
+  modelProtocols?: Record<string, string>;
+};
+
+/** Result of resolving a curated/catalog model for chat-start (renderer-facing, no secrets). */
 export type IModelRegistryResolveForChatStartResult =
-  | { ok: true; provider: IModelRegistryChatStartPayload }
+  | { ok: true; provider: IModelRegistryChatStartHandle }
   | { ok: false; error: 'not-connected' | 'undecryptable' | 'unsupported' | 'unknown' };
 
 /**
@@ -1734,6 +1824,11 @@ export const modelRegistry = {
   ),
   // Curated model list for a given CLI agent / backend key.
   curatedForAgent: buildProvider<CuratedModel[], { agentKey: string }>('modelRegistry.curatedForAgent'),
+  // The full connectable provider catalog (~100 named OpenAI-compatible
+  // providers from the engine's bundled `providers.toml`), sorted by
+  // displayName. Each entry carries its baseUrl/envVar so a catalog provider
+  // connects with just an API key (the engine resolves the endpoint).
+  getProviderCatalog: buildProvider<CatalogProviderEntry[], void>('modelRegistry.getProviderCatalog'),
   /**
    * Resolve a curated/catalog model into the chat-start payload (decrypted
    * key / baseUrl / platform). Used by the home model picker after the user
@@ -1742,7 +1837,7 @@ export const modelRegistry = {
    */
   resolveForChatStart: buildProvider<
     IModelRegistryResolveForChatStartResult,
-    { providerId: ProviderId; modelId: string }
+    { providerId: ProviderId; modelId: string; accountId?: string }
   >('modelRegistry.resolveForChatStart'),
   // Re-fetch + re-enrich every connected provider once; success-gated freshness stamp.
   refreshAll: buildProvider<IModelRegistryRefreshSummary, { reason?: 'manual' }>('modelRegistry.refreshAll'),
@@ -1754,6 +1849,102 @@ export const modelRegistry = {
   // Emitted once after every successful refreshAll / manual per-provider refresh
   // so an open picker / the Models page can re-fetch curated views live.
   listChanged: buildEmitter<void>('modelRegistry.list-changed'),
+};
+
+/**
+ * Presence-only view of one engine tool-backend key. The plaintext key is NEVER
+ * sent to the renderer - `wcoreToolKeys.list` returns only whether a key is
+ * stored for each backend.
+ */
+export type IWcoreToolKeyPresence = {
+  /** Canonical tool-backend id (e.g. `brave`, `tavily`, `exa`, `firecrawl`). */
+  id: string;
+  /** Whether an encrypted key is stored for this backend. */
+  hasKey: boolean;
+};
+
+/**
+ * Wayland Core tool-backend keys (web-search providers). HUMAN/RENDERER ONLY -
+ * `set`/`delete` mutate credential material for the engine tool sandbox and are
+ * remote-denied; `list` returns presence ONLY (never the plaintext key).
+ */
+export const wcoreToolKeys = {
+  // Store (insert or replace) the encrypted key for a tool backend.
+  set: buildProvider<{ ok: boolean }, { id: string; key: string }>('wcoreToolKeys.set'),
+  // Presence-only metadata for every supported tool backend (never the key).
+  list: buildProvider<IWcoreToolKeyPresence[], void>('wcoreToolKeys.list'),
+  // Remove a stored tool-backend key.
+  delete: buildProvider<{ ok: boolean }, { id: string }>('wcoreToolKeys.delete'),
+};
+
+/**
+ * Wayland Core engine `config.toml` sections (tools / security / memory /
+ * profiles, ...). HUMAN/RENDERER ONLY - `setSection` mutates the engine's
+ * security-load-bearing runtime config (tool allow-lists, sandbox policy, env
+ * passthrough). It is remote-denied in `bridgeAllowlist.ts` and must NEVER be
+ * exposed to the agent/engine tool surface: an agent that could call it could
+ * rewrite its own allow-list and escape the sandbox (SEC-6).
+ *
+ * The setter always targets the real user `config.toml` (no caller-supplied
+ * path) and honours the engine's config invariants (atomic, lossless,
+ * single-flight) via `configBridge.setSection`.
+ */
+export const wcoreConfig = {
+  // Read one top-level `config.toml` section (e.g. `tools`, `security`),
+  // or undefined when the section is absent.
+  getSection: buildProvider<Record<string, unknown> | undefined, { section: string }>('wcoreConfig.getSection'),
+  // Replace one top-level section wholesale, preserving every other section.
+  // HUMAN-ONLY; remote-denied; never reachable from the agent tool surface.
+  setSection: buildProvider<{ ok: boolean }, { section: string; value: Record<string, unknown> }>(
+    'wcoreConfig.setSection'
+  ),
+};
+
+/** A single Wayland Core profile, as listed by `wcoreProfiles.list`. */
+export type IWcoreProfile = {
+  /** Sanitized profile name (also the directory name under the profiles root). */
+  name: string;
+  /** Whether this profile is the active one. */
+  active: boolean;
+  /**
+   * Best-effort stats read from the profile's OWN config tree. Every field is
+   * OMITTED (not zeroed) when absent - a brand-new profile legitimately has no
+   * stats yet, and we never fabricate a count.
+   */
+  /** Model declared in the profile's `[default].model` (engine config.toml). */
+  model?: string;
+  /** Number of allow-listed tools in the profile's `[tools].allow_list`. */
+  tools?: number;
+  /** Number of skills installed in the profile's `skills/` dir. */
+  skills?: number;
+  /** `config.toml` last-modified time (epoch ms), for an "updated …" chip. */
+  updatedAt?: number;
+  /**
+   * Absolute config dir the engine actually reads for this profile. `default`
+   * maps to the native dir (`dirs::config_dir()/wayland-core`); named profiles
+   * to `~/.wayland/profiles/<name>/`. Surfaced so the UI shows the REAL path
+   * (Design B) instead of a fabricated `profiles/default`.
+   */
+  dir?: string;
+};
+
+/**
+ * Wayland Core profile directories (`~/.wayland/profiles/<name>/`). HUMAN-ONLY -
+ * create/clone/delete do filesystem mutation under the profiles root with a
+ * strict name sanitizer + realpath containment (SEC-4); they are remote-denied.
+ */
+export const wcoreProfiles = {
+  // List all profiles (name + active flag).
+  list: buildProvider<IWcoreProfile[], void>('wcoreProfiles.list'),
+  // Create an empty profile directory (sanitized name).
+  create: buildProvider<{ ok: boolean; error?: string }, { name: string }>('wcoreProfiles.create'),
+  // Clone an existing profile's config into a new one.
+  clone: buildProvider<{ ok: boolean; error?: string }, { from: string; to: string }>('wcoreProfiles.clone'),
+  // Activate a profile (persists the active marker). NOTE: the engine must be
+  // respawned for an active-profile switch to take effect (SEC-3).
+  activate: buildProvider<{ ok: boolean; error?: string }, { name: string }>('wcoreProfiles.activate'),
+  // Soft-delete a profile (moves it to a `.trash` sibling under the root).
+  remove: buildProvider<{ ok: boolean; error?: string }, { name: string }>('wcoreProfiles.remove'),
 };
 
 // Team Mode API
@@ -2063,6 +2254,62 @@ export const usage = {
     Array<{ modelId: string; useCount: number; lastUsedMs: number }>,
     { windowMs?: number; limit?: number }
   >('usage.queryRecentlyUsedModels'),
+};
+
+// Cost observability reads (cost_events table, migration v48). The renderer
+// (Mission Control cost panel) invokes these one-shot queries; the
+// CostAnalyticsService in the main process answers them over a shared SQLite
+// driver. All endpoints are read-only - writes go through CostRecorder.
+//
+// Remote (paired-device WebSocket) callers are denied ALL cost.* reads by the
+// `cost.` prefix in src/common/adapter/bridgeAllowlist.ts (no remote cost view
+// today); the namespace is left open for the WS-F budget mutations, which are
+// denied to remote callers up front.
+export const cost = {
+  /** Total cost + tokens + event count within a window. */
+  summary: buildProvider<
+    import('@process/services/cost/types').CostSummary,
+    import('@process/services/cost/types').CostWindow
+  >('cost.summary'),
+  /** Cost + tokens grouped by model id within a window (cost desc). */
+  byModel: buildProvider<
+    import('@process/services/cost/types').CostAggregate[],
+    import('@process/services/cost/types').CostWindow
+  >('cost.byModel'),
+  /** Cost + tokens grouped by backend within a window (cost desc). */
+  byBackend: buildProvider<
+    import('@process/services/cost/types').CostAggregate[],
+    import('@process/services/cost/types').CostWindow
+  >('cost.byBackend'),
+  /** Cost + tokens grouped by conversation id within a window (cost desc). */
+  byConversation: buildProvider<
+    import('@process/services/cost/types').CostAggregate[],
+    import('@process/services/cost/types').CostWindow
+  >('cost.byConversation'),
+  /** Cost + tokens grouped by team id within a window (cost desc). */
+  byTeam: buildProvider<
+    import('@process/services/cost/types').CostAggregate[],
+    import('@process/services/cost/types').CostWindow
+  >('cost.byTeam'),
+  /** Fixed-width time-bucketed series over a window. */
+  series: buildProvider<
+    import('@process/services/cost/types').CostSeriesPoint[],
+    { window: import('@process/services/cost/types').CostWindow; bucketMs: number }
+  >('cost.series'),
+  // --- Budgets / caps (Stage 1 / WS-F). All three are mutations or
+  //     spend-disclosing reads; remote-denied by the `cost.` prefix in
+  //     bridgeAllowlist.ts. listBudgets returns spend vs limit for the UI bars.
+  /** Insert or update a budget. Returns the persisted budget. */
+  upsertBudget: buildProvider<
+    import('@process/services/cost/types').Budget,
+    import('@process/services/cost/types').BudgetInput
+  >('cost.upsertBudget'),
+  /** Delete a budget by id. */
+  deleteBudget: buildProvider<void, string>('cost.deleteBudget'),
+  /** All budgets with their current-period spend. */
+  listBudgets: buildProvider<import('@process/services/cost/types').BudgetStatus[], void>('cost.listBudgets'),
+  /** One-time non-blocking over-budget warn notification (main -> renderer). */
+  budgetAlert: buildEmitter<import('@process/services/cost/types').BudgetAlert>('cost.budgetAlert'),
 };
 
 // ==================== Memory Archive (v0.6.4) ====================

@@ -6,9 +6,11 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@arco-design/web-react';
-import { Clock, Radar, RefreshCw, Users } from 'lucide-react';
+import { Button, Tabs } from '@arco-design/web-react';
+import { Clock, Gauge, RefreshCw, Users } from 'lucide-react';
 import { useMissionControl } from './useMissionControl';
+import { CostTab } from './cost/CostTab';
+import PageShell from '@/renderer/components/layout/PageShell';
 import type { LedgerCounts, LedgerEntry, LedgerStatus } from '@/common/types/missionControl';
 import styles from './MissionControl.module.css';
 
@@ -163,7 +165,7 @@ const Section: React.FC<{ label: string; accent: string; entries: LedgerEntry[] 
   );
 };
 
-const MissionControlPage: React.FC = () => {
+const OperationsView: React.FC = () => {
   const { t } = useTranslation();
   const { snapshot, loading, refresh } = useMissionControl();
   const entries = snapshot?.entries ?? [];
@@ -171,51 +173,62 @@ const MissionControlPage: React.FC = () => {
     snapshot?.counts ?? { running: 0, verifying: 0, pending: 0, blocked: 0, failed: 0, zombie: 0, done: 0, idle: 0, total: 0 };
 
   return (
-    <div className={styles.page}>
-      <div className={styles.inner}>
-        <div className={styles.header}>
-          <div>
-            <div className={styles.titleRow}>
-              <Radar size={26} className={styles.radar} />
-              <h1 className={styles.title}>{t('missionControl.pageTitle')}</h1>
-            </div>
-            <p className={styles.subtitle}>{t('missionControl.description')}</p>
-          </div>
-          <div className={styles.headerRight}>
-            <span className={styles.live}>
-              <span className={styles.liveDot} />
-              {t('missionControl.live')}
-            </span>
-            <Button size='small' icon={<RefreshCw size={14} />} loading={loading} onClick={() => void refresh()}>
-              {t('missionControl.refresh')}
-            </Button>
-          </div>
-        </div>
-
-        <div className={styles.statRow}>
-          {STAT_ORDER.map((status) => (
-            <StatTile key={status} status={status} count={counts[status]} />
-          ))}
-        </div>
-
-        {entries.length === 0 ? (
-          <div className={styles.empty}>
-            <Radar size={40} className={styles.emptyRadar} />
-            <span className={styles.emptyTitle}>{t('missionControl.empty')}</span>
-            <span className={styles.emptyHint}>{t('missionControl.emptyHint')}</span>
-          </div>
-        ) : (
-          SECTIONS.map((section) => (
-            <Section
-              key={section.key}
-              label={t(`missionControl.section.${section.key}`)}
-              accent={section.accent}
-              entries={entries.filter((e) => section.statuses.includes(e.status))}
-            />
-          ))
-        )}
+    <>
+      <div className={styles.opsToolbar}>
+        <span className={styles.live}>
+          <span className={styles.liveDot} />
+          {t('missionControl.live')}
+        </span>
+        <Button size='small' icon={<RefreshCw size={14} />} loading={loading} onClick={() => void refresh()}>
+          {t('missionControl.refresh')}
+        </Button>
       </div>
-    </div>
+
+      <div className={styles.statRow}>
+        {STAT_ORDER.map((status) => (
+          <StatTile key={status} status={status} count={counts[status]} />
+        ))}
+      </div>
+
+      {entries.length === 0 ? (
+        <div className={styles.empty}>
+          <Gauge size={40} className={styles.emptyRadar} />
+          <span className={styles.emptyTitle}>{t('missionControl.empty')}</span>
+          <span className={styles.emptyHint}>{t('missionControl.emptyHint')}</span>
+        </div>
+      ) : (
+        SECTIONS.map((section) => (
+          <Section
+            key={section.key}
+            label={t(`missionControl.section.${section.key}`)}
+            accent={section.accent}
+            entries={entries.filter((e) => section.statuses.includes(e.status))}
+          />
+        ))
+      )}
+    </>
+  );
+};
+
+const MissionControlPage: React.FC = () => {
+  const { t } = useTranslation();
+
+  return (
+    <PageShell
+      title={t('missionControl.pageTitle')}
+      icon={<Gauge size={20} />}
+      subtitle={t('missionControl.description')}
+      width='full'
+    >
+      <Tabs defaultActiveTab='operations' className={styles.tabs}>
+        <Tabs.TabPane key='operations' title={t('missionControl.tabs.operations')}>
+          <OperationsView />
+        </Tabs.TabPane>
+        <Tabs.TabPane key='cost' title={t('missionControl.tabs.cost')}>
+          <CostTab />
+        </Tabs.TabPane>
+      </Tabs>
+    </PageShell>
   );
 };
 

@@ -30,7 +30,7 @@
 import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Input, Message } from '@arco-design/web-react';
 import type { RefInputType } from '@arco-design/web-react/es/Input/interface';
-import { Search, Import as ImportIcon, Settings2, Plus } from 'lucide-react';
+import { Archive, Search, Import as ImportIcon, Settings2, Plus } from 'lucide-react';
 import { ipcBridge } from '@/common';
 import { memory as memoryBridge, ijfw as ijfwBridge } from '@/common/adapter/ipcBridge';
 import type { IjfwStatusPayload } from '@/common/adapter/ipcBridge';
@@ -381,6 +381,9 @@ const FullPanelShell: React.FC = () => {
         <div className={styles.topbarLeft}>
           {/* Breadcrumb */}
           <span className={styles.breadcrumb} data-testid='memory-full-panel-heading'>
+            <span className={styles.breadcrumbIcon} aria-hidden>
+              <Archive size={20} />
+            </span>
             <span className={styles.breadcrumbPrimary}>
               {t('archive.topbar.archive', 'Archive')}
             </span>

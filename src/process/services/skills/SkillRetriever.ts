@@ -23,6 +23,10 @@ export type RetrievalResult = {
   name: string;
   description: string;
   score: number;
+  /** How many DISTINCT query terms this doc actually contains. A corpus-size
+   * independent relevance signal: a spurious match shares one query word, a
+   * genuine match shares several. */
+  matchedTerms: number;
 };
 
 type DocRecord = {
@@ -137,10 +141,13 @@ export class SkillRetriever {
     const N = this.docs.length;
     if (N === 0) return [];
 
-    const queryTerms = tokenize(query);
+    // Distinct query terms - a repeated query word should not be scored or
+    // counted twice (also makes matchedTerms a clean distinct-term count).
+    const queryTerms = [...new Set(tokenize(query))];
     if (queryTerms.length === 0) return [];
 
     const scores = new Float64Array(N);
+    const matched = new Uint16Array(N);
 
     for (const term of queryTerms) {
       const df = this.df.get(term) ?? 0;
@@ -157,6 +164,7 @@ export class SkillRetriever {
         const norm = 1 - BM25_B + BM25_B * (doc.length / this.avgdl);
         const tfSat = (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * norm);
         scores[i] += idf * tfSat;
+        matched[i] += 1;
       }
     }
 
@@ -168,6 +176,7 @@ export class SkillRetriever {
           name: this.docs[i].name,
           description: this.docs[i].description,
           score: scores[i],
+          matchedTerms: matched[i],
         });
       }
     }

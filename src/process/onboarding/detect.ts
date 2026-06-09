@@ -22,6 +22,9 @@ import { agentRegistry } from '@process/agent/AgentRegistry';
 import { acpDetector } from '@process/agent/acp/AcpDetector';
 import { KeyDiscovery } from '@process/providers/detection/KeyDiscovery';
 import { getModelRegistryRepository } from '@process/providers/ipc/modelRegistryIpc';
+import { mirrorConnectOrRekey } from '@process/providers/legacyModelConfigBridge';
+import { autoRegisterOllamaInRepo } from '@process/onboarding/autoRegisterOllama';
+import type { OllamaRegistryRepo } from '@process/onboarding/autoRegisterOllama';
 
 import type { DetectionResult } from '@/common/types/onboarding';
 
@@ -250,6 +253,28 @@ function probeFluxConnected(): boolean {
 }
 
 /**
+ * Auto-register a detected local Ollama daemon as the `ollama-local` provider.
+ *
+ * Runs the idempotent registry upsert + catalog write, then mirrors the row to
+ * the legacy `model.config` so both persistence stores agree (the legacy
+ * selectors still read that blob). Fully guarded - a missing/uninitialised
+ * registry, or any repo error, degrades silently. Never throws.
+ */
+function autoWireOllama(ollama: DetectionResult['ollama']): void {
+  try {
+    if (!ollama.running) return;
+    const repo = getModelRegistryRepository();
+    if (!repo) return;
+    const outcome = autoRegisterOllamaInRepo(repo as unknown as OllamaRegistryRepo, ollama);
+    if (outcome.action === 'created' || outcome.action === 'refreshed') {
+      void mirrorConnectOrRekey(repo, 'ollama-local');
+    }
+  } catch {
+    // Auto-wiring is best-effort; onboarding detection must still succeed.
+  }
+}
+
+/**
  * Run the onboarding detection probes in parallel and assemble the result.
  *
  * Every probe is self-contained and never throws, so `Promise.all` here only
@@ -264,6 +289,12 @@ export async function runOnboardingDetection(): Promise<DetectionResult> {
     probeOllama(),
     probeFluxDesktop(),
   ]);
+
+  // Auto-wire a detected local Ollama daemon into the model registry so it is
+  // immediately selectable in chat. Best-effort + never throws - a registry
+  // that has not initialised yet (very early first run) simply skips, and the
+  // probe result is still returned to the renderer regardless.
+  autoWireOllama(ollama);
 
   return {
     name,

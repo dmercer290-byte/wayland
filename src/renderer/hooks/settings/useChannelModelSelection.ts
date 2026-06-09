@@ -3,17 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { Message } from '@arco-design/web-react';
 import { channel } from '@/common/adapter/ipcBridge';
 import { ConfigStorage } from '@/common/config/storage';
-import type { IProvider, TProviderWithModel } from '@/common/config/storage';
+import type { ChannelAgentConfigKey, ChannelModelConfigKey, IProvider, TProviderWithModel } from '@/common/config/storage';
 import { useModelProviderList } from '@renderer/hooks/agent/useModelProviderList';
 import { useGeminiModelSelection } from '@renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 import type { GeminiModelSelection } from '@renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
-
-type ChannelModelConfigKey =
-  | 'assistant.telegram.defaultModel'
-  | 'assistant.lark.defaultModel'
-  | 'assistant.dingtalk.defaultModel'
-  | 'assistant.weixin.defaultModel'
-  | 'assistant.wecom.defaultModel';
 
 /**
  * Wraps useGeminiModelSelection with ConfigStorage persistence for a specific channel config key.
@@ -67,13 +60,8 @@ export const useChannelModelSelection = (configKey: ChannelModelConfigKey): Gemi
         const modelRef = { id: provider.id, useModel: modelName };
         await ConfigStorage.set(configKey, modelRef);
 
-        const platform = configKey.replace('assistant.', '').replace('.defaultModel', '') as
-          | 'telegram'
-          | 'lark'
-          | 'dingtalk'
-          | 'weixin'
-          | 'wecom';
-        const agentKey = `assistant.${platform}.agent` as const;
+        const platform = configKey.replace('assistant.', '').replace('.defaultModel', '');
+        const agentKey = `assistant.${platform}.agent` as ChannelAgentConfigKey;
         const currentAgent = await ConfigStorage.get(agentKey);
         await channel.syncChannelSettings
           .invoke({

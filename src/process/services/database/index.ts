@@ -1374,6 +1374,58 @@ export class WaylandUIDatabase {
 
   /**
    * ==================
+   * Channel welcome marker (once-per-account "Hey, it's Wayland" handshake)
+   * ==================
+   */
+
+  /**
+   * Whether the given channel account has already received its welcome
+   * handshake. Keyed by platform + account identity so the welcome fires once
+   * per account, not once per app restart.
+   */
+  hasChannelWelcomed(platform: string, accountId: string): IQueryResult<boolean> {
+    try {
+      const row = this.db
+        .prepare('SELECT 1 FROM channel_welcome WHERE platform = ? AND account_id = ?')
+        .get(platform, accountId) as { 1: number } | undefined;
+      return { success: true, data: row !== undefined };
+    } catch (error: any) {
+      return { success: false, error: error.message, data: false };
+    }
+  }
+
+  /**
+   * Record that the given channel account has been welcomed. Idempotent: a
+   * second call for the same account is a no-op (INSERT OR IGNORE).
+   */
+  markChannelWelcomed(platform: string, accountId: string): IQueryResult<boolean> {
+    try {
+      this.db
+        .prepare('INSERT OR IGNORE INTO channel_welcome (platform, account_id, welcomed_at) VALUES (?, ?, ?)')
+        .run(platform, accountId, Date.now());
+      return { success: true, data: true };
+    } catch (error: any) {
+      return { success: false, error: error.message, data: false };
+    }
+  }
+
+  /**
+   * Clear the welcome marker for a channel account. Called on a genuine re-pair
+   * (logged out / account change) so the next connect re-sends the welcome.
+   */
+  clearChannelWelcome(platform: string, accountId: string): IQueryResult<boolean> {
+    try {
+      const result = this.db
+        .prepare('DELETE FROM channel_welcome WHERE platform = ? AND account_id = ?')
+        .run(platform, accountId);
+      return { success: true, data: result.changes > 0 };
+    } catch (error: any) {
+      return { success: false, error: error.message, data: false };
+    }
+  }
+
+  /**
+   * ==================
    * Channel User operations
    * ==================
    */

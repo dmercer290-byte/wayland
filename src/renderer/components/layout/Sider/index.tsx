@@ -263,13 +263,6 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
           siderTooltipProps={siderTooltipProps}
           onClick={() => handleTopZoneNav('/scheduled')}
         />
-        <SiderMissionControlEntry
-          isMobile={isMobile}
-          isActive={pathname.startsWith('/mission-control')}
-          collapsed={collapsed}
-          siderTooltipProps={siderTooltipProps}
-          onClick={() => handleTopZoneNav('/mission-control')}
-        />
         <SiderTeamsEntry
           isMobile={isMobile}
           isActive={pathname.startsWith('/teams')}
@@ -282,6 +275,13 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
           isActive={pathname.startsWith('/memory') || pathname.startsWith('/wiki')}
           collapsed={collapsed}
           siderTooltipProps={siderTooltipProps}
+        />
+        <SiderMissionControlEntry
+          isMobile={isMobile}
+          isActive={pathname.startsWith('/mission-control')}
+          collapsed={collapsed}
+          siderTooltipProps={siderTooltipProps}
+          onClick={() => handleTopZoneNav('/mission-control')}
         />
       </div>
 

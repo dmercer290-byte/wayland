@@ -10,6 +10,7 @@ import type { SessionManager } from '../core/SessionManager';
 import type { BasePlugin, PluginMessageHandler, PluginConfirmHandler } from '../plugins/BasePlugin';
 import { hasPluginCredentials } from '../types';
 import type { IChannelPluginConfig, IChannelPluginStatus, IUnifiedIncomingMessage, PluginType } from '../types';
+import { getChannelWelcomeService } from './ChannelWelcomeService';
 
 // Plugin registry - maps plugin types to their constructors
 // Will be populated when plugins are implemented
@@ -164,6 +165,18 @@ export class PluginManager {
       plugin.onConfirm(this.confirmHandler);
     }
 
+    // Let the plugin push async status updates (e.g. a new pairing QR) to the
+    // renderer between the start/stop boundaries we already emit. Also the
+    // moment a self-initiating channel learns its own address (WhatsApp/Email
+    // self-target), so this is where we fire the welcome-on-connect handshake.
+    // It is idempotent: the once-per-account marker skips repeats, and a null
+    // self target (bot channels) is a no-op (those get welcomed on first
+    // contact instead).
+    plugin.onStatusChange(() => {
+      void this.emitStatusChange(id, plugin);
+      void this.maybeWelcomeOnConnect(plugin);
+    });
+
     try {
       // Start plugin
       await plugin.start();
@@ -191,6 +204,13 @@ export class PluginManager {
 
     // Emit status change event
     this.emitStatusChange(id, plugin);
+
+    // Welcome-on-connect for channels whose self target is known synchronously
+    // at start (e.g. Email, where the inbox address is fixed at config time).
+    // Socket-backed channels (WhatsApp) learn their address asynchronously and
+    // are welcomed via the onStatusChange path above instead. Both paths are
+    // idempotent through the once-per-account marker.
+    void this.maybeWelcomeOnConnect(plugin);
   }
 
   /**
@@ -263,6 +283,14 @@ export class PluginManager {
       botUsername: botInfo?.username,
       hasToken: hasPluginCredentials(config.type, config.credentials),
       isExtension: !BUILTIN_TYPES.has(config.type),
+      qrCode: plugin?.getQrCode() ?? undefined,
+      connectionState: plugin?.getConnectionState() ?? undefined,
+      whatsappMode:
+        config.type === 'whatsapp'
+          ? config.credentials?.mode === 'dedicated'
+            ? 'dedicated'
+            : 'personal'
+          : undefined,
     };
   }
 
@@ -297,6 +325,27 @@ export class PluginManager {
       hasToken: hasPluginCredentials(config.type, config.credentials),
     };
     channelBridge.pluginStatusChanged.emit({ pluginId, status });
+  }
+
+  /**
+   * Welcome-on-connect for channels that can initiate a thread. Runs on every
+   * status change (cheap: skips immediately when there is no self target or the
+   * account is not yet known), so by the time a self-initiating channel reports
+   * its own address the welcome fires exactly once per account.
+   */
+  private async maybeWelcomeOnConnect(plugin: BasePlugin): Promise<void> {
+    if (plugin.status !== 'running') return;
+    const target = plugin.getSelfTarget();
+    if (!target) return; // bot channels are welcomed on first contact instead
+    const accountId = plugin.getAccountIdentity();
+    if (!accountId) return; // identity not learned yet; retry on next status change
+    try {
+      await getChannelWelcomeService().welcomeOnConnect(plugin.type, accountId, target, (chatId, msg) =>
+        plugin.sendMessage(chatId, msg)
+      );
+    } catch (err) {
+      console.warn('[PluginManager] welcome-on-connect failed:', err);
+    }
   }
 
   /**

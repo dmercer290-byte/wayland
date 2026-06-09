@@ -10,10 +10,12 @@ import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import WhatsAppConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/messaging/WhatsAppConfigForm';
 
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const WhatsAppSetup: React.FC = () => {
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
+  const modelSelection = useChannelModelSelection('assistant.whatsapp.defaultModel');
 
   const loadStatus = useCallback(async () => {
     try {
@@ -43,7 +45,7 @@ const WhatsAppSetup: React.FC = () => {
       displayName='WhatsApp'
       pluginId={pluginStatus?.id ?? 'whatsapp_default'}
     >
-      <WhatsAppConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <WhatsAppConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

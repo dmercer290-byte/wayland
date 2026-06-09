@@ -35,6 +35,7 @@ const ModelsSettings = React.lazy(() => import('@renderer/pages/settings/ModelsS
 const SkillsSettings = React.lazy(() => import('@renderer/pages/settings/SkillsSettings'));
 const StorageSettings = React.lazy(() => import('@renderer/pages/settings/StorageSettings'));
 const WCoreSettings = React.lazy(() => import('@renderer/pages/settings/WCoreSettings'));
+const WCoreConfig = React.lazy(() => import('@renderer/pages/settings/WCoreConfig'));
 const GeminiSettings = React.lazy(() => import('@renderer/pages/settings/GeminiSettings'));
 const SystemSettings = React.lazy(() => import('@renderer/pages/settings/SystemSettings'));
 const VoiceSettings = React.lazy(() => import('@renderer/pages/settings/VoiceSettings'));
@@ -105,9 +106,11 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
             />
             {/* WORKSPACE */}
             <Route path='/settings/assistants' element={withRouteFallback(AssistantSettings)} />
-            <Route path='/settings/constitution' element={withRouteFallback(ConstitutionSettings)} />
             <Route path='/settings/agents' element={withRouteFallback(AgentsSettings)} />
             <Route path='/settings/skills' element={withRouteFallback(SkillsSettings)} />
+            {/* Constitution is a Desktop concept (the engine has none of its own),
+              so it lives as a standalone Desktop settings page, not a Core pane. */}
+            <Route path='/settings/constitution' element={withRouteFallback(ConstitutionSettings)} />
             {/* AI MODELS */}
             <Route path='/settings/models' element={withRouteFallback(ModelsSettings)} />
             {/* Legacy `/settings/providers` redirects to the new Models page -
@@ -115,7 +118,11 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
             <Route path='/settings/providers' element={<Navigate to='/settings/models' replace />} />
             <Route path='/settings/images' element={withRouteFallback(ImageGenSettings)} />
             <Route path='/settings/voice' element={withRouteFallback(VoiceSettings)} />
-            <Route path='/settings/wcore' element={withRouteFallback(WCoreSettings)} />
+            {/* ENGINE - the Wayland Core configuration surface (its own destination).
+              It subsumes the former standalone `wcore` engine-status page. */}
+            <Route path='/settings/wcore-config' element={withRouteFallback(WCoreConfig)} />
+            {/* Legacy redirect: old standalone route now lands inside Core. */}
+            <Route path='/settings/wcore' element={<Navigate to='/settings/wcore-config' replace />} />
             {/* INTEGRATIONS */}
             <Route path='/settings/webui' element={withRouteFallback(WebuiSettings)} />
             <Route path='/settings/channels' element={withRouteFallback(ChannelsIndex)} />
@@ -188,8 +195,13 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
   );
 };
 
-// Reference unused legacy components so dynamic imports stay valid for tooling
+// Reference unused legacy components so dynamic imports stay valid for tooling.
+// WCoreSettings + ConstitutionSettings are now subsumed into the Wayland Core
+// surface (their routes redirect there); the underlying pages are still imported
+// here to keep their chunks discoverable, and reused as panes inside WCoreConfig.
 void GeminiSettings;
 void AgentSettings;
+void WCoreSettings;
+void ConstitutionSettings;
 
 export default PanelRoute;

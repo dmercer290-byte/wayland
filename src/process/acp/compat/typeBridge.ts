@@ -248,7 +248,7 @@ export function toResponseMessage(msg: TMessage, conversationId: string): IRespo
 // ─── Auth helpers ──────────────────────────────────────────────────
 
 /** Well-known API key env vars per backend. */
-const BACKEND_AUTH_KEYS: Record<string, string[]> = {
+export const BACKEND_AUTH_KEYS: Record<string, string[]> = {
   codex: ['OPENAI_API_KEY', 'CODEX_API_KEY'],
   claude: ['ANTHROPIC_API_KEY'],
   codebuddy: ['CODEBUDDY_API_KEY'],

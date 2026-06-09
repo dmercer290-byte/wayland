@@ -1,4 +1,10 @@
-export type ProviderId =
+/**
+ * The closed set of first-class providers Wayland Desktop ships with native
+ * metadata, detection rules, and curation. Every value here has an entry in
+ * `PROVIDER_META`. Catalog providers (the 104-provider models.dev set) are NOT
+ * members — they flow through the widened `ProviderId` below.
+ */
+export type NativeProviderId =
   | 'anthropic'
   | 'openai'
   | 'google-gemini'
@@ -30,7 +36,18 @@ export type ProviderId =
   | 'elevenlabs'
   | 'azure'
   | 'flux-router'
-  | 'openai-compatible';
+  | 'openai-compatible'
+  | 'ollama-local';
+
+/**
+ * A provider identifier. Either a {@link NativeProviderId} (ships with native
+ * metadata) or a dynamic catalog id (a models.dev provider slug). The branded
+ * string keeps the union open without collapsing to bare `string` — native
+ * literals still narrow, exhaustiveness checks still flag missing native cases,
+ * and arbitrary catalog slugs are assignable. Look up metadata via
+ * `providerMeta(id)`, which falls back to a generic tile for catalog ids.
+ */
+export type ProviderId = NativeProviderId | (string & { readonly __brand?: 'catalog' });
 
 export type ModelTier = 'flagship' | 'everyday' | 'fast' | 'reasoning' | 'legacy';
 

@@ -459,6 +459,53 @@ export function initChannelBridge(channelRepo: IChannelRepository): void {
     }
   });
 
+  // Resolve the public webhook base URL for a webhook-driven channel.
+  //
+  // SECURITY: when `tunnelEnabled` is true and no user URL is supplied, this
+  // lazily spawns a cloudflared quick tunnel that opens a PUBLIC ingress in
+  // front of the local webhook server. The opt-in defaults OFF in the UI; the
+  // channel's provider signature verification stays enforced regardless of how
+  // the URL is obtained. This resolver never relaxes signature checks.
+  channel.getWebhookExposure.provider(
+    async ({ platform, tunnelEnabled, connectionToken, userPublicUrl, provider }) => {
+      try {
+        if (!platform) {
+          return { success: false, msg: 'platform is required' };
+        }
+        const { resolveExposure, buildWebhookUrl } = await import('@process/channels/tunnel');
+        const { SERVER_CONFIG } = await import('@process/webserver/config/constants');
+        const webhookPort = SERVER_CONFIG._currentConfig.port;
+
+        const status = await resolveExposure({
+          platform,
+          webhookPort,
+          tunnelEnabled: tunnelEnabled === true,
+          userPublicUrl,
+          tunnelProvider: provider,
+        });
+
+        const webhookUrl =
+          status.configured && status.publicUrl && connectionToken
+            ? buildWebhookUrl(status.publicUrl, platform, connectionToken)
+            : null;
+
+        return {
+          success: true,
+          data: {
+            configured: status.configured,
+            publicUrl: status.publicUrl,
+            source: status.source,
+            message: status.message,
+            webhookUrl,
+          },
+        };
+      } catch (error: unknown) {
+        console.error('[ChannelBridge] getWebhookExposure error:', error);
+        return { success: false, msg: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+
   console.log('[ChannelBridge] Initialized');
 }
 

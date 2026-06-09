@@ -134,3 +134,65 @@ describe('buildSpawnConfig - resolvedMaxTokens return value', () => {
     expect(resolvedMaxTokens).toBeUndefined();
   });
 });
+
+describe('buildSpawnConfig - raw-engine (power-user) mode', () => {
+  const workspace = '/tmp/test-workspace';
+
+  it('emits ONLY the session-protocol args - no Desktop overrides leak in', () => {
+    const { args } = buildSpawnConfig(makeModel('anthropic', 'claude-opus-4-8'), {
+      workspace,
+      rawEngine: true,
+      sessionId: 'sess-1',
+      // Everything below must be ignored in raw mode:
+      maxTokens: 9000,
+      maxTurns: 50,
+      systemPrompt: 'you are wayland',
+      autoApprove: true,
+    });
+    expect(args).toEqual(['--json-stream', '--session-id', 'sess-1']);
+    // Explicitly assert each override flag is absent.
+    for (const flag of [
+      '--provider',
+      '--model',
+      '--max-tokens',
+      '--max-turns',
+      '--system-prompt',
+      '--auto-approve',
+      '--base-url',
+    ]) {
+      expect(args).not.toContain(flag);
+    }
+  });
+
+  it('forwards NO provider auth env and writes no project config in raw mode', () => {
+    const { env, projectConfig, resolvedMaxTokens } = buildSpawnConfig(makeModel('anthropic', 'claude-opus-4-8'), {
+      workspace,
+      rawEngine: true,
+      sessionId: 'sess-1',
+    });
+    expect(env).toEqual({});
+    expect(projectConfig).toBe('');
+    expect(resolvedMaxTokens).toBeUndefined();
+  });
+
+  it('passes --resume (not --session-id) when resuming in raw mode', () => {
+    const { args } = buildSpawnConfig(makeModel('openai', 'gpt-5.1'), {
+      workspace,
+      rawEngine: true,
+      resume: 'conv-42',
+      sessionId: 'sess-ignored',
+    });
+    expect(args).toEqual(['--json-stream', '--resume', 'conv-42']);
+  });
+
+  it('non-raw spawn still emits the provider/model override (control)', () => {
+    const { args, env } = buildSpawnConfig(makeModel('anthropic', 'claude-opus-4-8'), {
+      workspace,
+      sessionId: 'sess-1',
+    });
+    expect(args).toContain('--provider');
+    expect(args).toContain('anthropic');
+    expect(args).toContain('--model');
+    expect(env.ANTHROPIC_API_KEY).toBe('test-key');
+  });
+});

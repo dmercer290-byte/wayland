@@ -54,6 +54,8 @@ export interface OpenClawAgentConfig {
   onSignalEvent?: (data: IResponseMessage) => void;
   /** Session key update callback */
   onSessionKeyUpdate?: (sessionKey: string) => void;
+  /** Per-turn token usage callback (fired only when chat:final carries usage). */
+  onUsage?: (usage: unknown) => void;
 }
 
 /**
@@ -90,6 +92,7 @@ export class OpenClawAgent {
   private readonly onStreamEvent: (data: IResponseMessage) => void;
   private readonly onSignalEvent?: (data: IResponseMessage) => void;
   private readonly onSessionKeyUpdate?: (sessionKey: string) => void;
+  private readonly onUsage?: (usage: unknown) => void;
 
   constructor(config: OpenClawAgentConfig) {
     this.id = config.id;
@@ -97,6 +100,7 @@ export class OpenClawAgent {
     this.onStreamEvent = config.onStreamEvent;
     this.onSignalEvent = config.onSignalEvent;
     this.onSessionKeyUpdate = config.onSessionKeyUpdate;
+    this.onUsage = config.onUsage;
 
     // Initialize adapter with 'openclaw-gateway' backend
     this.adapter = new AcpAdapter(this.id, 'openclaw-gateway');
@@ -413,6 +417,13 @@ export class OpenClawAgent {
       }
 
       case 'final': {
+        // Surface any per-turn token usage the gateway attached to this final
+        // event (untyped field; the manager parses it defensively). Fire before
+        // the text-fallback branches so it is reported even when content is
+        // recovered via history fallback.
+        if (event.usage !== undefined && this.onUsage) {
+          this.onUsage(event.usage);
+        }
         // If delta events were missed (WebSocket gap), recover full text from final message
         if (event.message) {
           const finalText = this.extractTextFromMessage(event.message);

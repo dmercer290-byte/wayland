@@ -12,6 +12,7 @@ import { application } from '@/common/adapter/ipcBridge';
 import type { TMessage } from '@/common/chat/chatLib';
 import { ASSISTANT_PRESETS } from '@/common/config/presets/assistantPresets';
 import type {
+  IChannelAssistantConfigRefer,
   IChatConversationRefer,
   IConfigStorageRefer,
   IEnvStorageRefer,
@@ -301,7 +302,9 @@ const dirConfig = envFile.getSync('wayland.dir');
 
 const cacheDir = dirConfig?.cacheDir || getHomePage();
 
-const configFile = JsonFileBuilder<IConfigStorageRefer>(path.join(cacheDir, STORAGE_PATH.config));
+const configFile = JsonFileBuilder<IConfigStorageRefer & IChannelAssistantConfigRefer>(
+  path.join(cacheDir, STORAGE_PATH.config)
+);
 type ConversationHistoryData = Record<string, TMessage[]>;
 
 const _chatMessageFile = JsonFileBuilder<ConversationHistoryData>(path.join(cacheDir, STORAGE_PATH.chatMessage));

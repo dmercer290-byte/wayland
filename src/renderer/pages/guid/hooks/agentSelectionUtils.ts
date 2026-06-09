@@ -47,3 +47,29 @@ export const getAgentKey = (agent: { backend: AcpBackend; customAgentId?: string
   if (agent.customAgentId) return `custom:${agent.customAgentId}`;
   return agent.backend;
 };
+
+/**
+ * Filter the detected agents down to the ones shown in the Guid-page toolbar
+ * strip, removing any the user hid on the Agents settings page.
+ *
+ * Two guard rails keep the strip usable:
+ *  1. The currently-selected agent is never hidden out from under the user,
+ *     even if its key is in `hiddenSet`.
+ *  2. The strip is never collapsed to empty: if every agent would be hidden,
+ *     the full set is returned unchanged.
+ *
+ * `undefined` (agents still loading) is passed through so the caller can keep
+ * showing its skeleton.
+ */
+export function filterVisibleAgents<T extends { backend: AcpBackend; customAgentId?: string }>(
+  agents: T[] | undefined,
+  hiddenSet: ReadonlySet<string>,
+  selectedAgentKey: string
+): T[] | undefined {
+  if (!agents) return agents;
+  const visible = agents.filter((agent) => {
+    const key = getAgentKey(agent);
+    return !hiddenSet.has(key) || key === selectedAgentKey;
+  });
+  return visible.length > 0 ? visible : agents;
+}

@@ -39,7 +39,11 @@ import openaiLogo from '@renderer/assets/logos/openai.svg';
 import openrouterLogo from '@renderer/assets/logos/openrouter.svg';
 import { resolveFocusSelection, type FocusPersonaId } from './focusMap';
 import { providerLabel } from './providerLabel';
+import { openExternalUrl } from '@renderer/utils/platform';
 import styles from './Onboarding.module.css';
+
+/** Where to grab a Flux key by hand when the one-click OAuth handoff can't start. */
+const FLUX_KEY_URL = 'https://fluxrouter.ai/home/api-keys';
 
 type OnboardingFlowProps = {
   detection: DetectionResult;
@@ -129,6 +133,9 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ detection, onFinish }) 
   const [busy, setBusy] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  // Set true once the Flux one-click sign-in fails to start (e.g. the fluxrouter.ai
+  // handoff is down). Surfaces the manual key-paste path so onboarding never dead-ends.
+  const [fluxFallback, setFluxFallback] = useState(false);
   const [scanDone, setScanDone] = useState(false);
   const [scanLog, setScanLog] = useState(0);
   const [picks, setPicks] = useState<FocusPersonaId[]>([]);
@@ -217,10 +224,17 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ detection, onFinish }) 
         setScreen('interests');
         return;
       }
-      if ('error' in res && res.error !== 'cancelled') setErrorMsg(t('onboarding.flow.errors.fluxFailed'));
+      // A non-cancel failure means the one-click handoff couldn't complete (the
+      // fluxrouter.ai sign-in is the usual culprit). Don't dead-end - reveal the
+      // manual key-paste fallback alongside an actionable message.
+      if ('error' in res && res.error !== 'cancelled') {
+        setFluxFallback(true);
+        setErrorMsg(t('onboarding.flow.errors.fluxFallback'));
+      }
       setBusy(null);
     } catch {
-      setErrorMsg(t('onboarding.flow.errors.fluxFailed'));
+      setFluxFallback(true);
+      setErrorMsg(t('onboarding.flow.errors.fluxFallback'));
       setBusy(null);
     }
   }, [busy, t]);
@@ -444,17 +458,24 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ detection, onFinish }) 
     ) : null;
 
   const fluxBanner = (title: string, body: string) => (
-    <div className={styles.fluxbig}>
-      <span className={styles.fbIc}>
-        {busy === 'flux' ? <Loader2 size={22} className={styles.spinDark} /> : <FluxMark />}
-      </span>
-      <span className={styles.fbMain}>
-        <span className={styles.fbTitle}>{title}</span> <span className={styles.fbBody}>{body}</span>
-      </span>
-      <button type='button' className={styles.fbCta} onClick={() => void connectFlux()} disabled={busy !== null}>
-        {t('onboarding.flow.flux.cta')}
-      </button>
-    </div>
+    <>
+      <div className={styles.fluxbig}>
+        <span className={styles.fbIc}>
+          {busy === 'flux' ? <Loader2 size={22} className={styles.spinDark} /> : <FluxMark />}
+        </span>
+        <span className={styles.fbMain}>
+          <span className={styles.fbTitle}>{title}</span> <span className={styles.fbBody}>{body}</span>
+        </span>
+        <button type='button' className={styles.fbCta} onClick={() => void connectFlux()} disabled={busy !== null}>
+          {t(fluxFallback ? 'onboarding.flow.flux.retryCta' : 'onboarding.flow.flux.cta')}
+        </button>
+      </div>
+      {fluxFallback && (
+        <button type='button' className={styles.fluxGetKey} onClick={() => void openExternalUrl(FLUX_KEY_URL)}>
+          {t('onboarding.flow.flux.getKeyCta')} <ArrowRight size={14} />
+        </button>
+      )}
+    </>
   );
 
   const FLUX_TITLE = t('onboarding.flow.flux.title');

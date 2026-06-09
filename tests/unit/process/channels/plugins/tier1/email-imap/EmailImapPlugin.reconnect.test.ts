@@ -16,7 +16,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { IChannelPluginConfig } from '@process/channels/types';
+import type { ResolvedCredentials } from '@process/channels/plugins/tier1/email-imap/EmailImapShared';
 
 const { ImapFlowStub, instances, sendMailSpy, transporterCloseSpy, idleQueue } = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void;
@@ -125,25 +125,12 @@ vi.mock('nodemailer', () => ({
   },
 }));
 
-import { EmailImapPlugin } from '@process/channels/plugins/tier1/email-imap/EmailImapPlugin';
+import { EmailImapConnection } from '@process/channels/plugins/tier1/email-imap/EmailImapConnection';
 
-function makeConfig(): IChannelPluginConfig {
+function makeCreds(): ResolvedCredentials {
   return {
-    id: 'email_default',
-    type: 'email-imap',
-    name: 'Email',
-    enabled: true,
-    status: 'created',
-    createdAt: 0,
-    updatedAt: 0,
-    credentials: {
-      imapHost: 'imap.example.com',
-      imapPort: 993,
-      imapUser: 'a@b',
-      imapPassword: 'pw',
-      imapTls: true,
-      useSameAuth: true,
-    },
+    imap: { host: 'imap.example.com', port: 993, user: 'a@b', password: 'pw', tls: true },
+    smtp: { host: 'imap.example.com', port: 587, user: 'a@b', password: 'pw', tls: true },
   };
 }
 
@@ -156,7 +143,7 @@ async function tick(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-describe('EmailImapPlugin - reconnect state machine', () => {
+describe('EmailImapConnection - reconnect state machine', () => {
   beforeEach(() => {
     instances.length = 0;
     idleQueue.length = 0;
@@ -177,9 +164,8 @@ describe('EmailImapPlugin - reconnect state machine', () => {
       // Queue: first idle() rejects → reconnect → second idle() hangs (steady state).
       idleQueue.push('throw', 'hang');
 
-      const plugin = new EmailImapPlugin();
-      await plugin.initialize(makeConfig());
-      await plugin.start();
+      const conn = new EmailImapConnection(() => undefined);
+      await conn.connect(makeCreds());
 
       // One ImapFlow constructed during onStart.
       expect(instances).toHaveLength(1);
@@ -203,7 +189,7 @@ describe('EmailImapPlugin - reconnect state machine', () => {
       expect(second.connect).toHaveBeenCalledTimes(1);
       expect(second.mailboxOpen).toHaveBeenCalledWith('INBOX');
 
-      await plugin.stop();
+      await conn.stop();
     } finally {
       vi.useRealTimers();
     }
@@ -215,9 +201,8 @@ describe('EmailImapPlugin - reconnect state machine', () => {
       // First idle throws → reconnect scheduled. We stop BEFORE the timer fires.
       idleQueue.push('throw');
 
-      const plugin = new EmailImapPlugin();
-      await plugin.initialize(makeConfig());
-      await plugin.start();
+      const conn = new EmailImapConnection(() => undefined);
+      await conn.connect(makeCreds());
 
       expect(instances).toHaveLength(1);
 
@@ -226,7 +211,7 @@ describe('EmailImapPlugin - reconnect state machine', () => {
       await tick();
 
       // Stop now - the 5s reconnect timer is armed but has not fired.
-      await plugin.stop();
+      await conn.stop();
 
       // Advance past any reconnect window. If scheduleReconnect leaked past
       // onStop(), this would build a second ImapFlow.
@@ -245,9 +230,8 @@ describe('EmailImapPlugin - reconnect state machine', () => {
       // First and second idle both hang - close event is what triggers reconnect.
       idleQueue.push('hang', 'hang');
 
-      const plugin = new EmailImapPlugin();
-      await plugin.initialize(makeConfig());
-      await plugin.start();
+      const conn = new EmailImapConnection(() => undefined);
+      await conn.connect(makeCreds());
 
       expect(instances).toHaveLength(1);
       const first = instances[0]!;
@@ -263,7 +247,7 @@ describe('EmailImapPlugin - reconnect state machine', () => {
       expect(instances).toHaveLength(2);
       expect(instances[1]).not.toBe(first);
 
-      await plugin.stop();
+      await conn.stop();
     } finally {
       vi.useRealTimers();
     }

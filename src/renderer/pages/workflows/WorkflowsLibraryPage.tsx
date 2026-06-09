@@ -23,16 +23,16 @@
  */
 
 import { Button } from '@arco-design/web-react';
-import { Download, Sparkles } from 'lucide-react';
+import { Download, Sparkles, Workflow } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
 import {
   LibraryFilterRail,
   LibraryFilterRow,
-  LibraryPageHeader,
   LibrarySectionHeader,
 } from '@/renderer/components/layout/library';
+import PageShell from '@/renderer/components/layout/PageShell';
 import type { SkillIndexEntry } from '@/common/types/skillTypes';
 import BuildWorkflowModal from './BuildWorkflowModal';
 import WorkflowCard from './WorkflowCard';
@@ -155,146 +155,142 @@ const WorkflowsLibraryPage: React.FC = () => {
   }, [sections, activeCategory]);
 
   return (
-    <div
-      className='size-full overflow-hidden flex flex-col'
-      style={{ background: 'var(--color-bg-1)' }}
-    >
-      <LibraryPageHeader
-        title={t('title', 'Workflows')}
-        countLabel={t('count', '{{count}} workflow', { count: workflows.length })}
-      >
-        <Button
-          type='secondary'
-          icon={<Download size={14} />}
-          onClick={() => {
-            // eslint-disable-next-line no-alert
-            window.alert(
-              t(
-                'import.placeholder',
-                'Import wiring lands next: folder / git URL / SKILL.md with type:workflow auto-detected via frontmatter, scanned by Skill Guard, and registered as source:imported.',
-              ),
-            );
-          }}
-        >
-          {t('actions.import', 'Import workflow')}
-        </Button>
-        <Button
-          type='primary'
-          icon={<Sparkles size={14} />}
-          onClick={() => setBuildOpen(true)}
-        >
-          {t('actions.build', 'Build a workflow')}
-        </Button>
-      </LibraryPageHeader>
-      <div className='flex-1 min-h-0 overflow-y-auto px-24px pb-20px'>
-        <div className='flex flex-col gap-16px min-w-0'>
-        <div className='flex gap-20px items-start'>
-          <LibraryFilterRail
-            searchValue={query}
-            onSearchChange={setQuery}
-            searchPlaceholder={t('search.placeholder', 'Search workflows…')}
-            ariaLabel={t('filterRail.aria', 'Workflow filters')}
+    <PageShell
+      title={t('title', 'Workflows')}
+      icon={<Workflow size={20} />}
+      countLabel={t('count', '{{count}} workflow', { count: workflows.length })}
+      width='full'
+      actions={
+        <>
+          <Button
+            type='secondary'
+            icon={<Download size={14} />}
+            onClick={() => {
+              // eslint-disable-next-line no-alert
+              window.alert(
+                t(
+                  'import.placeholder',
+                  'Import wiring lands next: folder / git URL / SKILL.md with type:workflow auto-detected via frontmatter, scanned by Skill Guard, and registered as source:imported.',
+                ),
+              );
+            }}
           >
-            {!searching ? (
-              <div className='flex flex-col gap-2px'>
+            {t('actions.import', 'Import workflow')}
+          </Button>
+          <Button
+            type='primary'
+            icon={<Sparkles size={14} />}
+            onClick={() => setBuildOpen(true)}
+          >
+            {t('actions.build', 'Build a workflow')}
+          </Button>
+        </>
+      }
+      filterRail={
+        <LibraryFilterRail
+          searchValue={query}
+          onSearchChange={setQuery}
+          searchPlaceholder={t('search.placeholder', 'Search workflows…')}
+          ariaLabel={t('filterRail.aria', 'Workflow filters')}
+        >
+          {!searching ? (
+            <div className='flex flex-col gap-2px'>
+              <LibraryFilterRow
+                label={t('allCategories', 'All workflows')}
+                count={workflows.length}
+                active={activeCategory === null}
+                onClick={() => setActiveCategory(null)}
+              />
+              {sections.map((s) => (
                 <LibraryFilterRow
-                  label={t('allCategories', 'All workflows')}
-                  count={workflows.length}
-                  active={activeCategory === null}
-                  onClick={() => setActiveCategory(null)}
+                  key={s.slug}
+                  label={s.label}
+                  count={s.entries.length}
+                  active={activeCategory === s.slug}
+                  onClick={() => setActiveCategory(s.slug)}
                 />
-                {sections.map((s) => (
-                  <LibraryFilterRow
-                    key={s.slug}
-                    label={s.label}
-                    count={s.entries.length}
-                    active={activeCategory === s.slug}
-                    onClick={() => setActiveCategory(s.slug)}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className='text-12px px-10px' style={{ color: 'var(--color-text-3)' }}>
-                {t('count', '{{count}} workflows', { count: searchFiltered.length })}
-              </div>
-            )}
-          </LibraryFilterRail>
-
-          <div className='flex-1 min-w-0 flex flex-col gap-20px'>
-            {searching ? (
-              searchFiltered.length === 0 ? (
-                <div
-                  className='text-center text-13px py-40px'
-                  style={{ color: 'var(--color-text-2)' }}
-                >
-                  {t('search.empty', 'No workflows match your search')}
-                </div>
-              ) : (
+              ))}
+            </div>
+          ) : (
+            <div className='text-12px px-10px' style={{ color: 'var(--color-text-3)' }}>
+              {t('count', '{{count}} workflows', { count: searchFiltered.length })}
+            </div>
+          )}
+        </LibraryFilterRail>
+      }
+    >
+      <div className='flex-1 min-w-0 flex flex-col gap-20px'>
+        {searching ? (
+          searchFiltered.length === 0 ? (
+            <div
+              className='text-center text-13px py-40px'
+              style={{ color: 'var(--color-text-2)' }}
+            >
+              {t('search.empty', 'No workflows match your search')}
+            </div>
+          ) : (
+            <div
+              className='grid gap-12px'
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', minWidth: 0 }}
+            >
+              {searchFiltered.map((w) => (
+                <WorkflowCard key={w.name} entry={w} onClick={handleCardClick} />
+              ))}
+            </div>
+          )
+        ) : (
+          <>
+            {activeCategory === null && featured.length > 0 ? (
+              <section>
+                <LibrarySectionHeader
+                  label={t('section.featured', 'Featured workflows')}
+                  count={featured.length}
+                  variant='tier'
+                />
                 <div
                   className='grid gap-12px'
                   style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', minWidth: 0 }}
                 >
-                  {searchFiltered.map((w) => (
+                  {featured.map((w) => (
+                    <WorkflowCard key={w.name} entry={w} onClick={handleCardClick} featured />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {activeCategory === null && featured.length > 0 ? (
+              <LibrarySectionHeader
+                label={t('section.all', 'All workflows')}
+                count={workflows.length - featured.length}
+                variant='primary'
+                divider
+              />
+            ) : null}
+
+            {visibleSections.map((s) => (
+              <section key={s.slug}>
+                <LibrarySectionHeader label={s.label} count={s.entries.length} />
+                <div
+                  className='grid gap-12px'
+                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', minWidth: 0 }}
+                >
+                  {s.entries.map((w) => (
                     <WorkflowCard key={w.name} entry={w} onClick={handleCardClick} />
                   ))}
                 </div>
-              )
-            ) : (
-              <>
-                {activeCategory === null && featured.length > 0 ? (
-                  <section>
-                    <LibrarySectionHeader
-                      label={t('section.featured', 'Featured workflows')}
-                      count={featured.length}
-                      variant='tier'
-                    />
-                    <div
-                      className='grid gap-12px'
-                      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', minWidth: 0 }}
-                    >
-                      {featured.map((w) => (
-                        <WorkflowCard key={w.name} entry={w} onClick={handleCardClick} featured />
-                      ))}
-                    </div>
-                  </section>
-                ) : null}
-
-                {activeCategory === null && featured.length > 0 ? (
-                  <LibrarySectionHeader
-                    label={t('section.all', 'All workflows')}
-                    count={workflows.length - featured.length}
-                    variant='primary'
-                    divider
-                  />
-                ) : null}
-
-                {visibleSections.map((s) => (
-                  <section key={s.slug}>
-                    <LibrarySectionHeader label={s.label} count={s.entries.length} />
-                    <div
-                      className='grid gap-12px'
-                      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', minWidth: 0 }}
-                    >
-                      {s.entries.map((w) => (
-                        <WorkflowCard key={w.name} entry={w} onClick={handleCardClick} />
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-
-        <WorkflowDetailModal entry={selected} onClose={() => setSelected(null)} />
-        <BuildWorkflowModal
-          visible={buildOpen}
-          onClose={() => setBuildOpen(false)}
-          onSaved={refreshWorkflows}
-        />
-        </div>
+              </section>
+            ))}
+          </>
+        )}
       </div>
-    </div>
+
+      <WorkflowDetailModal entry={selected} onClose={() => setSelected(null)} />
+      <BuildWorkflowModal
+        visible={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        onSaved={refreshWorkflows}
+      />
+    </PageShell>
   );
 };
 

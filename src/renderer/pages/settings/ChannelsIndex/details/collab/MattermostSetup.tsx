@@ -14,10 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import MattermostConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/collab/MattermostConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const MattermostSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.mattermost.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -52,7 +54,7 @@ const MattermostSetup: React.FC = () => {
         'Connect to a Mattermost server with a personal access token. The bot listens via WebSocket and posts via REST.',
       )}
     >
-      <MattermostConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <MattermostConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

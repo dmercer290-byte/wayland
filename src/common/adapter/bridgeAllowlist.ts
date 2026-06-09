@@ -133,6 +133,13 @@ const REMOTE_DENIED_PREFIXES: readonly string[] = [
   'shell.',
   // Hub extension install/update/retry/uninstall - remote-reachable RCE chain.
   'hub.',
+  // Cost observability (WS-D). There is no remote cost view today, so deny the
+  // ENTIRE cost.* namespace to paired-device WebSocket callers: the read
+  // aggregates (summary/byModel/byBackend/byConversation/byTeam/series) plus the
+  // WS-F budget mutations (cost.upsertBudget / cost.deleteBudget) that land
+  // later. byConversation/series in particular disclose per-conversation usage
+  // and a fine-grained activity timeline. Local-renderer-only surface.
+  'cost.',
 ];
 // Note: fs provider keys are registered WITHOUT an `fs.` prefix on the wire
 // (e.g. `write-file`, `remove-entry`), so the dangerous fs surface is enumerated
@@ -178,6 +185,100 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   'skills.rescan-all',
   'skills.scan',
   'skills.set-pinned',
+  // --- Model registry secret/write IPC (audit C4). `resolveForChatStart`
+  //     returns a DECRYPTED plaintext provider key; connect/rekey/detectKeys
+  //     mutate or disclose stored credentials. A paired WebUI must never reach
+  //     these or it can harvest every stored provider key. ---
+  'modelRegistry.connect',
+  'modelRegistry.rekey',
+  'modelRegistry.detectKeys',
+  'modelRegistry.resolveForChatStart',
+  // --- Wayland Core tool-backend key mutation (plant/clear a search API key) ---
+  'wcoreToolKeys.set',
+  'wcoreToolKeys.delete',
+  // --- Wayland Core engine config.toml mutation (rewrite tool allow-list /
+  //     sandbox policy / env passthrough). A remote caller reaching this could
+  //     disable the sandbox or force-allow secrets into bash (SEC-6). ---
+  'wcoreConfig.setSection',
+  // Also deny the read: it discloses the engine's security/tools posture to a
+  // paired WebUI client (no secret values, but defence-in-depth — SEC review F2).
+  'wcoreConfig.getSection',
+  // --- Wayland Core profile fs mutation (create/clone/activate/delete profile
+  //     directories under the profiles root). Remote-denied (SEC-4). ---
+  'wcoreProfiles.create',
+  'wcoreProfiles.clone',
+  'wcoreProfiles.activate',
+  'wcoreProfiles.remove',
+  // --- Asleep-engine pending-send store (SEC-8). Message bodies are PII/secrets
+  //     held in main-process memory only. A remote caller must never read a held
+  //     body (take/peek) or inject one (hold), nor drop another user's hold. ---
+  'pendingSend.hold',
+  'pendingSend.take',
+  'pendingSend.peek',
+  'pendingSend.clear',
+  // --- Channel pairing (codes grant a remote user access to the assistant).
+  //     Reading the pending codes discloses live access tokens; approve/reject
+  //     mutate authorization. A paired WebUI must never harvest a pending code
+  //     or self-approve, so deny all three to remote WS callers. ---
+  'channel.get-pending-pairings',
+  'channel.approve-pairing',
+  'channel.reject-pairing',
+  // --- Channel config / authorization mutation + disclosure. Same threat class
+  //     as the pairing trio above: a paired WebUI must never reconfigure a
+  //     channel (enable/disable a plugin, rotate the webhook token, sync
+  //     settings such as WhatsApp mode='dedicated' + ownerNumbers which
+  //     auto-authorizes an arbitrary number), revoke/disclose authorized users,
+  //     or fire test-plugin (an outbound network call made with caller-supplied
+  //     credentials). The read-only status providers the WebUI legitimately
+  //     needs (channel.get-plugin-status / get-active-sessions /
+  //     get-webhook-exposure and the channel.*-changed event emitters) stay
+  //     allowed. ---
+  'channel.enable-plugin',
+  'channel.disable-plugin',
+  'channel.rotate-webhook-token',
+  'channel.sync-channel-settings',
+  'channel.revoke-user',
+  'channel.get-authorized-users',
+  'channel.test-plugin',
+  // --- WebUI admin auth surface (WS-POSTAUTH). The webui.* bridge providers are
+  //     registered via buildProvider, so a paired-device WS caller passes
+  //     isAllowedInboundName and reaches them with NO in-handler remote guard
+  //     (unlike the gated `webui-direct-*` ipcMain handlers). These mint/return
+  //     admin credentials or mutate auth: `start` returns the initial password,
+  //     `reset-password` broadcasts a new plaintext admin password to every
+  //     paired client, `change-password`/`change-username` rewrite the admin
+  //     login with NO current-password check, `generate-qr-token` /
+  //     `verify-qr-token` mint a full admin session token, and `stop` /
+  //     `revoke-device` disrupt access. Deny all to remote callers; the
+  //     read-only views (webui.get-status / list-paired-devices / activity-log)
+  //     stay allowed for the paired UI. ---
+  'webui.start',
+  'webui.stop',
+  'webui.change-password',
+  'webui.change-username',
+  'webui.reset-password',
+  'webui.generate-qr-token',
+  'webui.verify-qr-token',
+  'webui.revoke-device',
+  // --- Onboarding credential writes. connect-pasted-key persists a
+  //     caller-supplied provider key (remote credential injection / overwrite of
+  //     the legitimate key); connect-flux mints + persists a Flux provider
+  //     credential via OAuth. Same class as modelRegistry.connect /
+  //     wcoreToolKeys.set (already denied). The read-only onboarding.infer-focus
+  //     stays allowed. ---
+  'onboarding.connect-pasted-key',
+  'onboarding.connect-flux',
+  // --- Cost observability (WS-D / WS-F). The whole cost.* namespace is already
+  //     denied to remote callers via the `cost.` prefix above; these exact keys
+  //     are enumerated for documentation + defence-in-depth. byConversation +
+  //     series leak per-conversation usage and a fine-grained activity timeline;
+  //     upsertBudget / deleteBudget (added by WS-F) are mutations a paired WebUI
+  //     must never reach. ---
+  'cost.byConversation',
+  'cost.series',
+  'cost.upsertBudget',
+  'cost.deleteBudget',
+  'cost.listBudgets',
   // --- MCP mutation (agent install/remove, OAuth login/logout, credential set) ---
   'mcp.sync-to-agents',
   'mcp.remove-from-agents',

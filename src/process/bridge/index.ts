@@ -64,6 +64,9 @@ import { initNicknamesBridge } from '@process/storage/nicknamesIpc';
 import { initSyncIpc } from '@process/sync/syncIpc';
 import type { TeamSessionService } from '@process/team/TeamSessionService';
 import { initModelRegistryIpc } from '@process/providers/ipc/modelRegistryIpc';
+import { initWcoreToolKeyIpc } from '@process/agent/wcore/toolKeyIpc';
+import { initWcoreConfigBridge } from './wcoreConfigBridge';
+import { initPendingSendBridge } from './pendingSendBridge';
 
 export interface BridgeDependencies {
   conversationService: IConversationService;
@@ -133,6 +136,9 @@ export function initAllBridges(deps: BridgeDependencies): void {
   void initModelRegistryIpc().catch((error) => {
     console.error('[modelRegistry] Failed to initialize IPC:', error);
   });
+  initWcoreToolKeyIpc();
+  initWcoreConfigBridge();
+  initPendingSendBridge();
   initStorageBridge();
   initNicknamesBridge();
   initSyncIpc();

@@ -11,10 +11,12 @@ import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import GoogleChatConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/collab/GoogleChatConfigForm';
 
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const GoogleChatSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.google-chat.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -49,7 +51,7 @@ const GoogleChatSetup: React.FC = () => {
         'Google Chat (Workspace) bot. SETUP: (1) GCP Console → enable Google Chat API; (2) IAM → Service Accounts → create new + download JSON key; (3) Chat API → Configuration → set Bot URL to the inbound webhook URL printed after setup; (4) Publish bot to your Workspace. THEN paste the service-account JSON keyfile and provide the expected JWT audience (project number or app URL).',
       )}
     >
-      <GoogleChatConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <GoogleChatConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

@@ -13,10 +13,12 @@ import { useTranslation } from 'react-i18next';
 import { application, channel, shell } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import IMessageConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/messaging/IMessageConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const IMessageSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.imessage.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -90,7 +92,7 @@ const IMessageSetup: React.FC = () => {
           {t('settings.channels.imessage.relaunchApp', 'Relaunch app (after granting FDA)')}
         </Button>
       </div>
-      <IMessageConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <IMessageConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

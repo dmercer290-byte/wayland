@@ -22,10 +22,70 @@ export const ChatStorage = buildStorage<IChatConversationRefer>('agent.chat');
 export const ChatMessageStorage = buildStorage('agent.chat.message');
 
 // System configuration storage
-export const ConfigStorage = buildStorage<IConfigStorageRefer>('agent.config');
+export const ConfigStorage = buildStorage<IConfigStorageRefer & IChannelAssistantConfigRefer>('agent.config');
 
 // System environment variable storage
 export const EnvStorage = buildStorage<IEnvStorageRefer>('agent.env');
+
+/**
+ * Messaging channel platforms that expose a per-channel agent + default-model
+ * selector. Each one persists `assistant.<platform>.defaultModel` and
+ * `assistant.<platform>.agent` so the channel answers with the user's chosen
+ * agent/model instead of silently inheriting Telegram's.
+ *
+ * Keep this in sync with the channel Setup pages under
+ * `pages/settings/ChannelsIndex/details/` and `BuiltinPluginType` in
+ * `process/channels/types.ts`.
+ */
+export type ChannelPlatform =
+  | 'telegram'
+  | 'slack'
+  | 'discord'
+  | 'whatsapp'
+  | 'signal'
+  | 'sms-twilio'
+  | 'lark'
+  | 'dingtalk'
+  | 'weixin'
+  | 'wecom'
+  | 'matrix'
+  | 'email-agentmail'
+  | 'email-imap'
+  | 'line'
+  | 'imessage'
+  | 'ms-teams'
+  | 'google-chat'
+  | 'mattermost'
+  | 'nextcloud-talk'
+  | 'synology-chat'
+  | 'bluebubbles'
+  | 'irc'
+  | 'nostr'
+  | 'twitch'
+  | 'webhook';
+
+/** Config key for a channel's default model selection. */
+export type ChannelModelConfigKey = `assistant.${ChannelPlatform}.defaultModel`;
+
+/** Config key for a channel's agent selection. */
+export type ChannelAgentConfigKey = `assistant.${ChannelPlatform}.agent`;
+
+/** A saved model reference (provider id + model name) for a channel. */
+export type ChannelDefaultModel = { id: string; useModel: string };
+
+/** A saved agent selection for a channel. */
+export type ChannelAgentSelection = { backend: string; customAgentId?: string; name?: string };
+
+/**
+ * Generated config keys for every channel's default-model + agent selection.
+ * Intersected into the ConfigStorage refer so each channel gets type-safe
+ * `assistant.<platform>.{defaultModel,agent}` keys without hand-writing them.
+ */
+export type IChannelAssistantConfigRefer = {
+  [K in ChannelModelConfigKey]?: ChannelDefaultModel;
+} & {
+  [K in ChannelAgentConfigKey]?: ChannelAgentSelection;
+};
 
 export interface IConfigStorageRefer {
   'gemini.config': {
@@ -68,6 +128,14 @@ export interface IConfigStorageRefer {
   'acp.agentIdleTimeout'?: number;
   /** User-defined custom ACP agents (isPreset !== true, require defaultCliPath). */
   'acp.customAgents'?: AcpBackendConfig[];
+  /**
+   * Agent keys the user hid from the Guid-page agent toolbar strip. Detected
+   * agents whose key is listed here stay detected (and still appear on the
+   * Agents settings page) but are removed from the toolbar. Keys use the same
+   * format as `getAgentKey` (plain backend, `custom:uuid`, or `remote:uuid`).
+   * Absent or empty means every detected agent is shown.
+   */
+  'agents.hidden'?: string[];
   /** Preset assistant configurations (isPreset === true, prompt-only, no CLI). */
   assistants?: AcpBackendConfig[];
   /**
@@ -121,12 +189,12 @@ export interface IConfigStorageRefer {
   customCss: string; // Custom CSS styles
   'css.themes': ICssTheme[]; // Custom CSS themes list
   'css.activeThemeId': string; // Currently active theme ID
-  'gemini.defaultModel': string | { id: string; useModel: string };
+  'gemini.defaultModel': string | { id: string; useModel: string; accountId?: string };
   'wcore.config'?: {
     /** Preferred session mode for new conversations */
     preferredMode?: string;
   };
-  'wcore.defaultModel'?: { id: string; useModel: string };
+  'wcore.defaultModel'?: { id: string; useModel: string; accountId?: string };
   /**
    * User-pinned models for the composer model picker, as `providerId:modelId`
    * keys. Surfaced in a dedicated "Pinned" zone at the top of the picker so a
@@ -233,61 +301,9 @@ export interface IConfigStorageRefer {
   'system.routeThroughFlux'?: boolean;
   // Automatically preview newly created Office files in the current workspace
   'system.autoPreviewOfficeFiles'?: boolean;
-  // Telegram assistant default model
-  'assistant.telegram.defaultModel'?: {
-    id: string;
-    useModel: string;
-  };
-  // Telegram assistant agent selection
-  'assistant.telegram.agent'?: {
-    backend: string;
-    customAgentId?: string;
-    name?: string;
-  };
-  // Lark assistant default model
-  'assistant.lark.defaultModel'?: {
-    id: string;
-    useModel: string;
-  };
-  // Lark assistant agent selection
-  'assistant.lark.agent'?: {
-    backend: string;
-    customAgentId?: string;
-    name?: string;
-  };
-  // DingTalk assistant default model
-  'assistant.dingtalk.defaultModel'?: {
-    id: string;
-    useModel: string;
-  };
-  // DingTalk assistant agent selection
-  'assistant.dingtalk.agent'?: {
-    backend: string;
-    customAgentId?: string;
-    name?: string;
-  };
-  // WeChat assistant default model
-  'assistant.weixin.defaultModel'?: {
-    id: string;
-    useModel: string;
-  };
-  // WeChat assistant agent selection
-  'assistant.weixin.agent'?: {
-    backend: string;
-    customAgentId?: string;
-    name?: string;
-  };
-  // WeCom assistant default model
-  'assistant.wecom.defaultModel'?: {
-    id: string;
-    useModel: string;
-  };
-  // WeCom assistant agent selection
-  'assistant.wecom.agent'?: {
-    backend: string;
-    customAgentId?: string;
-    name?: string;
-  };
+  // Per-channel assistant default-model and agent selections
+  // (`assistant.<platform>.defaultModel` / `assistant.<platform>.agent`) are
+  // provided by IChannelAssistantConfigRefer, intersected into ConfigStorage above.
   // Skills Market: whether the wayland-skills builtin skill is enabled
   'skillsMarket.enabled'?: boolean;
   /**
@@ -332,6 +348,16 @@ export interface IConfigStorageRefer {
   'launchpad.barOrder'?: import('@/common/types/launchpad').LaunchpadBarOrder;
   // Ambient Mode: persisted bubble window position (displayId used for multi-monitor recovery)
   'ambient.bubblePosition'?: { x: number; y: number; displayId: number };
+  /**
+   * Wayland Core "raw engine mode" power-user toggle. When true, the embedded
+   * engine should run on its OWN `config.toml` and NOT be overridden with
+   * Desktop's per-session model / skills / overlay injection. Off by default.
+   *
+   * NOTE: this flag only PERSISTS the preference. The spawn seam in
+   * WCoreManager must read it to actually skip injection (see the
+   * `TODO(orchestrator)` marker there).
+   */
+  'wcore.rawEngineMode'?: boolean;
 }
 
 export interface IEnvStorageRefer {
@@ -713,6 +739,14 @@ export interface IProvider {
 
 export type TProviderWithModel = Omit<IProvider, 'model'> & {
   useModel: string;
+  /**
+   * Multi-account per provider (issue #14, Phase 1a). Which connected account
+   * of the provider this binding targets. Absent / `'default'` is the
+   * single-account case (every binding today). Carried as a structured field,
+   * never serialized into the model id (audit C2). Frozen onto a conversation
+   * at create time so resuming a chat never silently re-attributes it.
+   */
+  accountId?: string;
 };
 
 // MCP Server Configuration Types

@@ -8,10 +8,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import EmailAgentMailConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/email/EmailAgentMailConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const EmailAgentMailSetup: React.FC = () => {
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
+  const modelSelection = useChannelModelSelection('assistant.email-agentmail.defaultModel');
 
   const loadStatus = useCallback(async () => {
     try {
@@ -41,7 +43,7 @@ const EmailAgentMailSetup: React.FC = () => {
       displayName='Email (AgentMail)'
       pluginId={pluginStatus?.id ?? 'email-agentmail_default'}
     >
-      <EmailAgentMailConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <EmailAgentMailConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

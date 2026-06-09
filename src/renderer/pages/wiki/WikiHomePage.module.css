@@ -38,17 +38,16 @@
   gap: 8px;
 }
 
-.logoDot {
-  width: 10px;
-  height: 10px;
-  background: var(--orange, var(--color-primary-6, #ff7a45));
-  border-radius: 50%;
-  box-shadow: 0 0 8px rgba(255, 122, 69, 0.5);
+.logoIcon {
+  display: flex;
+  align-items: center;
+  color: var(--brand, #ff6b35);
+  filter: drop-shadow(0 0 10px rgba(255, 107, 53, 0.4));
 }
 
 .logoLabel {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 20px;
   color: var(--text-1, var(--color-text-1, #e8e9ec));
 }
 

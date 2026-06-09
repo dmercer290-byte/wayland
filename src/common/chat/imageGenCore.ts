@@ -13,10 +13,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { jsonrepair } from 'jsonrepair';
+import { AuthType } from '@office-ai/aioncli-core';
 import type OpenAI from 'openai';
 import { ClientFactory, type RotatingClient } from '@/common/api/ClientFactory';
+import { OpenAIRotatingClient } from '@/common/api/OpenAIRotatingClient';
 import type { TProviderWithModel } from '@/common/config/storage';
 import type { UnifiedChatCompletionResponse } from '@/common/api/RotatingApiClient';
+import { getProviderAuthType } from '@/common/utils/platformAuthType';
 import { IMAGE_EXTENSIONS, MIME_TYPE_MAP, MIME_TO_EXT_MAP, DEFAULT_IMAGE_EXTENSION } from '@/common/config/constants';
 
 // Copyright 2026 Ferrox Labs
@@ -260,6 +263,116 @@ export interface ImageGenResult {
 }
 
 /**
+ * OpenAI native image-model id pattern. Covers `gpt-image-1`, `gpt-image-2`,
+ * `gpt-image-1-mini`, `gpt-image-1.5`, `chatgpt-image-latest`, `dall-e-3`,
+ * `dall-e-2`. Deliberately anchored so it does NOT catch OpenRouter ids like
+ * `openai/gpt-5-image`, Gemini ids (`gemini-2.5-flash-image`), or `flux-image`.
+ */
+const OPENAI_IMAGE_MODEL_RE = /^(gpt-image|dall-e|chatgpt-image)/i;
+
+/**
+ * True only for OpenAI's native Images API (`v1/images/generations`). These
+ * models 404 on `v1/chat/completions`, so they must route through
+ * `client.images.generate` instead of the chat path used by Gemini/OpenRouter
+ * image models (which return images inline in the chat response).
+ *
+ * Three conditions, all required:
+ *  1. Provider resolves to the OpenAI protocol (USE_OPENAI auth type).
+ *  2. The provider's baseUrl targets the official OpenAI host. OpenRouter and
+ *     other OpenAI-compatible gateways also use USE_OPENAI but do NOT serve the
+ *     Images API, so the host check keeps them on the chat path.
+ *  3. The model id matches the OpenAI Images-API naming pattern.
+ */
+export function isOpenAINativeImageModel(provider: TProviderWithModel): boolean {
+  if (getProviderAuthType(provider) !== AuthType.USE_OPENAI) return false;
+  if (!OPENAI_IMAGE_MODEL_RE.test(provider.useModel || '')) return false;
+
+  const baseUrl = provider.baseUrl || '';
+  let host: string;
+  try {
+    host = new URL(baseUrl).host.toLowerCase();
+  } catch {
+    return false;
+  }
+  return host === 'api.openai.com';
+}
+
+/**
+ * Generation via the OpenAI Images API (`client.images.generate`). gpt-image-1
+ * returns base64-encoded images by default and rejects `response_format`, so we
+ * send only model/prompt/n and never pass `response_format` or a model-specific
+ * `size`. Handles both `b64_json` (gpt-image-*) and `url` (dall-e-*) responses.
+ */
+async function executeOpenAINativeImageGen(
+  params: ImageGenParams,
+  provider: TProviderWithModel,
+  workspaceDir: string,
+  proxy: string | undefined,
+  hasInputImages: boolean,
+  signal?: AbortSignal
+): Promise<ImageGenResult> {
+  if (hasInputImages) {
+    return {
+      success: false,
+      text: `OpenAI image editing with input images is not yet supported through this path. Generation (no input images) works; for edits, use a Gemini or OpenRouter image model, or omit the input image. Model: ${provider.useModel}`,
+      error: 'openai-image-edit-unsupported',
+    };
+  }
+
+  const rotatingClient: RotatingClient = await ClientFactory.createRotatingClient(provider, {
+    proxy,
+    rotatingOptions: { maxRetries: 3, retryDelay: 1000 },
+  });
+
+  if (!(rotatingClient instanceof OpenAIRotatingClient)) {
+    return {
+      success: false,
+      text: `Image generation client is not an OpenAI client for model ${provider.useModel}.`,
+      error: 'client-mismatch',
+    };
+  }
+
+  const response = await rotatingClient.createImage(
+    { model: provider.useModel, prompt: params.prompt, n: 1 },
+    { signal, timeout: API_TIMEOUT_MS }
+  );
+
+  const first = response.data?.[0];
+  if (!first) {
+    return { success: false, text: 'OpenAI Images API returned no image data.', error: 'No image data' };
+  }
+
+  let dataUrl: string;
+  if (first.b64_json) {
+    dataUrl = `data:image/png;base64,${first.b64_json}`;
+  } else if (first.url) {
+    const fetchResponse = await globalThis.fetch(first.url, { signal });
+    if (!fetchResponse.ok) {
+      return {
+        success: false,
+        text: `Failed to download generated image (${fetchResponse.status}).`,
+        error: `image-download-${fetchResponse.status}`,
+      };
+    }
+    const arrayBuffer = await fetchResponse.arrayBuffer();
+    const base64 = Buffer.from(arrayBuffer).toString('base64');
+    dataUrl = `data:image/png;base64,${base64}`;
+  } else {
+    return { success: false, text: 'OpenAI Images API returned neither b64_json nor url.', error: 'No image payload' };
+  }
+
+  const imagePath = await saveGeneratedImage(dataUrl, workspaceDir);
+  const relativeImagePath = path.relative(workspaceDir, imagePath);
+
+  return {
+    success: true,
+    text: `Image generated successfully.\n\nGenerated image saved to: ${imagePath}`,
+    imagePath,
+    relativeImagePath,
+  };
+}
+
+/**
  * Core image generation function shared between MCP server and Gemini tool.
  */
 export async function executeImageGeneration(
@@ -286,6 +399,15 @@ export async function executeImageGeneration(
     }
 
     const hasImages = imageUris.length > 0;
+
+    // OpenAI native image models (gpt-image-*, dall-e-*, chatgpt-image-*) use the
+    // Images API, not chat/completions (which 404s for them). Route them before
+    // building the chat-style payload. Gemini/OpenRouter image models fall
+    // through to the chat-completions path below, unchanged.
+    if (isOpenAINativeImageModel(provider)) {
+      return await executeOpenAINativeImageGen(params, provider, workspaceDir, proxy, hasImages, signal);
+    }
+
     let enhancedPrompt: string;
     if (hasImages) {
       enhancedPrompt = `Analyze/Edit image: ${params.prompt}`;

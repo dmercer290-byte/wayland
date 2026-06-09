@@ -81,13 +81,15 @@ type Built = {
   mirror: ReturnType<typeof vi.fn>;
   emitListChanged: ReturnType<typeof vi.fn>;
   setLastRefreshedAt: ReturnType<typeof vi.fn>;
+  probeOllama: ReturnType<typeof vi.fn>;
 };
 
-function build(opts: { now?: () => number } = {}): Built {
+function build(opts: { now?: () => number; probeOllama?: ReturnType<typeof vi.fn> } = {}): Built {
   const repo = new FakeRepo();
   const getRegistry = vi.fn().mockResolvedValue({});
   const mirror = vi.fn().mockResolvedValue(undefined);
   const emitListChanged = vi.fn();
+  const probeOllama = opts.probeOllama ?? vi.fn().mockResolvedValue({ running: false, models: [] });
   const setLastRefreshedAt = vi.fn().mockResolvedValue(undefined);
 
   const deps: ModelRegistryDeps = {
@@ -112,9 +114,10 @@ function build(opts: { now?: () => number } = {}): Built {
     emitListChanged,
     setLastRefreshedAt,
     now: opts.now,
+    probeOllama,
   };
 
-  return { repo, deps, getRegistry, mirror, emitListChanged, setLastRefreshedAt };
+  return { repo, deps, getRegistry, mirror, emitListChanged, setLastRefreshedAt, probeOllama };
 }
 
 describe('refreshAllOnce - added diff', () => {
@@ -211,5 +214,76 @@ describe('refreshAllOnce - success-gated freshness stamp', () => {
     await h.refreshAllOnce();
 
     expect(emitListChanged).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('refreshAllOnce - keyless ollama-local (Finding 1 + 5)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const OLLAMA_CREDS = { key: '', baseUrl: 'http://127.0.0.1:11434/v1' };
+
+  it('does NOT wipe the ollama-local catalog on refresh - re-probes the daemon instead', async () => {
+    // Daemon is up and reports its models; the refresh must re-probe and keep a
+    // NON-EMPTY catalog. The pre-fix bug routed keyless ollama-local through
+    // buildAndPersistCatalog, which assembled 0 models and wiped the catalog.
+    const probeOllama = vi.fn().mockResolvedValue({ running: true, models: ['llama3:latest', 'qwen2:7b'] });
+    const { repo, deps } = build({ probeOllama });
+    repo.add('ollama-local', OLLAMA_CREDS, [catalogModel({ id: 'llama3:latest', providerId: 'ollama-local' })]);
+
+    const h = createModelRegistryHandlers(deps);
+    const summary = await h.refreshAllOnce();
+
+    const after = repo.getRegistryCatalog('ollama-local');
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.map((m) => m.id)).toEqual(['llama3:latest', 'qwen2:7b']);
+    expect(summary.succeeded).toEqual(['ollama-local']);
+    expect(probeOllama).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the existing ollama-local catalog intact when the daemon is unreachable - never replaces with []', async () => {
+    const probeOllama = vi.fn().mockResolvedValue({ running: false, models: [] });
+    const { repo, deps } = build({ probeOllama });
+    const seeded = [
+      catalogModel({ id: 'llama3:latest', providerId: 'ollama-local' }),
+      catalogModel({ id: 'mistral:latest', providerId: 'ollama-local' }),
+    ];
+    repo.add('ollama-local', OLLAMA_CREDS, seeded);
+
+    const h = createModelRegistryHandlers(deps);
+    const summary = await h.refreshAllOnce();
+
+    expect(repo.getRegistryCatalog('ollama-local').map((m) => m.id)).toEqual(['llama3:latest', 'mistral:latest']);
+    expect(summary.failed).toEqual(['ollama-local']);
+    expect(summary.succeeded).toEqual([]);
+  });
+
+  it('reports newly-pulled ollama models in the added diff', async () => {
+    const probeOllama = vi.fn().mockResolvedValue({ running: true, models: ['llama3:latest', 'phi3:mini'] });
+    const { repo, deps } = build({ probeOllama });
+    repo.add('ollama-local', OLLAMA_CREDS, [catalogModel({ id: 'llama3:latest', providerId: 'ollama-local' })]);
+
+    const h = createModelRegistryHandlers(deps);
+    const summary = await h.refreshAllOnce();
+
+    expect(summary.added.map((a) => a.modelId)).toEqual(['phi3:mini']);
+    expect(summary.added[0].providerId).toBe('ollama-local');
+  });
+
+  it('does NOT exempt ollama-local from the SSRF gate when its stored baseUrl is non-loopback (Finding 5)', async () => {
+    // An ollama-local row whose baseUrl points off-loopback must NOT get the
+    // keyless re-probe path - it is validated like any custom provider and,
+    // failing the private-host SSRF rule, is skipped (never probed).
+    const probeOllama = vi.fn().mockResolvedValue({ running: true, models: ['x'] });
+    const { repo, deps } = build({ probeOllama });
+    repo.add('ollama-local', { key: '', baseUrl: 'http://169.254.169.254/v1' }, [
+      catalogModel({ id: 'seed', providerId: 'ollama-local' }),
+    ]);
+
+    const h = createModelRegistryHandlers(deps);
+    const summary = await h.refreshAllOnce();
+
+    expect(probeOllama).not.toHaveBeenCalled();
+    expect(summary.failed).toEqual(['ollama-local']);
+    expect(summary.succeeded).toEqual([]);
   });
 });

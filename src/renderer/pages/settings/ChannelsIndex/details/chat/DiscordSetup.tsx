@@ -10,10 +10,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import DiscordConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/chat/DiscordConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const DiscordSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.discord.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -48,7 +50,7 @@ const DiscordSetup: React.FC = () => {
         'Native Discord bot integration via the Gateway. Create a Discord application and bot in the Developer Portal, then paste the bot token below.',
       )}
     >
-      <DiscordConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <DiscordConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

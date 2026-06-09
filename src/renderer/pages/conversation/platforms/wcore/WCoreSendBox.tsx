@@ -19,7 +19,9 @@ import { useAutoTitle } from '@/renderer/hooks/chat/useAutoTitle';
 import { getSendBoxDraftHook, type FileOrFolderItem } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { createSetUploadFile, useSendBoxFiles } from '@/renderer/hooks/chat/useSendBoxFiles';
 import { useSlashCommands } from '@/renderer/hooks/chat/useSlashCommands';
+import { usePendingSendOnWake } from '@/renderer/hooks/chat/usePendingSendOnWake';
 import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
+import { useProviderReadiness } from '@/renderer/hooks/useProviderReadiness';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import { useAddOrUpdateMessage, useRemoveMessageByMsgId } from '@/renderer/pages/conversation/Messages/hooks';
 import { assertBridgeSuccess } from '@/renderer/pages/conversation/platforms/assertBridgeSuccess';
@@ -41,6 +43,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useWCoreMessage } from './useWCoreMessage';
 import type { WCoreModelSelection } from './useWCoreModelSelection';
+import type { IResponseMessage } from '@/common/adapter/ipcBridge';
+import { classifyAcpAuthFailure } from '@/renderer/pages/conversation/platforms/acp/acpAuthFailure';
 
 const useWCoreSendBoxDraft = getSendBoxDraftHook('wcore', {
   _type: 'wcore',
@@ -97,6 +101,24 @@ const WCoreSendBox: React.FC<{
   const { t } = useTranslation();
   const { checkAndUpdateTitle } = useAutoTitle();
   const { currentModel, getDisplayModelName } = modelSelection;
+  const readiness = useProviderReadiness();
+  // The engine is "asleep" when no working inference provider is configured.
+  // While asleep we still let the user compose + send: the message is held in
+  // the main process and auto-fires once a provider wakes the engine (WS-4).
+  const engineAsleep = !readiness.ready && !readiness.loading;
+
+  // When the engine surfaces a provider auth failure (e.g. 401 / invalid
+  // x-api-key on a dead key), show the same remedy card the ACP backends use.
+  // The main process separately flips that provider off "connected".
+  const handleAuthError = useCallback(
+    (message: IResponseMessage) => {
+      const text = typeof message.data === 'string' ? message.data : String(message.data ?? '');
+      if (classifyAcpAuthFailure('wcore', text)) {
+        emitter.emit('wcore.auth.failed.card', { conversation_id, providerLabel: currentModel?.name });
+      }
+    },
+    [conversation_id, currentModel?.name]
+  );
 
   const { thought, running, hasHydratedRunningState, tokenUsage, setActiveMsgId, setWaitingResponse, resetState } =
     useWCoreMessage(conversation_id, {
@@ -106,6 +128,7 @@ const WCoreSendBox: React.FC<{
           setDynamicModes(mergeWithCapabilities('wcore', modes));
         }
       },
+      onError: handleAuthError,
     });
 
   const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent } = useSendBoxDraft(conversation_id);
@@ -234,6 +257,15 @@ const WCoreSendBox: React.FC<{
     ]
   );
 
+  // WS-4: hold a send while the engine is asleep; auto-fire it once a provider
+  // wakes the engine (exactly-once, survives a remount into settings and back).
+  const { holdIfAsleep } = usePendingSendOnWake({
+    conversationId: conversation_id,
+    asleep: engineAsleep,
+    ready: readiness.ready,
+    execute: executeCommand,
+  });
+
   const {
     items: queuedCommands,
     isPaused: isQueuePaused,
@@ -292,6 +324,13 @@ const WCoreSendBox: React.FC<{
     const filesToSend = collectSelectedFiles(uploadFile, atPath);
     clearFiles();
     emitter.emit('wcore.selected.file.clear');
+
+    // Engine asleep: park the message instead of dispatching it. The inline
+    // ActivationCard (hosted by WCoreChat) is the call-to-action; the held
+    // message auto-fires the moment a provider is connected.
+    if (await holdIfAsleep(message, filesToSend)) {
+      return;
+    }
 
     if (
       shouldEnqueueConversationCommand({
@@ -372,7 +411,7 @@ const WCoreSendBox: React.FC<{
           setAtPath(items);
         }}
         loading={isBusy}
-        disabled={!currentModel?.useModel}
+        disabled={!currentModel?.useModel && !engineAsleep}
         placeholder={
           currentModel?.useModel
             ? t('conversation.chat.sendMessageTo', { model: getDisplayModelName(currentModel.useModel) })

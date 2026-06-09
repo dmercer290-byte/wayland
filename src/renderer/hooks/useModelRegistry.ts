@@ -11,6 +11,7 @@ import type {
   IModelRegistryTestResult,
 } from '@/common/adapter/ipcBridge';
 import type { CuratedModel, ProviderId } from '@process/providers/types';
+import type { CatalogProviderEntry } from '@process/providers/catalog/catalogProvider';
 
 /**
  * Renderer wrapper around the full `ipcBridge.modelRegistry` IPC contract.
@@ -58,6 +59,13 @@ export type UseModelRegistry = {
   rekey: (providerId: ProviderId, creds: IModelRegistryCreds) => Promise<IModelRegistryConnectResult>;
   /** Curated model list scoped to a CLI agent / backend key. */
   curatedForAgent: (agentKey: string) => Promise<CuratedModel[]>;
+  /**
+   * The full connectable provider catalog (~100 named providers from the
+   * engine's bundled catalog), sorted by displayName. Used by the Browse modal
+   * to render a searchable named-provider list; selecting one connects with
+   * just an API key (the engine resolves its baseUrl).
+   */
+  getProviderCatalog: () => Promise<CatalogProviderEntry[]>;
   /**
    * Re-fetch + re-enrich every connected provider once and return the run
    * summary (added models, success/failure, freshness stamp). Reloads the
@@ -203,6 +211,8 @@ function useModelRegistryImpl(skipInitialReload = false): UseModelRegistry {
 
   const curatedForAgent = useCallback((agentKey: string) => modelRegistry.curatedForAgent.invoke({ agentKey }), []);
 
+  const getProviderCatalog = useCallback(() => modelRegistry.getProviderCatalog.invoke(), []);
+
   const refreshAll = useCallback(async () => {
     const summary = await modelRegistry.refreshAll.invoke({ reason: 'manual' });
     // Refresh the providers list so per-row badges / model counts reflect the
@@ -228,6 +238,7 @@ function useModelRegistryImpl(skipInitialReload = false): UseModelRegistry {
       disconnect,
       rekey,
       curatedForAgent,
+      getProviderCatalog,
       refreshAll,
       registryVersion,
     }),
@@ -245,6 +256,7 @@ function useModelRegistryImpl(skipInitialReload = false): UseModelRegistry {
       disconnect,
       rekey,
       curatedForAgent,
+      getProviderCatalog,
       refreshAll,
       registryVersion,
     ]

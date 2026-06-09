@@ -24,12 +24,13 @@
  */
 
 import { Button, Input, Message, Select } from '@arco-design/web-react';
-import { Plus, Search, Upload } from 'lucide-react';
+import { Plus, Search, Upload, Users } from 'lucide-react';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ipcBridge } from '@/common';
-import { LibraryPageHeader, LibrarySectionHeader } from '@/renderer/components/layout/library';
+import { LibrarySectionHeader } from '@/renderer/components/layout/library';
+import PageShell from '@/renderer/components/layout/PageShell';
 import { useAuth } from '@/renderer/hooks/context/AuthContext';
 import { useAssistantList } from '@/renderer/hooks/assistant';
 import type { AssistantListItem } from '@/renderer/pages/settings/AssistantSettings/types';
@@ -282,30 +283,34 @@ const TeamsLibraryPage: React.FC = () => {
   );
 
   return (
-    <div className={styles.page} data-testid='teams-library-page'>
-      <LibraryPageHeader
-        title={t('teams.title', { defaultValue: 'Teams' })}
-        countLabel={t('teams.totalCount', { count: totalTeams, defaultValue: '{{count}} teams' })}
-        testId='teams-action-bar'
-        countTestId='teams-total-count'
-      >
-        <Button
-          type='secondary'
-          icon={<Upload size={14} />}
-          onClick={triggerImportPicker}
-          data-testid='teams-import-cta'
-        >
-          {t('teams.import.button', { defaultValue: 'Import team' })}
-        </Button>
-        <Button
-          type='primary'
-          icon={<Plus size={14} />}
-          onClick={handleBuildMyOwn}
-          data-testid='teams-build-my-own-cta'
-        >
-          {t('teams.buildMyOwn.cta', { defaultValue: 'Build my own team' })}
-        </Button>
-      </LibraryPageHeader>
+    <PageShell
+      title={t('teams.title', { defaultValue: 'Teams' })}
+      icon={<Users size={20} />}
+      countLabel={t('teams.totalCount', { count: totalTeams, defaultValue: '{{count}} teams' })}
+      countTestId='teams-total-count'
+      width='full'
+      testId='teams-library-page'
+      actions={
+        <>
+          <Button
+            type='secondary'
+            icon={<Upload size={14} />}
+            onClick={triggerImportPicker}
+            data-testid='teams-import-cta'
+          >
+            {t('teams.import.button', { defaultValue: 'Import team' })}
+          </Button>
+          <Button
+            type='primary'
+            icon={<Plus size={14} />}
+            onClick={handleBuildMyOwn}
+            data-testid='teams-build-my-own-cta'
+          >
+            {t('teams.buildMyOwn.cta', { defaultValue: 'Build my own team' })}
+          </Button>
+        </>
+      }
+    >
       <input
         ref={fileInputRef}
         type='file'
@@ -423,7 +428,7 @@ const TeamsLibraryPage: React.FC = () => {
           onCancel={closeImportModal}
         />
       )}
-    </div>
+    </PageShell>
   );
 };
 

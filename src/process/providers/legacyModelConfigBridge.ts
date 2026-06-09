@@ -41,8 +41,9 @@
 import type { IProvider } from '@/common/config/storage';
 import { uuid } from '@/common/utils';
 import { ProcessConfig } from '@process/utils/initStorage';
-import type { ProviderId } from './types';
-import type { ProviderRepository } from './storage/ProviderRepository';
+import { Curator } from './catalog/Curator';
+import type { CatalogModel, ProviderId } from './types';
+import type { ProviderRepository, RegistryOverride } from './storage/ProviderRepository';
 
 const BRIDGE_TAG_KEY = '__waylandModelRegistryBridge';
 /**
@@ -122,6 +123,28 @@ function runSerial<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/**
+ * The model ids to mirror into the legacy `model.config` for the in-chat
+ * pickers: the CURATED (recommended/enabled) set with the user's per-model
+ * overrides applied - NOT the full raw catalog.
+ *
+ * A broad provider exposes hundreds of models (OpenRouter ships ~300), and
+ * dumping every id buried the chosen handful under an alphabetical wall so the
+ * in-chat dropdown showed models the user never picked (issue #13). This mirrors
+ * exactly what Settings shows: the Curator's enabled set, plus any model the
+ * user explicitly toggled on/off. Non-text models (image/audio/embedding) are
+ * dropped by the Curator, which is correct for a chat model picker.
+ */
+export function selectMirrorModelIds(catalog: CatalogModel[], overrides: RegistryOverride[]): string[] {
+  const curated = new Curator().curate(catalog);
+  const overrideEnabled = new Map(overrides.map((o) => [o.modelId, o.enabled]));
+  const enabled = curated.filter((m) => overrideEnabled.get(m.id) ?? m.enabled);
+  // Never hand the picker an empty list: if nothing is curated-enabled (e.g. a
+  // provider with no eligible flagship family), fall back to the full curated
+  // text set rather than blanking the dropdown.
+  return (enabled.length > 0 ? enabled : curated).map((m) => m.id);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -148,24 +171,44 @@ export function mirrorConnectOrRekey(repo: ProviderRepository, providerId: Provi
     if (stored.creds.useGoogleAuth === true) return;
 
     const apiKey = typeof stored.creds.key === 'string' ? stored.creds.key : '';
-    if (!apiKey) return; // Nothing useful to mirror.
+    // `ollama-local` is keyless by design (a local Ollama daemon needs no key),
+    // so its mirror row legitimately carries an empty `apiKey`. Every other
+    // provider with no key has nothing useful to mirror and is skipped.
+    if (!apiKey && providerId !== 'ollama-local') return;
 
     const baseUrl = typeof stored.creds.baseUrl === 'string' ? stored.creds.baseUrl : '';
-    const catalog = repo.getRegistryCatalog(providerId);
-    const modelIds = catalog.map((m) => m.id);
+    const modelIds = selectMirrorModelIds(repo.getRegistryCatalog(providerId), repo.listRegistryOverrides(providerId));
     const modelProtocols =
       stored.creds.protocols && typeof stored.creds.protocols === 'object'
         ? (stored.creds.protocols as Record<string, string>)
         : undefined;
 
+    const platform = platformFor(providerId);
+
+    const raw = await ProcessConfig.get('model.config');
+    const current: IProvider[] = Array.isArray(raw) ? (raw as IProvider[]) : [];
+
+    // Carry the user's prior enable/disable intent across a re-mirror (Finding
+    // 4). A refresh (or any reconnect) re-runs this mirror; without preserving
+    // the prior row's `enabled` / `modelEnabled`, a provider the user DISABLED
+    // in the legacy pickers would silently reappear (a fresh row defaults to
+    // enabled). The new registry has no `disabled` state, so the legacy
+    // `enabled:false` flag is the only disable signal for these surfaces and
+    // must survive the rewrite.
+    const prior = current.find((p) => isV2BridgeRowForProvider(p, providerId, platform));
+    const priorEnabled = prior?.enabled;
+    const priorModelEnabled = prior?.modelEnabled;
+
     const row: BridgeRow = {
-      id: uuid(),
+      id: prior?.id ?? uuid(),
       name: displayNameFor(providerId),
-      platform: platformFor(providerId),
+      platform,
       baseUrl,
       apiKey,
       model: modelIds,
       ...(modelProtocols ? { modelProtocols } : {}),
+      ...(priorEnabled !== undefined ? { enabled: priorEnabled } : {}),
+      ...(priorModelEnabled !== undefined ? { modelEnabled: priorModelEnabled } : {}),
       // Ship-gate Fix C4: include the providerId in the tag so multiple
       // providers that share a legacy `platform` (every `openai-compatible`
       // family member) coexist as distinct bridge rows. The previous flat
@@ -173,12 +216,10 @@ export function mirrorConnectOrRekey(repo: ProviderRepository, providerId: Provi
       [BRIDGE_TAG_KEY]: bridgeTagValue(providerId),
     };
 
-    const raw = await ProcessConfig.get('model.config');
-    const current: IProvider[] = Array.isArray(raw) ? (raw as IProvider[]) : [];
     // Drop any prior bridge row owned by THIS providerId; leave sibling
     // bridge rows (different providerId, same platform) and non-bridge rows
     // alone.
-    const filtered = current.filter((p) => !isV2BridgeRowForProvider(p, providerId, row.platform));
+    const filtered = current.filter((p) => !isV2BridgeRowForProvider(p, providerId, platform));
     filtered.push(row);
     await ProcessConfig.set('model.config', filtered);
   }).catch((error) => {

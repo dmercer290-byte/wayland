@@ -231,6 +231,21 @@ export class AcpAgentV2 {
       }
       // Drop the stale session id so SessionLifecycle takes the createSession path.
       (this.agentConfig as { resumeSessionId?: string }).resumeSessionId = undefined;
+    } else if (this.agentConfig.resumeSessionId) {
+      // Normal resume attempt (wrapper version unchanged). claude-agent-acp
+      // sessions are in-memory and don't survive a process restart, so the
+      // stored sessionId may be unloadable. Arm history replay SPECULATIVELY
+      // before we try to resume: if loadSession succeeds, SessionLifecycle
+      // signals 'session_loaded' and the onSignal handler clears this; if it
+      // fails, it signals 'session_recovered' and we keep the replay so the
+      // first prompt against the fresh session restores context. Awaited here
+      // (before session.start) so it is ready before any prompt is consumed.
+      try {
+        this.pendingReplayContext = await buildHistoryReplayContext(this.conversationId);
+      } catch (err) {
+        console.warn('[AcpAgentV2] Failed to build speculative replay context, proceeding without it:', err);
+        this.pendingReplayContext = null;
+      }
     }
 
     const callbacks: SessionCallbacks = this.buildCallbacks();
@@ -424,6 +439,23 @@ export class AcpAgentV2 {
               msg_id: `finish_${Date.now()}`,
               data: null,
             });
+            break;
+
+          case 'session_loaded':
+            // Resume succeeded; drop the speculative replay so we don't re-send
+            // history the resumed session already has.
+            this.pendingReplayContext = null;
+            break;
+
+          case 'session_recovered':
+            // loadSession failed and SessionLifecycle created a fresh session.
+            // The speculative replay armed in ensureSession stays set and is
+            // consumed by the in-flight prompt (sendMessage), restoring context.
+            // Deliberately emit NO error/finish: the turn continues normally.
+            console.log(
+              `[AcpAgentV2] Session resume failed for conversation ${this.conversationId}; ` +
+                'recovered with a fresh session + history replay.'
+            );
             break;
 
           case 'session_expired':

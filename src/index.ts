@@ -7,6 +7,9 @@
 // configureChromium sets app name (dev isolation) and Chromium flags - must run before
 // ANY module that calls app.getPath('userData'), because Electron caches the path on first call.
 import './process/utils/configureChromium';
+// Force IPv4-first DNS in the main process (side-effect import). Keeps outbound
+// connects fast/reliable; fixes the IMAP email channel hanging on a slow IPv6 path.
+import './process/utils/dnsOrder';
 import os from 'node:os';
 import { createScrubPii } from '@/common/utils/sentryPii';
 

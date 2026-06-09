@@ -22,3 +22,85 @@ describe('isAllowedForRemote - fs/project arbitrary-path providers denied', () =
     expect(isAllowedForRemote(`subscribe-${key}`)).toBe(false);
   });
 });
+
+/**
+ * Channel config / authorization mutation surface must NOT be reachable by a
+ * remote (paired-device WebSocket) caller. enable/disable reconfigure a
+ * channel, sync-channel-settings can set WhatsApp mode='dedicated' +
+ * ownerNumbers (auto-authorizing an arbitrary number), revoke/get-authorized
+ * mutate and disclose authorization, rotate-webhook-token mutates the webhook
+ * secret, and test-plugin makes an outbound call with caller-supplied creds.
+ * Consistent with the channel.*-pairing trio.
+ */
+describe('isAllowedForRemote - channel config/auth providers denied', () => {
+  const deniedKeys: ReadonlyArray<string> = [
+    'channel.enable-plugin',
+    'channel.disable-plugin',
+    'channel.rotate-webhook-token',
+    'channel.sync-channel-settings',
+    'channel.revoke-user',
+    'channel.get-authorized-users',
+    'channel.test-plugin',
+  ];
+
+  it.each(deniedKeys)('denies subscribe-%s for remote callers', (key) => {
+    expect(isAllowedForRemote(`subscribe-${key}`)).toBe(false);
+  });
+
+  it('still allows the read-only channel.get-plugin-status for remote callers', () => {
+    expect(isAllowedForRemote('subscribe-channel.get-plugin-status')).toBe(true);
+  });
+});
+
+/**
+ * WebUI admin/auth surface must NOT be reachable by a remote (paired-device
+ * WebSocket) caller. The webui.* bridge providers carry no in-handler remote
+ * guard (unlike the gated webui-direct-* ipcMain handlers), so a paired browser
+ * could otherwise mint/return admin credentials: start -> initialPassword,
+ * reset-password -> broadcast a new plaintext admin password to every paired
+ * client, generate/verify-qr-token -> a full admin session token, and
+ * change-password/username rewrite the admin login with no current-password
+ * check. Deny the mutating/secret-minting ops; keep the read-only views.
+ */
+describe('isAllowedForRemote - webui admin/auth providers denied', () => {
+  const deniedKeys: ReadonlyArray<string> = [
+    'webui.start',
+    'webui.stop',
+    'webui.change-password',
+    'webui.change-username',
+    'webui.reset-password',
+    'webui.generate-qr-token',
+    'webui.verify-qr-token',
+    'webui.revoke-device',
+  ];
+
+  it.each(deniedKeys)('denies subscribe-%s for remote callers', (key) => {
+    expect(isAllowedForRemote(`subscribe-${key}`)).toBe(false);
+  });
+
+  it.each(['webui.get-status', 'webui.list-paired-devices', 'webui.activity-log'])(
+    'still allows the read-only %s for remote callers',
+    (key) => {
+      expect(isAllowedForRemote(`subscribe-${key}`)).toBe(true);
+    }
+  );
+});
+
+/**
+ * Onboarding credential-write providers must NOT be reachable by a remote
+ * caller: connect-pasted-key persists an attacker-supplied provider key
+ * (injection / overwrite), connect-flux mints + persists a Flux credential.
+ * The read-only onboarding.infer-focus stays allowed.
+ */
+describe('isAllowedForRemote - onboarding credential writes denied', () => {
+  it.each(['onboarding.connect-pasted-key', 'onboarding.connect-flux'])(
+    'denies subscribe-%s for remote callers',
+    (key) => {
+      expect(isAllowedForRemote(`subscribe-${key}`)).toBe(false);
+    }
+  );
+
+  it('still allows the read-only onboarding.infer-focus for remote callers', () => {
+    expect(isAllowedForRemote('subscribe-onboarding.infer-focus')).toBe(true);
+  });
+});

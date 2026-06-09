@@ -311,5 +311,24 @@
     "unknown": "Usando o login proprio desta ferramenta",
     "fluxError": "Flux indisponivel",
     "fluxErrorNotice": "O roteamento via Flux falhou neste turno. Verifique sua conexao com o Flux ou troque de modelo."
+  },
+  "activation": {
+    "title": "Desperte seus agentes",
+    "subtitle": "Conecte um provedor de modelos para começar a executar tarefas. Escolha o caminho ideal para você.",
+    "flux": {
+      "label": "Conectar o Flux Router",
+      "sublabel": "Chave gratuita com US$ 1 de crédito inicial. Sem cartão — encaminha cada tarefa para o modelo especialista mais adequado.",
+      "action": "Conectar"
+    },
+    "ownKey": {
+      "label": "Usar minha própria chave",
+      "sublabel": "Use uma chave de API da OpenAI, Anthropic, Google ou de mais de 100 provedores.",
+      "action": "Explorar"
+    },
+    "claudeCode": {
+      "label": "Usar o Claude Code",
+      "sublabel": "Execute com seu login atual do Claude Code — sem chaves extras para gerenciar.",
+      "action": "Usar"
+    }
   }
 }

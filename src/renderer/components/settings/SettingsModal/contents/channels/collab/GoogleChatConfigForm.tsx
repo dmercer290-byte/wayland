@@ -13,13 +13,15 @@
  * service account has Chat API access.
  */
 
-import { Alert, Button, Input, Message } from '@arco-design/web-react';
+import { Alert, Button, Input, Message, Select } from '@arco-design/web-react';
 import { Copy } from 'lucide-react';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -43,17 +45,21 @@ const PreferenceRow: React.FC<{
 
 export type GoogleChatConfigFormProps = {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange?: (status: IChannelPluginStatus | null) => void;
 };
 
 const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
   pluginStatus,
+  modelSelection,
   onStatusChange,
 }) => {
   const { t } = useTranslation();
 
   const [serviceAccountJson, setServiceAccountJson] = useState('');
   const [audience, setAudience] = useState('');
+  const [transport, setTransport] = useState<'webhook' | 'pubsub'>('webhook');
+  const [subscriptionName, setSubscriptionName] = useState('');
   const [testLoading, setTestLoading] = useState(false);
   const [webhookToken, setWebhookToken] = useState<string | null>(null);
 
@@ -74,11 +80,29 @@ const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
   }, [inboundUrl, webhookToken, t]);
 
   const handleTestAndEnable = useCallback(async () => {
-    if (!serviceAccountJson.trim() || !audience.trim()) {
+    if (!serviceAccountJson.trim()) {
       Message.warning(
         t(
-          'settings.channels.googleChat.credentials.bothRequired',
-          'Service Account JSON and JWT audience are required',
+          'settings.channels.googleChat.credentials.serviceAccountRequired',
+          'Service Account JSON is required',
+        ),
+      );
+      return;
+    }
+    if (transport === 'webhook' && !audience.trim()) {
+      Message.warning(
+        t(
+          'settings.channels.googleChat.credentials.audienceRequired',
+          'JWT audience is required for the webhook transport',
+        ),
+      );
+      return;
+    }
+    if (transport === 'pubsub' && !subscriptionName.trim()) {
+      Message.warning(
+        t(
+          'settings.channels.googleChat.credentials.subscriptionRequired',
+          'Subscription name is required for the Pub/Sub transport',
         ),
       );
       return;
@@ -89,6 +113,8 @@ const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
       const tokenJson = JSON.stringify({
         serviceAccountJson: serviceAccountJson.trim(),
         audience: audience.trim(),
+        transport,
+        subscriptionName: subscriptionName.trim(),
       });
 
       const testResult = await channel.testPlugin.invoke({
@@ -116,6 +142,8 @@ const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
         config: {
           serviceAccountJson: serviceAccountJson.trim(),
           audience: audience.trim(),
+          transport,
+          subscriptionName: subscriptionName.trim(),
         },
       });
 
@@ -123,15 +151,19 @@ const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
         Message.success(
           t('settings.channels.googleChat.pluginEnabled', 'Google Chat plugin enabled'),
         );
-        // Mint inbound webhook URL - secret for Google Chat is the JWT audience
-        const rotateResult = await channel.rotateWebhookToken.invoke({
-          platform: 'google-chat',
-          pluginInstanceId,
-          agentId: 'default',
-          secret: audience.trim(),
-        });
-        if (rotateResult.success && rotateResult.data) {
-          setWebhookToken(rotateResult.data.token);
+        // Webhook transport needs an inbound URL minted for the WebhookReceiver.
+        // The Pub/Sub transport pulls events itself, so no public URL is minted.
+        if (transport === 'webhook') {
+          // Mint inbound webhook URL - secret for Google Chat is the JWT audience
+          const rotateResult = await channel.rotateWebhookToken.invoke({
+            platform: 'google-chat',
+            pluginInstanceId,
+            agentId: 'default',
+            secret: audience.trim(),
+          });
+          if (rotateResult.success && rotateResult.data) {
+            setWebhookToken(rotateResult.data.token);
+          }
         }
         const statusResult = await channel.getPluginStatus.invoke();
         if (statusResult.success && statusResult.data) {
@@ -148,7 +180,7 @@ const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
     } finally {
       setTestLoading(false);
     }
-  }, [serviceAccountJson, audience, pluginInstanceId, t, onStatusChange]);
+  }, [serviceAccountJson, audience, transport, subscriptionName, pluginInstanceId, t, onStatusChange]);
 
   return (
     <div className='flex flex-col gap-24px'>
@@ -186,28 +218,76 @@ const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
       </PreferenceRow>
 
       <PreferenceRow
-        label={t(
-          'settings.channels.googleChat.credentials.audience.label',
-          'JWT Audience',
-        )}
+        label={t('settings.channels.googleChat.transport.label', 'Inbound Transport')}
         description={t(
-          'settings.channels.googleChat.credentials.audience.help',
-          'The expected `aud` claim in Google Chat\'s Bearer JWT. Use your Google Cloud project number (e.g. 123456789012) or the registered app URL.',
+          'settings.channels.googleChat.transport.help',
+          'Webhook needs a public HTTPS URL. Pub/Sub pulls events from a Google Cloud subscription and works with no public URL (recommended for desktop).',
         )}
         required
       >
-        <Input
-          value={audience}
-          onChange={setAudience}
-          placeholder={t(
-            'settings.channels.googleChat.credentials.audience.placeholder',
-            '123456789012 OR https://your-app-url',
-          )}
+        <Select
+          value={transport}
+          onChange={(value) => setTransport(value as 'webhook' | 'pubsub')}
           style={{ width: 320 }}
+          options={[
+            {
+              label: t('settings.channels.googleChat.transport.webhook', 'Webhook (public URL)'),
+              value: 'webhook',
+            },
+            {
+              label: t('settings.channels.googleChat.transport.pubsub', 'Pub/Sub pull (no public URL)'),
+              value: 'pubsub',
+            },
+          ]}
         />
       </PreferenceRow>
 
-      {webhookToken !== null && (
+      {transport === 'webhook' && (
+        <PreferenceRow
+          label={t(
+            'settings.channels.googleChat.credentials.audience.label',
+            'JWT Audience',
+          )}
+          description={t(
+            'settings.channels.googleChat.credentials.audience.help',
+            'The expected `aud` claim in Google Chat\'s Bearer JWT. Use your Google Cloud project number (e.g. 123456789012) or the registered app URL.',
+          )}
+          required
+        >
+          <Input
+            value={audience}
+            onChange={setAudience}
+            placeholder={t(
+              'settings.channels.googleChat.credentials.audience.placeholder',
+              '123456789012 OR https://your-app-url',
+            )}
+            style={{ width: 320 }}
+          />
+        </PreferenceRow>
+      )}
+
+      {transport === 'pubsub' && (
+        <PreferenceRow
+          label={t(
+            'settings.channels.googleChat.credentials.subscriptionName.label',
+            'Pub/Sub Subscription',
+          )}
+          description={t(
+            'settings.channels.googleChat.credentials.subscriptionName.help',
+            'Full pull-subscription path the Chat app publishes to. Format: projects/<project>/subscriptions/<sub>. The service account needs the Pub/Sub Subscriber role on it.',
+          )}
+          required
+        >
+          <Input
+            value={subscriptionName}
+            onChange={setSubscriptionName}
+            placeholder='projects/my-project/subscriptions/wayland-chat-sub'
+            style={{ width: 320 }}
+          />
+        </PreferenceRow>
+      )}
+
+      {transport === 'webhook' && webhookToken !== null && (
         <PreferenceRow
           label={t('settings.channels.googleChat.webhookUrl.label', 'Inbound Webhook URL')}
           description={t(
@@ -233,6 +313,8 @@ const GoogleChatConfigForm: React.FC<GoogleChatConfigFormProps> = ({
           {t('settings.channels.googleChat.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='google-chat' modelSelection={modelSelection} />
+
     </div>
   );
 };

@@ -8,7 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { agentRegistry } from '@process/agent/AgentRegistry';
-import type { IProvider, TChatConversation, TProviderWithModel } from '@/common/config/storage';
+import type { ChannelModelConfigKey, IProvider, TChatConversation, TProviderWithModel } from '@/common/config/storage';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { conversationServiceSingleton } from '@/process/services/conversationServiceSingleton';
 import { workerTaskManager } from '@process/task/workerTaskManagerSingleton';
@@ -79,17 +79,15 @@ export async function getChannelDefaultModel(platform: PluginType): Promise<TPro
       return null;
     };
 
-    // Try to get saved model selection
-    const savedModel =
-      platform === 'lark'
-        ? await ProcessConfig.get('assistant.lark.defaultModel')
-        : platform === 'dingtalk'
-          ? await ProcessConfig.get('assistant.dingtalk.defaultModel')
-          : platform === 'weixin'
-            ? await ProcessConfig.get('assistant.weixin.defaultModel')
-            : platform === 'wecom'
-              ? await ProcessConfig.get('assistant.wecom.defaultModel')
-              : await ProcessConfig.get('assistant.telegram.defaultModel');
+    // Read the per-platform saved model selection generically. Every channel
+    // persists `assistant.<platform>.defaultModel`. Fall back to Telegram's key
+    // ONLY when this platform has nothing saved, so existing setups that relied
+    // on inheriting Telegram's model keep working.
+    const platformModelKey = `assistant.${platform}.defaultModel` as ChannelModelConfigKey;
+    let savedModel = await ProcessConfig.get(platformModelKey).catch((): undefined => undefined);
+    if ((!savedModel?.id || !savedModel?.useModel) && platform !== 'telegram') {
+      savedModel = await ProcessConfig.get('assistant.telegram.defaultModel').catch((): undefined => undefined);
+    }
     if (savedModel?.id && savedModel?.useModel) {
       if (savedModel.id === GOOGLE_AUTH_PROVIDER_ID) {
         // Google OAuth credentials are stored locally by Gemini CLI (~/.gemini/oauth_creds.json).

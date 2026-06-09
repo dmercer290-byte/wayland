@@ -14,6 +14,8 @@ import { AlertTriangle, Copy } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -31,10 +33,11 @@ const PreferenceRow: React.FC<{
 
 export interface MsTeamsConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 }
 
-const MsTeamsConfigForm: React.FC<MsTeamsConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const MsTeamsConfigForm: React.FC<MsTeamsConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [appId, setAppId] = useState('');
@@ -232,6 +235,8 @@ const MsTeamsConfigForm: React.FC<MsTeamsConfigFormProps> = ({ pluginStatus, onS
           {t('settings.channels.msTeams.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='ms-teams' modelSelection={modelSelection} />
+
     </div>
   );
 };

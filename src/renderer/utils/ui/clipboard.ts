@@ -13,12 +13,23 @@ export const copyText = async (text: string): Promise<void> => {
     throw new Error('copyText requires a browser environment');
   }
 
+  // Prefer the async Clipboard API, but FALL BACK on any failure rather than
+  // throwing. In Electron on macOS `writeText` can reject even when the API is
+  // present - clipboard-write permission not granted, the document not focused,
+  // or a custom-protocol context that isn't treated as secure - which surfaced a
+  // spurious "Copy failed" toast (issue #10). The execCommand path below works
+  // from a focused document (a click handler always provides focus).
   if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // fall through to the execCommand fallback
+    }
   }
 
-  // Fallback for non-secure contexts (WebUI over HTTP)
+  // Fallback for non-secure contexts (WebUI over HTTP) and for a rejected
+  // Clipboard API write.
   const previousActiveElement = document.activeElement as HTMLElement | null;
   const textArea = document.createElement('textarea');
   textArea.value = text;

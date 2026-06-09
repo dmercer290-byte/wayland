@@ -16,6 +16,13 @@ import { TeamSessionService, SqliteTeamRepository } from '@process/team';
 import { initTeamGuideService } from '@process/team/mcp/guide/teamGuideSingleton';
 import { CronRitualScheduler, makeExtensionRegistryRitualsResolver } from '@process/team/ritualScheduler';
 import { prewarmProviderSdks } from '@process/utils/prewarmProviders';
+import { SqliteCostRepository } from '@process/services/cost/SqliteCostRepository';
+import { SqliteBudgetRepository } from '@process/services/cost/SqliteBudgetRepository';
+import { CostAnalyticsService } from '@process/services/cost/CostAnalyticsService';
+import { BudgetController } from '@process/services/cost/BudgetController';
+import { initCostBridge, initCostBudgetBridge } from '@process/bridge/costBridge';
+import { CostRecorder, setCostRecorder } from '@process/services/cost/CostRecorder';
+import { getModelPricing } from '@process/services/cost/ModelPricing';
 import { getDatabase } from '@process/services/database';
 import { FrequentlyUsedAggregator } from '@process/services/usage/FrequentlyUsedAggregator';
 import { SqliteUsageEventRepository } from '@process/services/usage/SqliteUsageEventRepository';
@@ -136,6 +143,9 @@ registerWorkflowBridge();
 // long-lived installs. Aggregator only queries the last 7 days; 90 days is
 // the retention floor.
 const USAGE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+// cost_events grows one row per turn, so prune older than the analytics
+// lookback window on startup to keep it bounded (R5). 180 days is the floor.
+const COST_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
 void getDatabase()
   .then((db) => {
     const usageRepo = new SqliteUsageEventRepository(db.getDriver());
@@ -149,6 +159,43 @@ void getDatabase()
         if (pruned > 0) console.log(`[usage] pruned ${pruned} events older than 90d`);
       })
       .catch((err) => console.warn('[usage] prune failed:', err));
+
+    // cost_events retention prune (R5). prune is synchronous (better-sqlite3),
+    // so guard best-effort and never let it break cold-start. The same repo
+    // instance backs the process-wide CostRecorder singleton that each backend
+    // manager records turn-finish deltas through (WS-C); register it here so it
+    // is live before any manager records. Budgets (Stage 1) reuse the shared
+    // driver: the BudgetController reads spend through CostAnalyticsService and
+    // enforces warn-default caps via a post-turn hook on the recorder.
+    try {
+      const costRepo = new SqliteCostRepository(db.getDriver());
+      const costPruned = costRepo.prune(Date.now() - COST_RETENTION_MS);
+      if (costPruned > 0) console.log(`[cost] pruned ${costPruned} events older than 180d`);
+      const costRecorder = new CostRecorder(costRepo, getModelPricing());
+      setCostRecorder(costRecorder);
+
+      // Cost observability reads (WS-D). Wire the analytics service over the
+      // shared driver into the cost.* IPC providers so the renderer cost panel
+      // can query summary/byModel/byBackend/byConversation/byTeam/series.
+      const costAnalytics = new CostAnalyticsService(db.getDriver());
+      initCostBridge(costAnalytics);
+
+      // Budgets / caps (Stage 1). The controller emits a one-time non-blocking
+      // cost.budgetAlert to the renderer when a turn pushes a 'warn' budget over
+      // its limit; the recorder's post-turn hook drives that check. 'pause'
+      // budgets are opt-in: a future send/turn-start path consults
+      // budgetController.canStartTurn({modelId,backend,teamId}) at its cleanest
+      // pre-turn checkpoint and surfaces a RESUMABLE card on allowed:false (no
+      // hard lock). Default behaviour never blocks a turn.
+      const budgetRepo = new SqliteBudgetRepository(db.getDriver());
+      const budgetController = new BudgetController(budgetRepo, costAnalytics, (alert) => {
+        ipcBridge.cost.budgetAlert.emit(alert);
+      });
+      initCostBudgetBridge(budgetController);
+      costRecorder.setTurnRecordedHook((ctx) => budgetController.checkAfterTurn(ctx));
+    } catch (err) {
+      console.warn('[cost] init failed:', err);
+    }
 
     // Workflow Launch Surface (v0.6.0 / v0.6.1) - wire the live WorkflowSessionService
     // into the bridge handlers registered eagerly above. Shares the SQLite

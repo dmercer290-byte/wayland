@@ -92,6 +92,11 @@ vi.mock('@renderer/hooks/mcp', () => ({
     handleDeleteMcpServer,
     handleToggleMcpServer,
   }),
+  useMcpConnection: () => ({
+    testingServers: {},
+    handleTestMcpConnection: vi.fn().mockResolvedValue(undefined),
+    refreshServerStatuses: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 vi.mock('@arco-design/web-react', async () => {

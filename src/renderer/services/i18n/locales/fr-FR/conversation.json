@@ -311,5 +311,24 @@
     "unknown": "Utilisation de la session propre de cet outil",
     "fluxError": "Flux indisponible",
     "fluxErrorNotice": "L'acheminement via Flux a echoue pour ce tour. Verifiez votre connexion Flux ou changez de modele."
+  },
+  "activation": {
+    "title": "Réveillez vos agents",
+    "subtitle": "Connectez un fournisseur de modèles pour commencer à exécuter des tâches. Choisissez la voie qui vous convient.",
+    "flux": {
+      "label": "Connecter Flux Router",
+      "sublabel": "Clé gratuite avec 1 $ de crédit de démarrage. Sans carte — chaque tâche est routée vers le modèle spécialisé le plus adapté.",
+      "action": "Connecter"
+    },
+    "ownKey": {
+      "label": "Utiliser ma propre clé",
+      "sublabel": "Apportez une clé API d’OpenAI, Anthropic, Google ou de plus de 100 fournisseurs.",
+      "action": "Parcourir"
+    },
+    "claudeCode": {
+      "label": "Utiliser Claude Code",
+      "sublabel": "Exécutez avec votre connexion Claude Code existante — aucune clé supplémentaire à gérer.",
+      "action": "Utiliser"
+    }
   }
 }

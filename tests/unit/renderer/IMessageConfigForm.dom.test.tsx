@@ -30,6 +30,14 @@ vi.mock('@/common/adapter/ipcBridge', () => ({
   },
 }));
 
+// The shared per-channel agent/model selector pulls in the gemini model
+// selector (and, transitively, the conversation preview graph). This smoke
+// test only covers the iMessage-specific form fields, so stub the selector to
+// keep the import graph small - it has its own dedicated coverage.
+vi.mock('@/renderer/components/settings/shared/forms/ChannelAgentModelSelector', () => ({
+  default: () => <div data-testid='agent-model-selector' />,
+}));
+
 // Arco overrides - we only need the DOM shapes the form renders.
 vi.mock('@arco-design/web-react', () => ({
   Button: ({

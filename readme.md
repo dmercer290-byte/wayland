@@ -159,6 +159,8 @@ Ready-made teams of AI specialists, each led by a manager you talk to in plain l
 
 <p><img src=".github/assets/teams.jpg" alt="Wayland multi-agent team coordinating on a shared blackboard" width="100%"/></p>
 
+<p><img src=".github/assets/teams-in-action.jpg" alt="A Wayland team in action: a leader coordinating X, LinkedIn, and Facebook specialists plus a Humanizer, each running its own model, working the task live across shared columns" width="100%"/></p>
+
 ### Projects that keep work moving
 
 Pick up a multi-week effort where you left it. A project keeps the chats, files, reference material, instructions, and scoped memory for one piece of work in a single place, so the context is still there when you come back days later. No re-briefing, no lost thread. Organized, shareable, and ready to ship.

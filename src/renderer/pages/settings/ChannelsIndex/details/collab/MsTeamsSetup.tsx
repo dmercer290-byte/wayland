@@ -13,10 +13,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import MsTeamsConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/collab/MsTeamsConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const MsTeamsSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.ms-teams.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -51,7 +53,7 @@ const MsTeamsSetup: React.FC = () => {
         'Bot Framework via Azure Bot Service. Register a bot, set the webhook endpoint, and paste your App ID and client secret below.',
       )}
     >
-      <MsTeamsConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <MsTeamsConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

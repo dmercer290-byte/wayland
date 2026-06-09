@@ -35,6 +35,7 @@ import { buildDisplayMessage } from '@/renderer/utils/file/messageFiles';
 import { Tag } from '@arco-design/web-react';
 import React, { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { classifyAcpAuthFailure } from './acpAuthFailure';
 import { useAcpInitialMessage } from './useAcpInitialMessage';
 import { useAcpMessage } from './useAcpMessage';
 
@@ -210,6 +211,14 @@ const AcpSendBox: React.FC<{
         emitter.emit('chat.history.refresh');
       } catch (error: unknown) {
         const errorMsg = error instanceof Error ? error.message : String(error);
+        if (classifyAcpAuthFailure(backend, errorMsg)) {
+          // The CLI could not authenticate. Surface the remedy card (route
+          // through Flux, add a provider key, or run the CLI login command)
+          // instead of the raw auth tip.
+          emitter.emit('acp.auth.failed.card', { conversation_id, backend });
+          setAiProcessing(false);
+          throw error;
+        }
         const isAuthError =
           errorMsg.includes('[ACP-AUTH-') ||
           errorMsg.includes('authentication failed') ||

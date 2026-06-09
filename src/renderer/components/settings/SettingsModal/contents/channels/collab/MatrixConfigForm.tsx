@@ -11,6 +11,8 @@ import { AlertTriangle } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 /**
  * Section row - kept inline so this form is self-contained, mirroring the
@@ -32,10 +34,11 @@ const PreferenceRow: React.FC<{
 
 export interface MatrixConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 }
 
-const MatrixConfigForm: React.FC<MatrixConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const MatrixConfigForm: React.FC<MatrixConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [homeserverUrl, setHomeserverUrl] = useState('https://matrix.org');
@@ -212,6 +215,8 @@ const MatrixConfigForm: React.FC<MatrixConfigFormProps> = ({ pluginStatus, onSta
           {t('settings.channels.matrix.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='matrix' modelSelection={modelSelection} />
+
     </div>
   );
 };

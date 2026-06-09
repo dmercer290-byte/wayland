@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Tabs } from '@arco-design/web-react';
+import { channel } from '@/common/adapter/ipcBridge';
 import {
   ArrowRight,
   Bird,
@@ -26,6 +27,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import SettingsPageShell from '@renderer/pages/settings/components/SettingsPageShell';
+import PendingPairings from '@renderer/pages/settings/ChannelsIndex/PendingPairings';
 
 type ChannelStatus = 'idle' | 'connected' | 'soon';
 type ChannelTier = 1 | 2 | 3;
@@ -83,6 +85,33 @@ const ChannelsIndex: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>('1');
 
+  // Live per-channel connection state (keyed by plugin type == channel id).
+  // `connected` is the verified-and-live flag the plugin sets once its runtime
+  // actually establishes the connection, so we light a card green only when it
+  // is genuinely set up and working, not merely configured.
+  const [connectedMap, setConnectedMap] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    let mounted = true;
+    channel.getPluginStatus
+      .invoke()
+      .then((result) => {
+        if (!mounted || !result?.success || !result.data) return;
+        const map: Record<string, boolean> = {};
+        for (const p of result.data) map[p.type] = p.connected;
+        setConnectedMap(map);
+      })
+      .catch(() => {
+        /* status is best-effort; absence just means no green highlight */
+      });
+    const unsubscribe = channel.pluginStatusChanged.on(({ status }) => {
+      setConnectedMap((prev) => ({ ...prev, [status.type]: status.connected }));
+    });
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
+  }, []);
+
   const statusLabel = (status: ChannelStatus): string => {
     if (status === 'connected') return t('settings.channelsIndex.connected');
     if (status === 'soon') return t('settings.channelsIndex.comingSoon');
@@ -104,6 +133,8 @@ const ChannelsIndex: React.FC = () => {
       {CHANNELS.filter((c) => c.tier === tier).map((channel) => {
         const Icon = channel.icon;
         const clickable = true;
+        const connected = connectedMap[channel.id] === true;
+        const liveStatus: ChannelStatus = connected ? 'connected' : channel.status;
         return (
           <article
             key={channel.id}
@@ -111,7 +142,9 @@ const ChannelsIndex: React.FC = () => {
             // border, 12px radius, --color-bg-2 surface, 12/14/10 padding,
             // primary-6 hover border + soft ring. Channels needs slightly more
             // vertical room than 104px because of the status pill + CTA row.
-            className={`group flex flex-col gap-8px rounded-12px bg-[var(--color-bg-2)] border border-solid border-[var(--color-border-2)] min-h-[124px] min-w-0 cursor-pointer transition-[border-color,background,box-shadow,transform] duration-160 hover:border-[rgb(var(--primary-6))] hover:bg-[var(--color-fill-1)] hover:shadow-[0_0_0_1px_rgb(var(--primary-6)/0.4)] active:scale-[0.99]`}
+            // A connected+verified channel gets a persistent green outline so it
+            // reads as "done" at a glance while several are being set up.
+            className={`group flex flex-col gap-8px rounded-12px border border-solid min-h-[124px] min-w-0 cursor-pointer transition-[border-color,background,box-shadow,transform] duration-160 hover:border-[rgb(var(--primary-6))] hover:bg-[var(--color-fill-1)] hover:shadow-[0_0_0_1px_rgb(var(--primary-6)/0.4)] active:scale-[0.99] ${connected ? 'border-[var(--success,#22c55e)] bg-[var(--success-soft-bg,rgba(34,197,94,0.06))] shadow-[0_0_0_1px_var(--success,#22c55e)]' : 'border-[var(--color-border-2)] bg-[var(--color-bg-2)]'}`}
             style={{ padding: '12px 14px 10px' }}
             onClick={clickable ? () => navigate(`/settings/channels/${channel.id}`) : undefined}
             role={clickable ? 'button' : undefined}
@@ -138,12 +171,12 @@ const ChannelsIndex: React.FC = () => {
             <p className='text-[12.5px] text-[var(--color-text-3)] m-0 leading-[18px]'>{t(channel.taglineKey)}</p>
             <div className='flex items-center justify-between gap-8px mt-auto'>
               <span
-                className={`inline-flex items-center whitespace-nowrap px-8px py-2px rounded-full text-11px font-medium ${STATUS_STYLES[channel.status]}`}
+                className={`inline-flex items-center whitespace-nowrap px-8px py-2px rounded-full text-11px font-medium ${STATUS_STYLES[liveStatus]}`}
               >
-                {statusLabel(channel.status)}
+                {statusLabel(liveStatus)}
               </span>
               <span className='inline-flex items-center gap-4px text-[12.5px] font-semibold text-[var(--brand)] whitespace-nowrap'>
-                {ctaLabel(channel.status)} <ArrowRight size={13} />
+                {ctaLabel(liveStatus)} <ArrowRight size={13} />
               </span>
             </div>
           </article>
@@ -158,6 +191,7 @@ const ChannelsIndex: React.FC = () => {
       subtitle={t('settings.channelsIndex.subtitle')}
       contentClassName='md:max-w-[1600px]'
     >
+      <PendingPairings />
       <Tabs activeTab={activeTab} onChange={setActiveTab}>
         <Tabs.TabPane key='1' title={t('settings.channelsIndex.tier1Tab')}>
           {renderTier(1)}

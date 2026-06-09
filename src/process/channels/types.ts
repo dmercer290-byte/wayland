@@ -107,6 +107,13 @@ export interface IPluginCredentials {
   phoneNumberId?: string;
   businessAccountId?: string;
   verifyToken?: string;
+  // WhatsApp mode (default 'personal' when absent). 'personal' = the linked
+  // account is the operator's own number; only the self-chat is trusted and
+  // unknown contacts are ignored silently. 'dedicated' = a separate bot number
+  // others may pair with; ownerNumbers lists the operator's personal number(s)
+  // so Wayland can recognize the owner from a different device.
+  mode?: 'personal' | 'dedicated';
+  ownerNumbers?: readonly string[];
   // Matrix (Tier 2) - federation-aware messaging via matrix-js-sdk. accessToken
   // reused from WhatsApp Meta. homeserverUrl is the canonical HTTPS base
   // (e.g. https://matrix.org); userId is the full mxid (e.g. @bot:matrix.org).
@@ -237,6 +244,21 @@ export interface IChannelPluginStatus {
    * `running` after a successful pair.
    */
   qrCode?: string;
+  /**
+   * Live transport-connection state for plugins backed by a long-lived socket
+   * (e.g. WhatsApp Baileys: 'connecting' | 'connected' | 'disconnected' |
+   * 'logged_out'). Lets the renderer distinguish "connected, no QR needed" from
+   * "waiting for a pairing QR" - both of which otherwise have a null qrCode.
+   */
+  connectionState?: string;
+  /**
+   * Non-secret WhatsApp account mode ('personal' | 'dedicated') surfaced so the
+   * config form can restore the saved mode on reopen (IChannelPluginStatus does
+   * not carry credentials). The mode itself is not a secret; ownerNumbers (the
+   * operator's phone numbers) are deliberately NOT exposed here because status
+   * is readable by remote WebUI callers.
+   */
+  whatsappMode?: 'personal' | 'dedicated';
   /** Whether this plugin comes from an extension (not built-in) */
   isExtension?: boolean;
   /** Extension-contributed metadata for dynamic UI rendering */
@@ -456,6 +478,13 @@ export interface IUnifiedIncomingMessage {
    * branch on it.
    */
   isGroup?: boolean;
+  /**
+   * True when the message comes from the channel operator's own trusted thread
+   * (e.g. a linked-device WhatsApp "message yourself" chat). Such messages skip
+   * the pairing gate - the operator does not need to approve a conversation
+   * with themselves.
+   */
+  isOwner?: boolean;
   replyToMessageId?: string;
   action?: IMessageAction;
   raw?: unknown;
@@ -704,6 +733,41 @@ export function isBuiltinChannelPlatform(
  */
 export function isChannelPlatform(value: string): value is ChannelPlatform {
   return value.length > 0;
+}
+
+/**
+ * Built-in channel conversation sources (== plugin platform id; see
+ * ActionExecutor `const source = platform`). A conversation from any of these
+ * has NO interactive human to approve tool-permission prompts, so the agent
+ * must run with auto-approve (yoloMode). Keep this in sync with the registered
+ * channel plugins. A channel missing here causes tool-using turns to hang on
+ * an unconfirmable permission prompt until the channel queue times out.
+ * Non-channel sources ('wayland' = in-app, 'user' = workflow) are intentionally
+ * absent so they keep interactive approval.
+ */
+export const CHANNEL_AUTO_APPROVE_SOURCES: ReadonlySet<string> = new Set([
+  'telegram',
+  'lark',
+  'dingtalk',
+  'weixin',
+  'wecom',
+  'slack',
+  'discord',
+  'whatsapp',
+  'email-imap',
+  'signal',
+  'sms-twilio',
+  'google-chat',
+  'line',
+  'imessage',
+]);
+
+/**
+ * Whether a conversation source is a channel that should auto-approve tool
+ * permissions (no interactive human in the loop).
+ */
+export function isAutoApproveChannelSource(source: string | null | undefined): boolean {
+  return !!source && CHANNEL_AUTO_APPROVE_SOURCES.has(source);
 }
 
 /**

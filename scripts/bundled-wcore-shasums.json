@@ -1,6 +1,14 @@
 {
   "_comment": "Authoritative SHA-256 checksums for bundled wayland-core release archives (the downloaded .tar.gz / .zip assets), keyed by release tag then asset filename. Mirrors scripts/bundled-bun-shasums.json. Source of truth: the SHASUMS published alongside each signed FerroxLabs/wayland-core release. The downloaded archive is verified against this file BEFORE it is extracted, copied, or executed. Update this file in lockstep with DEFAULT_WCORE_VERSION in scripts/prepareWaylandCore.js and regenerate on every engine version bump.",
   "_ownerAction": "Fill in the canonical per-platform archive SHA-256 values from the signed wayland-core release for each tag below. Until the real values are present, release builds (CI=1 / npm_config_production / NODE_ENV=production without WCORE_ALLOW_UNVERIFIED=1) will fail closed on a missing entry. The 'PENDING-...' placeholders are intentionally invalid 64-hex strings so they can never accidentally match a real artifact.",
+  "v0.10.0": {
+    "wayland-core-v0.10.0-aarch64-apple-darwin.tar.gz": "sha256:0ef1aebd38a742f970e75a93826866238a3cebeccb306ea58ffb0bd05c6aa8aa",
+    "wayland-core-v0.10.0-x86_64-apple-darwin.tar.gz": "sha256:e4f99e9c0174d93ba68ec905c5454a1f3b5203f56aa364bd97f8290d23e0db71",
+    "wayland-core-v0.10.0-aarch64-unknown-linux-gnu.tar.gz": "sha256:f6625057963a942afcd6a6ff2c43f644b952f2de835ad504e8d7d128251e1386",
+    "wayland-core-v0.10.0-x86_64-unknown-linux-gnu.tar.gz": "sha256:ecc96d2164f107d9ac0cb092359a9bf42ce60b3f41273f64bd39bc4425a51752",
+    "wayland-core-v0.10.0-aarch64-pc-windows-msvc.zip": "sha256:6aec81a97ff32b571810013969e95f517685b93f6df2eee4c95dd9dfbf3b9003",
+    "wayland-core-v0.10.0-x86_64-pc-windows-msvc.zip": "sha256:154c885b9576d10567373f1ddbeb04182fe4eb486143118141a1e910731afa0f"
+  },
   "v0.9.6-rc.1": {
     "wayland-core-v0.9.6-rc.1-aarch64-apple-darwin.tar.gz": "sha256:6256f1d64fd396f959aaf75ffc2fb767db9140ab3e31e21b4fe5d82d368480f2",
     "wayland-core-v0.9.6-rc.1-x86_64-apple-darwin.tar.gz": "sha256:89e36c7cf1f12045a8e602b3d3bedac1ca4beea6396f086b4667605570d13c9d",

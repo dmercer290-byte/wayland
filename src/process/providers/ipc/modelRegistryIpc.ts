@@ -41,6 +41,7 @@ import { app } from 'electron';
 import { ipcBridge } from '@/common';
 import type {
   IModelRegistryCatalogView,
+  IModelRegistryChatStartHandle,
   IModelRegistryChatStartPayload,
   IModelRegistryConnectResult,
   IModelRegistryCreds,
@@ -51,6 +52,11 @@ import type {
   IModelRegistryResolveForChatStartResult,
   IModelRegistryTestResult,
 } from '@/common/adapter/ipcBridge';
+import type { TProviderWithModel } from '@/common/config/storage';
+import { DEFAULT_ACCOUNT_ID, resolveAccountId } from '@/common/config/account';
+import { isLocalBaseUrl } from '@/common/utils/urlValidation';
+import { autoRegisterOllamaInRepo } from '@process/onboarding/autoRegisterOllama';
+import type { OllamaProbe, OllamaRegistryRepo } from '@process/onboarding/autoRegisterOllama';
 import { getDatabase } from '@process/services/database';
 import type { ConnectError, CuratedModel, ProviderConnState, ProviderId, RawModel } from '../types';
 import type { CatalogSource } from '../sources/CatalogSource';
@@ -61,6 +67,8 @@ import { CliAgentSource, isEnumerableCliAgent } from '../sources/CliAgentSource'
 import type { CliAgentKey } from '../sources/CliAgentSource';
 import { CatalogAssembler, MODELS_DEV_PROVIDER_KEY } from '../catalog/CatalogAssembler';
 import { Curator } from '../catalog/Curator';
+import { ProviderCatalogStore, loadBaselineProviderCatalog } from '../catalog/providerCatalogStore';
+import type { CatalogProviderEntry } from '../catalog/catalogProvider';
 import { FLUX_PROVIDER_ID } from '@/common/config/flux';
 import { injectFluxVirtualModels } from '../catalog/fluxVirtualModels';
 import { ConnectionTester } from '../detection/ConnectionTester';
@@ -191,7 +199,45 @@ export type ModelRegistryDeps = {
   emitListChanged?: () => void;
   setLastRefreshedAt?: (value: number) => Promise<void>;
   now?: () => number;
+  /**
+   * Re-probe the local Ollama daemon (`/api/tags`) during a scheduled refresh.
+   * `ollama-local` is keyless and loopback-only: its catalog comes from a live
+   * daemon probe, NOT from `buildAndPersistCatalog` (which would assemble zero
+   * models for a keyless provider and wipe the catalog). Omitted by tests that
+   * don't exercise the ollama path; wired to `detect.probeOllama` in
+   * `initModelRegistryIpc`. A `null`/unreachable result must leave the existing
+   * catalog untouched rather than emptying it.
+   */
+  probeOllama?: () => Promise<OllamaProbe>;
 };
+
+/** The fixed native provider id for the local Ollama daemon. */
+const OLLAMA_LOCAL_ID: ProviderId = 'ollama-local';
+/** The hardcoded loopback OpenAI-compatible endpoint the local Ollama provider is pinned to. */
+const OLLAMA_LOCAL_BASE_URL = 'http://127.0.0.1:11434/v1';
+
+/**
+ * True only when `baseUrl` parses and its host is a LOOPBACK literal
+ * (`localhost`, `127.0.0.0/8`, `::1`) - NOT the broader private/link-local set
+ * `isLoopbackOrPrivateHost` covers. The keyless `ollama-local` SSRF exemption
+ * (Finding 5) is scoped to loopback so the exemption can never be hijacked onto
+ * a private or link-local host (e.g. `169.254.169.254` cloud-metadata).
+ */
+function isLoopbackBaseUrl(baseUrl: string): boolean {
+  if (typeof baseUrl !== 'string' || baseUrl.trim().length === 0) return false;
+  let host: string;
+  try {
+    host = new URL(baseUrl.trim()).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  if (host === 'localhost' || host === '::1') return true;
+  const parts = host.split('.');
+  if (parts.length !== 4) return false;
+  if (!parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)) return false;
+  return Number(parts[0]) === 127; // 127.0.0.0/8
+}
 
 /** The 10 `modelRegistry` handler functions, keyed by contract method name. */
 export type ModelRegistryHandlers = {
@@ -208,6 +254,7 @@ export type ModelRegistryHandlers = {
   resolveForChatStart: (p: {
     providerId: ProviderId;
     modelId: string;
+    accountId?: string;
   }) => Promise<IModelRegistryResolveForChatStartResult>;
   /**
    * Re-fetch + re-assemble + persist EVERY connected provider's catalog in one
@@ -346,6 +393,38 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
     } catch {
       return { ok: false, models: 0, sourceErrors: 0 };
     }
+  }
+
+  /**
+   * Refresh the keyless `ollama-local` provider by RE-PROBING the local daemon
+   * (`/api/tags`) and re-running the idempotent autoRegister catalog write -
+   * NOT `buildAndPersistCatalog`, which would assemble zero models for a keyless
+   * provider and wipe the catalog (Finding 1).
+   *
+   * Returns:
+   *  - `'ok'`        - the daemon answered; catalog refreshed from the live list.
+   *  - `'unreachable'` - no `probeOllama` dep, or the daemon is down/empty; the
+   *                      EXISTING catalog is left untouched (never replaced []).
+   *  - `'failed'`    - the autoRegister write itself errored.
+   *
+   * `autoRegisterOllamaInRepo` preserves a user-changed `state` (e.g. disabled)
+   * and only refreshes the catalog for an already-registered provider.
+   */
+  async function refreshOllamaLocal(): Promise<'ok' | 'unreachable' | 'failed'> {
+    if (!deps.probeOllama) return 'unreachable';
+    let probe: OllamaProbe;
+    try {
+      probe = await deps.probeOllama();
+    } catch {
+      return 'unreachable';
+    }
+    // A down daemon (`running:false`) must NOT empty the catalog - leave the
+    // last-known models in place so a transient daemon restart doesn't blank the
+    // picker. autoRegister would `skip` a non-running probe anyway, but we guard
+    // explicitly so the refresh reports `unreachable` rather than a false `ok`.
+    if (!probe.running) return 'unreachable';
+    const outcome = autoRegisterOllamaInRepo(repo as unknown as OllamaRegistryRepo, probe);
+    return outcome.action === 'skipped' ? 'failed' : 'ok';
   }
 
   /**
@@ -653,9 +732,37 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
             failed.push(providerId);
             continue;
           }
+          const storedBaseUrl = stored.creds.baseUrl;
+
+          // The native `ollama-local` provider is keyless: its catalog is the
+          // live `/api/tags` daemon listing, NOT a `buildAndPersistCatalog`
+          // assembly (which would see an empty key, build zero models, and WIPE
+          // the catalog on every refresh tick - Finding 1). Re-probe the daemon
+          // and re-run the autoRegister refresh path instead. An unreachable
+          // daemon leaves the existing catalog untouched (never replaced with
+          // []). The id exemption is ALSO scoped to a loopback baseUrl (Finding
+          // 5): a row whose stored host is not loopback is treated like any
+          // other custom provider (validated below), so the keyless+SSRF-exempt
+          // allowance can never be hijacked onto a remote host.
+          if (providerId === OLLAMA_LOCAL_ID && isLoopbackBaseUrl(typeof storedBaseUrl === 'string' ? storedBaseUrl : '')) {
+            const ollamaBefore = new Set(repo.getRegistryCatalog(providerId).map((m) => m.id));
+            const outcome = await refreshOllamaLocal();
+            if (outcome !== 'ok') {
+              failed.push(providerId);
+              continue;
+            }
+            if (deps.mirror) await deps.mirror(providerId).catch(() => {});
+            for (const model of repo.getRegistryCatalog(providerId)) {
+              if (!ollamaBefore.has(model.id)) {
+                added.push({ providerId, modelId: model.id, displayName: model.displayName || model.id });
+              }
+            }
+            succeeded.push(providerId);
+            continue;
+          }
+
           // SSRF gate: a stored custom baseUrl is fired unattended on a timer
           // with the key in the header - validate before every scheduled fetch.
-          const storedBaseUrl = stored.creds.baseUrl;
           if (
             typeof storedBaseUrl === 'string' &&
             storedBaseUrl.trim().length > 0 &&
@@ -718,7 +825,11 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
       }
     },
 
-    async resolveForChatStart({ providerId, modelId }): Promise<IModelRegistryResolveForChatStartResult> {
+    async resolveForChatStart({
+      providerId,
+      modelId,
+      accountId,
+    }): Promise<IModelRegistryResolveForChatStartResult> {
       try {
         const provider = repo.getRegistryProvider(providerId);
         if (!provider) return { ok: false, error: 'not-connected' };
@@ -726,21 +837,31 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
         if (stored.status === 'undecryptable') return { ok: false, error: 'undecryptable' };
         if (stored.status !== 'ok') return { ok: false, error: 'not-connected' };
 
-        // Build the chat-start payload. The main-process dispatch
-        // (`wcore/envBuilder.ts`, `GeminiAgentManager`, ACP managers) reads
-        // these fields verbatim - `platform` chooses the dispatcher arm,
-        // `apiKey` + `baseUrl` feed the spawn config, and (for cloud
-        // providers) the `bedrockConfig` / `cloudFields` blocks carry the
-        // typed creds.
+        // Build (and validate) the full chat-start payload, then return ONLY
+        // the non-secret handle to the renderer (audit C4). The decrypted
+        // `apiKey` / `bedrockConfig` / `cloudFields` are deliberately dropped
+        // here - they never cross IPC. The main-process spawn path re-resolves
+        // them from this handle at dispatch (`resolveModelSecretsForSpawn`).
         //
-        // Fix 9 - discriminate `undecryptable` from `unsupported`: a
-        // connected api-key row that has no `key` is a corrupted creds row,
-        // not an unsupported provider. The renderer routes the two cases to
-        // different recovery prompts.
+        // We still build the full payload so the validation outcomes below
+        // (Fix 9: discriminate `undecryptable` from `unsupported`) match what
+        // the spawn-time resolution will see, giving the picker an accurate
+        // re-key vs unsupported prompt before the conversation is created.
         const result = buildChatStartPayload(providerId, modelId, stored.creds);
         if (result.kind === 'unsupported') return { ok: false, error: 'unsupported' };
         if (result.kind === 'undecryptable') return { ok: false, error: 'undecryptable' };
-        return { ok: true, provider: result.payload };
+        const p = result.payload;
+        const handle: IModelRegistryChatStartHandle = {
+          id: p.id,
+          providerId: p.providerId,
+          name: p.name,
+          platform: p.platform,
+          modelId: p.modelId,
+          baseUrl: p.baseUrl,
+          accountId: resolveAccountId({ accountId }),
+          ...(p.modelProtocols ? { modelProtocols: p.modelProtocols } : {}),
+        };
+        return { ok: true, provider: handle };
       } catch {
         return { ok: false, error: 'unknown' };
       }
@@ -877,6 +998,9 @@ const CHAT_START_PLATFORM: Partial<Record<ProviderId, string>> = {
   elevenlabs: 'openai-compatible',
   'flux-router': 'openai-compatible',
   'openai-compatible': 'openai-compatible',
+  // Local Ollama daemon - dispatched as the OpenAI-compatible protocol against
+  // its hardcoded loopback `/v1` endpoint, with no API key (keyless local).
+  'ollama-local': 'openai-compatible',
   // Azure intentionally absent - the legacy dispatch has no Azure arm; a
   // future Azure chat-start will need its own dispatcher work.
 };
@@ -913,6 +1037,9 @@ const CHAT_START_BASE_URL: Partial<Record<ProviderId, string>> = {
   assemblyai: 'https://api.assemblyai.com/v2',
   elevenlabs: 'https://api.elevenlabs.io/v1',
   'flux-router': 'https://api.fluxrouter.ai/v1',
+  // Hardcoded local Ollama OpenAI-compatible endpoint. Never user-overridable -
+  // the keyless allowance is anchored to this fixed loopback host.
+  'ollama-local': 'http://127.0.0.1:11434/v1',
 };
 
 /** Short human label per provider - shown in the home-picker button text. */
@@ -948,6 +1075,7 @@ const CHAT_START_NAME: Partial<Record<ProviderId, string>> = {
   elevenlabs: 'ElevenLabs',
   'flux-router': 'Flux Router',
   'openai-compatible': 'OpenAI Compatible',
+  'ollama-local': 'Ollama (Local)',
 };
 
 /**
@@ -1039,16 +1167,131 @@ function buildChatStartPayload(
 
   // ── Standard API-key provider ──────────────────────────────────────────
   const apiKey = typeof creds.key === 'string' ? (creds.key as string) : '';
+  const customBaseUrl = typeof creds.baseUrl === 'string' ? (creds.baseUrl as string) : '';
+  const resolvedBaseUrl = customBaseUrl || CHAT_START_BASE_URL[providerId] || '';
+
   if (!apiKey) {
+    // Keyless local backends (Ollama / LM Studio / llama.cpp) accept no API
+    // key. Permit an empty key ONLY when the resolved base URL host is local -
+    // a cloud provider with no key is still an `undecryptable` corrupt record
+    // (the original Fix 9 behavior, unchanged for cloud).
+    if (isLocalBaseUrl(resolvedBaseUrl)) {
+      payload.apiKey = '';
+      payload.baseUrl = resolvedBaseUrl;
+      return { kind: 'payload', payload };
+    }
     // The provider row is `connected` but the creds carry no key - a
     // corrupted record, not an unsupported provider (Fix 9).
     return { kind: 'undecryptable' };
   }
 
-  const customBaseUrl = typeof creds.baseUrl === 'string' ? (creds.baseUrl as string) : '';
   payload.apiKey = apiKey;
-  payload.baseUrl = customBaseUrl || CHAT_START_BASE_URL[providerId] || '';
+  payload.baseUrl = resolvedBaseUrl;
   return { kind: 'payload', payload };
+}
+
+// ─── Main-process spawn-time secret resolution (audit C4/C5/C6) ──────────────────
+
+/**
+ * Decrypted creds a backend spawn needs, resolved in main from a binding handle.
+ *
+ * `apiKey` is `undefined` for an intentionally keyless local provider (Ollama /
+ * LM Studio / llama.cpp - Finding 2). `undefined` means "this provider carries
+ * NO credential": the merge must NOT fall back to a stale `model.apiKey`, and
+ * the envBuilder simply omits `OPENAI_API_KEY` (a local daemon needs none). An
+ * empty string is never used to signal keyless - it is indistinguishable from a
+ * cloud provider whose key failed to resolve.
+ */
+export type SpawnSecrets = {
+  apiKey: string | undefined;
+  baseUrl: string;
+  bedrockConfig?: IModelRegistryChatStartPayload['bedrockConfig'];
+};
+
+/** A binding handle: the non-secret `(provider, account, model)` identity. */
+export type SpawnHandle = { providerId: string; accountId?: string; modelId: string };
+
+/** The slice of `ProviderRepository` the spawn-time resolver reads. */
+type SpawnSecretRepo = Pick<ProviderRepository, 'getRegistryProvider' | 'getRegistryProviderCreds'>;
+
+/**
+ * Pure, repo-injected core of {@link resolveModelSecretsForSpawn} (exported for
+ * tests). Returns `null` when the provider is not connected / its creds are
+ * unreadable / it has no dispatcher arm. `accountId` is threaded for Phase 1b
+ * (when the repo gains an account dimension); in Phase 1a only the implicit
+ * `'default'` account exists, so the lookup is account-agnostic for now.
+ */
+export function resolveSpawnSecretsFromRepo(repo: SpawnSecretRepo, handle: SpawnHandle): SpawnSecrets | null {
+  const providerId = handle.providerId as ProviderId;
+  if (!repo.getRegistryProvider(providerId)) return null;
+  const stored = repo.getRegistryProviderCreds(providerId);
+  if (stored.status !== 'ok') return null;
+  const result = buildChatStartPayload(providerId, handle.modelId, stored.creds);
+  if (result.kind !== 'payload') return null;
+  const p = result.payload;
+  // A keyless local provider (empty key resolved against a loopback base URL)
+  // carries NO credential. Represent that as `undefined` - NOT `''` - so the
+  // merge below never falls back to a stale legacy `model.apiKey` (Finding 2).
+  const apiKey = p.apiKey === '' && isLocalBaseUrl(p.baseUrl) ? undefined : p.apiKey;
+  return {
+    apiKey,
+    baseUrl: p.baseUrl,
+    ...(p.bedrockConfig ? { bedrockConfig: p.bedrockConfig } : {}),
+  };
+}
+
+/**
+ * Resolve the decrypted spawn secrets for a binding handle, in the MAIN process
+ * at dispatch time (audit C4/C5). Resolution runs fresh on every call, so a
+ * re-keyed provider is picked up on the next turn (late resolution).
+ */
+export async function resolveModelSecretsForSpawn(handle: SpawnHandle): Promise<SpawnSecrets | null> {
+  try {
+    const repo = _repo ?? new ProviderRepository((await getDatabase()).getDriver());
+    return resolveSpawnSecretsFromRepo(repo, handle);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pure merge of resolved secrets onto a model binding (exported for tests). A
+ * `null` resolution leaves the model unchanged - so a legacy `model.config` row
+ * that is not in the registry keeps its own `apiKey` (back-compat).
+ */
+export function mergeSpawnSecrets<T extends TProviderWithModel>(model: T, secrets: SpawnSecrets | null): T {
+  // `secrets === null` = no registry resolution at all (a legacy `model.config`
+  // row that isn't in the registry); keep the model's own creds untouched.
+  if (!secrets) return model;
+  // A non-null resolution is authoritative. `secrets.apiKey === undefined` is
+  // the explicit "intentionally keyless local provider" signal (Finding 2): the
+  // resolved provider carries NO credential, so the merge must clear the key
+  // (empty) rather than inherit a stale legacy `model.apiKey`. A resolved STRING
+  // key (cloud / custom provider) is used verbatim.
+  const apiKey = secrets.apiKey ?? '';
+  return {
+    ...model,
+    apiKey,
+    baseUrl: secrets.baseUrl || model.baseUrl,
+    ...(secrets.bedrockConfig ? { bedrockConfig: secrets.bedrockConfig } : {}),
+  };
+}
+
+/**
+ * Hydrate a conversation's model binding with its decrypted spawn secrets, in
+ * main, just before spawning the backend (audit C4/C5/C6). The persisted
+ * conversation blob and the renderer carry only the NON-SECRET handle - the key
+ * is resolved here and lives only in the returned object, never persisted and
+ * never sent to the renderer. Resolution is per-call, so two concurrent chats
+ * each get their own key with no shared global state in this path.
+ */
+export async function hydrateModelForSpawn<T extends TProviderWithModel>(model: T): Promise<T> {
+  const secrets = await resolveModelSecretsForSpawn({
+    providerId: model.id,
+    accountId: model.accountId ?? DEFAULT_ACCOUNT_ID,
+    modelId: model.useModel,
+  });
+  return mergeSpawnSecrets(model, secrets);
 }
 
 // ─── IPC registration ─────────────────────────────────────────────────────────
@@ -1063,6 +1306,15 @@ let _handlers: ModelRegistryHandlers | null = null;
 
 /** The auto-refresh scheduler singleton, created at `initModelRegistryIpc` time. */
 let _scheduler: ModelRefreshScheduler | null = null;
+
+/**
+ * The Provider Catalog store singleton (T3.3): the ~100 connectable catalog
+ * PROVIDERS (distinct from the per-provider model registry above). Created at
+ * `initModelRegistryIpc` time over the production `ModelsDevClient` for additive
+ * metadata enrichment; the bundled vendored catalog is always the routing
+ * authority + fail-safe floor.
+ */
+let _providerCatalogStore: ProviderCatalogStore | null = null;
 
 /**
  * Build the production dependency set wired to the real 1A–1E modules and the
@@ -1095,7 +1347,39 @@ async function buildProductionDeps(): Promise<ModelRegistryDeps> {
     mirror: (providerId) => (_repo ? mirrorConnectOrRekey(_repo, providerId) : Promise.resolve()),
     emitListChanged: () => ipcBridge.modelRegistry.listChanged.emit(),
     setLastRefreshedAt: (value) => setLastRefreshedAt(value),
+    // Keyless `ollama-local` refreshes from a live daemon probe, never from
+    // `buildAndPersistCatalog` (Finding 1). A down/unreachable daemon resolves
+    // to `{ running:false }`, which the refresh path treats as "leave the
+    // existing catalog untouched" rather than wiping it.
+    probeOllama: () => probeOllamaDaemon(),
   };
+}
+
+/**
+ * Probe the local Ollama daemon's `/api/tags`. Returns `{ running, models }`;
+ * a down daemon, non-2xx, malformed body, or timeout resolves to
+ * `{ running:false, models:[] }`. Never throws. Mirror of `detect.probeOllama`
+ * but kept here to avoid a `detect -> modelRegistryIpc` import cycle.
+ */
+async function probeOllamaDaemon(): Promise<OllamaProbe> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2000);
+  try {
+    const res = await fetch(`${OLLAMA_LOCAL_BASE_URL.replace(/\/v1$/, '')}/api/tags`, { signal: controller.signal });
+    if (!res.ok) return { running: false, models: [] };
+    const body = (await res.json()) as unknown;
+    if (!body || typeof body !== 'object') return { running: false, models: [] };
+    const raw = (body as { models?: unknown }).models;
+    if (!Array.isArray(raw)) return { running: true, models: [] };
+    const models = raw
+      .map((m) => (m && typeof m === 'object' ? (m as { name?: unknown }).name : undefined))
+      .filter((n): n is string => typeof n === 'string' && n.length > 0);
+    return { running: true, models };
+  } catch {
+    return { running: false, models: [] };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -1179,7 +1463,9 @@ export async function initModelRegistryIpc(): Promise<void> {
   // (WCoreModelSelector / GeminiModelSelector / AcpModelSelector /
   // EditModeModal / AddPlatformModal) still see new connections until they
   // are refactored. The bridge is a no-op for cloud + CLI-only providers.
-  ipcBridge.modelRegistry.connect.provider((payload) => connectModelRegistryProvider(payload.providerId, payload.creds));
+  ipcBridge.modelRegistry.connect.provider((payload) =>
+    connectModelRegistryProvider(payload.providerId, payload.creds)
+  );
   ipcBridge.modelRegistry.testConnection.provider((payload) => h.testConnection(payload));
   ipcBridge.modelRegistry.list.provider(() => h.list());
   ipcBridge.modelRegistry.getCatalog.provider((payload) => h.getCatalog(payload));
@@ -1206,6 +1492,18 @@ export async function initModelRegistryIpc(): Promise<void> {
   });
   ipcBridge.modelRegistry.curatedForAgent.provider((payload) => h.curatedForAgent(payload));
   ipcBridge.modelRegistry.resolveForChatStart.provider((payload) => h.resolveForChatStart(payload));
+
+  // ── Provider catalog (T3.3): the ~100 connectable catalog PROVIDERS ─────────
+  // A separate concept from the per-provider model registry above. The vendored
+  // bundled catalog is the routing authority + fail-safe floor; models.dev only
+  // contributes additive per-provider model metadata (never endpoint URLs). The
+  // handler kicks off a best-effort enrichment refresh and is defensive: any
+  // error returns the bundled baseline rather than throwing.
+  _providerCatalogStore = new ProviderCatalogStore({
+    registrySource: { getRegistry: () => new ModelsDevClient().getRegistry() },
+  });
+  void _providerCatalogStore.refresh().catch(() => {});
+  ipcBridge.modelRegistry.getProviderCatalog.provider(() => getProviderCatalog());
 
   // ── Automatic refresh: scheduler + the global "Refresh models" surface ──────
   _scheduler = new ModelRefreshScheduler({
@@ -1436,6 +1734,29 @@ export async function _runPostUpgradeCatalogRefresh(
 /** The model-registry repository instance, available after `initModelRegistryIpc`. */
 export function getModelRegistryRepository(): ProviderRepository | null {
   return _repo;
+}
+
+/**
+ * Resolve the provider catalog for the `modelRegistry.getProviderCatalog` IPC
+ * contract: the ~100 connectable catalog providers, sorted by `displayName`,
+ * with `baseUrl` / `apiPath` / `envVar` always from the vendored bundled
+ * catalog (the routing authority). Additive models.dev metadata may decorate
+ * entries but the returned array satisfies the frozen `CatalogProviderEntry[]`
+ * shape (extra metadata keys are structurally compatible).
+ *
+ * Defensive: if the store is missing (pre-init) or anything throws, falls back
+ * to the bundled baseline floor and NEVER throws.
+ */
+export async function getProviderCatalog(): Promise<CatalogProviderEntry[]> {
+  try {
+    return _providerCatalogStore ? _providerCatalogStore.getCatalog() : loadBaselineProviderCatalog();
+  } catch {
+    try {
+      return loadBaselineProviderCatalog();
+    } catch {
+      return [];
+    }
+  }
 }
 
 /**

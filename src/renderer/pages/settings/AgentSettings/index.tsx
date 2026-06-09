@@ -5,12 +5,13 @@
  */
 
 import React from 'react';
-import { Alert, Avatar, Button, Spin, Tooltip, Typography } from '@arco-design/web-react';
+import { Alert, Avatar, Button, Spin, Switch, Tooltip, Typography } from '@arco-design/web-react';
 import { CheckOne } from '@icon-park/react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { ipcBridge } from '@/common';
 import { getFluxCompat } from '@/common/types/acpTypes';
+import { useHiddenAgents } from '@renderer/hooks/assistant/useHiddenAgents';
 import { resolveAgentLogo } from '@renderer/utils/model/agentLogo';
 import { resolveExtensionAssetUrl } from '@renderer/utils/platform';
 import SettingsPageShell from '@renderer/pages/settings/components/SettingsPageShell';
@@ -125,10 +126,49 @@ const FluxCompatChip: React.FC<{ backend: string }> = ({ backend }) => {
 };
 
 /**
+ * Per-agent "show in toolbar" toggle. Flipping it off removes the agent from
+ * the Guid-page toolbar strip (it stays detected and listed here); flipping it
+ * on restores it. Wayland Core is the always-available default backend, so its
+ * toggle is locked on - the strip must keep at least one agent.
+ */
+const ToolbarToggle: React.FC<{
+  backend: string;
+  shown: boolean;
+  locked: boolean;
+  onChange: (shown: boolean) => void;
+}> = ({ backend, shown, locked, onChange }) => {
+  const { t } = useTranslation();
+  const control = (
+    <Switch
+      size='small'
+      checked={shown}
+      disabled={locked}
+      onChange={onChange}
+      data-testid={`agent-toolbar-toggle-${backend}`}
+      aria-label={t('settings.agentsPage.toolbarToggle.label')}
+    />
+  );
+  if (locked) {
+    return <Tooltip content={t('settings.agentsPage.toolbarToggle.lockedTooltip')}>{control}</Tooltip>;
+  }
+  return (
+    <Tooltip content={t(shown ? 'settings.agentsPage.toolbarToggle.hide' : 'settings.agentsPage.toolbarToggle.show')}>
+      {control}
+    </Tooltip>
+  );
+};
+
+/**
  * One featured agent card (prototype `#screen-agents` `.acard`). States, in a
  * plain sentence, what models the agent runs - no "family" jargon, no padlock.
  */
-const AgentCard: React.FC<{ agent: DetectedAgent; hero: boolean }> = ({ agent, hero }) => {
+const AgentCard: React.FC<{
+  agent: DetectedAgent;
+  hero: boolean;
+  shown: boolean;
+  locked: boolean;
+  onToggle: (shown: boolean) => void;
+}> = ({ agent, hero, shown, locked, onToggle }) => {
   const { t } = useTranslation();
   const scope = resolveAgentScope(agent.backend);
   const logo = agentLogo(agent);
@@ -149,10 +189,13 @@ const AgentCard: React.FC<{ agent: DetectedAgent; hero: boolean }> = ({ agent, h
           </div>
           <div className={styles.desc}>{t(`settings.agentsPage.about.${agent.backend}`, { defaultValue: '' })}</div>
         </div>
-        <span className={`${styles.badge} ${hero ? styles.badgeActive : styles.badgeDetected}`}>
-          {hero && <span className={styles.badgeDot} />}
-          {t(hero ? 'settings.agentsPage.badge.active' : 'settings.agentsPage.badge.detected')}
-        </span>
+        <div className={styles.cardActions}>
+          <span className={`${styles.badge} ${hero ? styles.badgeActive : styles.badgeDetected}`}>
+            {hero && <span className={styles.badgeDot} />}
+            {t(hero ? 'settings.agentsPage.badge.active' : 'settings.agentsPage.badge.detected')}
+          </span>
+          <ToolbarToggle backend={agent.backend} shown={shown} locked={locked} onChange={onToggle} />
+        </div>
       </div>
     </div>
   );
@@ -162,7 +205,11 @@ const AgentCard: React.FC<{ agent: DetectedAgent; hero: boolean }> = ({ agent, h
  * One compact tile for a detected agent in the "More detected" grid
  * (prototype `.mtile`). Shows only the agent and its plain-language scope.
  */
-const AgentTile: React.FC<{ agent: DetectedAgent }> = ({ agent }) => {
+const AgentTile: React.FC<{ agent: DetectedAgent; shown: boolean; onToggle: (shown: boolean) => void }> = ({
+  agent,
+  shown,
+  onToggle,
+}) => {
   const { t } = useTranslation();
   const scope = resolveAgentScope(agent.backend);
   const logo = agentLogo(agent);
@@ -179,6 +226,7 @@ const AgentTile: React.FC<{ agent: DetectedAgent }> = ({ agent }) => {
           <FluxCompatChip backend={agent.backend} />
         </div>
       </div>
+      <ToolbarToggle backend={agent.backend} shown={shown} locked={false} onChange={onToggle} />
     </div>
   );
 };
@@ -196,6 +244,7 @@ const AgentTile: React.FC<{ agent: DetectedAgent }> = ({ agent }) => {
  */
 const AgentsSettings: React.FC = () => {
   const { t } = useTranslation();
+  const { isHidden, setAgentHidden } = useHiddenAgents();
 
   // Detected agents - built-in backends and extension-contributed agents,
   // excluding remote and user-custom agents (those have their own surfaces).
@@ -264,7 +313,14 @@ const AgentsSettings: React.FC = () => {
         <>
           <div className={styles.agentList}>
             {featured.map((agent) => (
-              <AgentCard key={agent.backend} agent={agent} hero={agent.backend === 'wcore' ? wcoreIsActive : true} />
+              <AgentCard
+                key={agent.backend}
+                agent={agent}
+                hero={agent.backend === 'wcore' ? wcoreIsActive : true}
+                shown={agent.backend === 'wcore' ? true : !isHidden(agent.backend)}
+                locked={agent.backend === 'wcore'}
+                onToggle={(shown) => void setAgentHidden(agent.backend, !shown)}
+              />
             ))}
           </div>
           {agents.length === 0 && <div className={styles.emptyNote}>{t('settings.agentsPage.empty')}</div>}
@@ -279,7 +335,12 @@ const AgentsSettings: React.FC = () => {
           </div>
           <div className={styles.tileGrid}>
             {moreDetected.map((agent) => (
-              <AgentTile key={agent.backend} agent={agent} />
+              <AgentTile
+                key={agent.backend}
+                agent={agent}
+                shown={!isHidden(agent.backend)}
+                onToggle={(shown) => void setAgentHidden(agent.backend, !shown)}
+              />
             ))}
           </div>
         </>

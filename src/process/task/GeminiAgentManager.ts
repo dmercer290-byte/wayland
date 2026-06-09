@@ -12,6 +12,7 @@ import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { ProcessConfig, getSkillsDir } from '@process/utils/initStorage';
 import { ExtensionRegistry } from '@process/extensions';
+import { hydrateModelForSpawn } from '@process/providers/ipc/modelRegistryIpc';
 import {
   buildSystemInstructionsWithSkillsIndex,
   buildTurnSkillContext,
@@ -28,8 +29,10 @@ import { getDatabase } from '@process/services/database';
 import { addMessage, addOrUpdateMessage, nextTickToLocalFinish } from '@process/utils/message';
 import { cronBusyGuard } from '@process/services/cron/CronBusyGuard';
 import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher';
+import { getCostRecorder } from '@process/services/cost/CostRecorder';
 import { handlePreviewOpenEvent } from '@process/utils/previewUtils';
 import { getTeamGuideStdioConfig } from '@process/team/mcp/guide/teamGuideSingleton';
+import { shouldInjectGeminiMcpServer } from '@process/agent/acp/mcpSessionConfig';
 import BaseAgentManager from './BaseAgentManager';
 import { IpcAgentEventEmitter } from './IpcAgentEventEmitter';
 import { mainLog, mainWarn, mainError } from '@process/utils/mainLogger';
@@ -118,6 +121,16 @@ export class GeminiAgentManager extends BaseAgentManager<
   /** Current session mode for approval behavior */
   private currentMode: string = 'default';
 
+  /**
+   * Latest per-turn token split from the gemini `'finished'` event's
+   * usageMetadata (input/output/cacheRead). These are per-turn totals, not a
+   * cumulative gauge, so the last `'finished'` before `'finish'` carries the
+   * turn's final counts. Stashed here in MAIN (the renderer also reads it, but
+   * the cost ledger lives in the main process) and recorded once on `'finish'`.
+   * Reset to undefined after each record so a turn with no usage records nothing.
+   */
+  private lastGeminiUsage: { input: number; output: number; cacheRead: number } | undefined;
+
   /** Current turn's thinking message msg_id for accumulating content */
   private thinkingMsgId: string | null = null;
   /** Timestamp when thinking started for duration calculation */
@@ -202,6 +215,14 @@ export class GeminiAgentManager extends BaseAgentManager<
   private createBootstrap(): Promise<void> {
     return Promise.all([ProcessConfig.get('gemini.config'), this.getMcpServers()])
       .then(async ([config, mcpServers]) => {
+        // Resolve the provider key in main at dispatch (audit C4/C5): the model
+        // blob carries only a non-secret handle, so the decrypted key is
+        // fetched here - just before the gemini worker is started - rather than
+        // shipped from the renderer. Each conversation runs in its own forked
+        // worker, so this per-call resolution keeps concurrent accounts
+        // isolated (audit C6). Back-compat: a legacy key-bearing model that is
+        // not in the registry is returned unchanged.
+        this.model = await hydrateModelForSpawn(this.model);
         let projectId: string | undefined;
         const authType = getProviderAuthType(this.model);
         const needsGoogleOAuth = authType === AuthType.LOGIN_WITH_GOOGLE || authType === AuthType.USE_VERTEX_AI;
@@ -358,7 +379,10 @@ export class GeminiAgentManager extends BaseAgentManager<
       // MCPServerConfig supports: stdio (command/args/env), sse/http (url/type/headers)
       const mcpConfig: Record<string, UiMcpServerConfig> = {};
       allServers
-        .filter((server: IMcpServer) => server.enabled && server.status === 'connected') // Only use enabled and connected servers
+        // Builtin servers (image gen, skill search) are seeded with status
+        // undefined and never connection-tested; accept them on undefined to
+        // match the ACP session path. User servers still require connected.
+        .filter(shouldInjectGeminiMcpServer)
         .forEach((server: IMcpServer) => {
           if (server.transport.type === 'stdio') {
             mcpConfig[server.name] = {
@@ -799,6 +823,29 @@ export class GeminiAgentManager extends BaseAgentManager<
         this.status = 'finished';
       }
 
+      // Capture per-turn token usage from the `'finished'` stats event in MAIN
+      // (it is otherwise renderer-only). Gemini emits cumulative-per-turn counts,
+      // so the last `'finished'` before `'finish'` holds the turn's final split.
+      if (data.type === 'finished') {
+        const usageMetadata = (
+          data.data as {
+            usageMetadata?: {
+              promptTokenCount?: number;
+              candidatesTokenCount?: number;
+              cachedContentTokenCount?: number;
+            };
+          } | null
+        )?.usageMetadata;
+        if (usageMetadata) {
+          this.lastGeminiUsage = {
+            input: typeof usageMetadata.promptTokenCount === 'number' ? usageMetadata.promptTokenCount : 0,
+            output: typeof usageMetadata.candidatesTokenCount === 'number' ? usageMetadata.candidatesTokenCount : 0,
+            cacheRead:
+              typeof usageMetadata.cachedContentTokenCount === 'number' ? usageMetadata.cachedContentTokenCount : 0,
+          };
+        }
+      }
+
       if (data.type === 'finish') {
         // When stream finishes, check for cron commands in the accumulated message
         // Use longer delay and retry logic to ensure message is persisted
@@ -812,6 +859,7 @@ export class GeminiAgentManager extends BaseAgentManager<
           this.thinkingStartTime = null;
           this.thinkingContent = '';
         }
+        this.recordCost();
       }
       if (data.type === 'start') {
         this.status = 'running';
@@ -893,6 +941,30 @@ export class GeminiAgentManager extends BaseAgentManager<
 
       // Emit to Channel global event bus (for Telegram and other external platforms)
       channelEventBus.emitAgentMessage(this.conversation_id, filteredData);
+    });
+  }
+
+  /**
+   * Record this gemini turn's cost to the ledger at finish. usageMetadata is a
+   * per-turn input/output/cacheRead split (computed path): the recorder prices
+   * it via ModelPricing keyed on `this.model.useModel`, falling back to
+   * cost_source='unknown' (tokens only) when the model is unpriced. Skips when
+   * no `'finished'` usage event arrived this turn so a no-usage turn records
+   * nothing; resets the stash so the next turn starts clean.
+   */
+  private recordCost(): void {
+    const usage = this.lastGeminiUsage;
+    this.lastGeminiUsage = undefined;
+    if (!usage || usage.input + usage.output + usage.cacheRead <= 0) return;
+    getCostRecorder()?.recordTurnFinish({
+      conversationId: this.conversation_id,
+      backend: 'gemini',
+      modelId: this.model?.useModel,
+      costSource: 'computed',
+      inputTokens: usage.input,
+      outputTokens: usage.output,
+      cacheReadTokens: usage.cacheRead,
+      ts: Date.now(),
     });
   }
 

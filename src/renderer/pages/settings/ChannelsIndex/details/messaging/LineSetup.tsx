@@ -11,10 +11,12 @@ import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import LineConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/messaging/LineConfigForm';
 
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const LineSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.line.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -49,7 +51,7 @@ const LineSetup: React.FC = () => {
         'LINE Messaging API. In LINE Developers Console → your channel → Messaging API: set Use webhook = ON, Auto-reply messages = OFF, and Greeting messages = OFF. Then paste the webhook URL shown after Test & Enable into the Webhook URL field.',
       )}
     >
-      <LineConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <LineConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

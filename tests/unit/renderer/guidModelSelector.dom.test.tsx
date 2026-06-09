@@ -451,10 +451,10 @@ describe('GuidModelSelector home picker', () => {
     expect(screen.getByText('$')).toBeInTheDocument();
   });
 
-  it('passes the resolved chat-start payload through to setCurrentModel', async () => {
-    // The resolver hands back the credentials + platform + baseUrl the
-    // chat-start dispatch needs. The picker writes them straight into
-    // `currentModel` via `setCurrentModel`.
+  it('passes the non-secret chat-start handle through to setCurrentModel (audit C4)', async () => {
+    // The resolver hands back the NON-SECRET handle (platform + baseUrl +
+    // account binding) - no decrypted key. The picker writes the binding into
+    // `currentModel`; `apiKey` stays empty and is resolved in main at spawn.
     mockCuratedForAgent.mockResolvedValue([
       curated({ id: 'gpt-5', providerId: 'openai', displayName: 'GPT-5.5', family: 'GPT-5' }),
     ]);
@@ -467,7 +467,7 @@ describe('GuidModelSelector home picker', () => {
         platform: 'openai',
         modelId: 'gpt-5',
         baseUrl: 'https://api.openai.com/v1',
-        apiKey: 'sk-resolved',
+        accountId: 'default',
       },
     });
     const fireEventClick = (await import('@testing-library/react')).fireEvent.click;
@@ -482,7 +482,9 @@ describe('GuidModelSelector home picker', () => {
     expect(mockResolveForChatStart).toHaveBeenCalledWith({ providerId: 'openai', modelId: 'gpt-5' });
     const arg = setCurrentModel.mock.calls[0][0];
     expect(arg.platform).toBe('openai');
-    expect(arg.apiKey).toBe('sk-resolved');
+    // No plaintext key crosses IPC - it is resolved in main at dispatch.
+    expect(arg.apiKey).toBe('');
+    expect(arg.accountId).toBe('default');
     expect(arg.useModel).toBe('gpt-5');
     expect(arg.baseUrl).toBe('https://api.openai.com/v1');
   });

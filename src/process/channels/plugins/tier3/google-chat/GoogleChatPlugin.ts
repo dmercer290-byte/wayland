@@ -7,8 +7,9 @@
  * Copyright (c) 2025 Peter Steinberger
  * Licensed under the MIT License - see LICENSES/openclaw.txt
  *
- * Google Chat (Workspace) bot plugin - service-account JWT auth, webhook-driven
- * inbound, REST outbound via the Chat API.
+ * Google Chat (Workspace) bot plugin - service-account JWT auth, REST outbound
+ * via the Chat API. Inbound supports two transports: webhook (push, needs a
+ * public URL) or pubsub (pull, no public URL required).
  *
  * Auth flow:
  *   Operator pastes the full service-account JSON keyfile into the ConfigForm.
@@ -16,10 +17,18 @@
  *   token on demand for every REST call. Tokens are cached by google-auth-library
  *   internally (~1 hour TTL).
  *
- * Inbound flow:
+ * Inbound flow (transport = 'webhook', default):
  *   Google Chat POSTs a Bearer-JWT-signed webhook to the Wayland WebhookReceiver.
  *   The verifier (webhook/verifiers/google-chat.ts) validates issuer + audience +
- *   exp, then routes the parsed payload here via handleWebhookPayload.
+ *   exp, then routes the parsed payload here via handleWebhookPayload. Requires a
+ *   public HTTPS endpoint Wayland cannot provide on a desktop behind NAT.
+ *
+ * Inbound flow (transport = 'pubsub'):
+ *   The Chat app is configured to publish events to a Google Cloud Pub/Sub topic.
+ *   On start the plugin opens a streaming-pull subscription on that topic's
+ *   subscription (see GoogleChatPubSub.ts) and forwards MESSAGE events to the
+ *   same googleChatEventToUnified path the webhook uses. No public URL needed -
+ *   the model parallels Slack Socket Mode / Telegram long-polling.
  *
  * Outbound flow:
  *   sendMessage  → POST  /v1/spaces/{space}/messages
@@ -44,6 +53,11 @@ import {
   toGoogleChatMessageBody,
   type GoogleChatEvent,
 } from './GoogleChatAdapter';
+import {
+  GoogleChatPubSubSubscriber,
+  isValidSubscriptionPath,
+  type ServiceAccountCredentials,
+} from './GoogleChatPubSub';
 
 const CHAT_API_BASE = 'https://chat.googleapis.com/v1';
 const CHAT_SCOPE = 'https://www.googleapis.com/auth/chat.bot';
@@ -56,6 +70,13 @@ type ServiceAccountKey = {
   [key: string]: unknown;
 };
 
+/**
+ * Inbound transport selector. 'webhook' (default) is push-based and needs a
+ * public HTTPS endpoint. 'pubsub' is pull-based via a Google Cloud Pub/Sub
+ * streaming-pull subscription and works on a desktop with no public URL.
+ */
+export type GoogleChatTransport = 'webhook' | 'pubsub';
+
 type GoogleChatCreds = {
   serviceAccountJson: string;
   // The JWT `aud` claim the webhook verifier must match. Persisted under
@@ -63,6 +84,11 @@ type GoogleChatCreds = {
   // 2026-05-18 - previously read `projectId` while the form saved
   // `audience`, so inbound verification could never succeed).
   audience?: string;
+  // Inbound transport: 'webhook' (default) or 'pubsub'.
+  transport?: string;
+  // Pub/Sub pull subscription path: `projects/<project>/subscriptions/<sub>`.
+  // Required only when transport === 'pubsub'.
+  subscriptionName?: string;
 };
 
 type SpaceListResponse = {
@@ -87,6 +113,14 @@ export class GoogleChatPlugin extends BasePlugin {
   private serviceEmail: string | null = null;
   /** JWT `aud` claim used by the webhook verifier. Falls back to service-account project_id. */
   private audience: string | null = null;
+  /** Resolved inbound transport. Defaults to 'webhook'. */
+  private transport: GoogleChatTransport = 'webhook';
+  /** Pub/Sub subscription path (only set when transport === 'pubsub'). */
+  private subscriptionName: string | null = null;
+  /** Parsed service-account credentials, reused to auth the Pub/Sub client. */
+  private saCredentials: ServiceAccountCredentials | null = null;
+  /** Active Pub/Sub pull subscriber (only when transport === 'pubsub'). */
+  private pubsubSubscriber: GoogleChatPubSubSubscriber | null = null;
 
   protected async onInitialize(config: IChannelPluginConfig): Promise<void> {
     const creds = config.credentials ?? {};
@@ -109,26 +143,80 @@ export class GoogleChatPlugin extends BasePlugin {
         ? creds.audience.trim()
         : (typeof parsed.project_id === 'string' ? parsed.project_id : '');
 
+    const rawTransport = typeof creds.transport === 'string' ? creds.transport.trim() : '';
+    const transport: GoogleChatTransport = rawTransport === 'pubsub' ? 'pubsub' : 'webhook';
+
+    let subscriptionName: string | null = null;
+    if (transport === 'pubsub') {
+      subscriptionName =
+        typeof creds.subscriptionName === 'string' ? creds.subscriptionName.trim() : '';
+      if (!subscriptionName) {
+        throw new Error(
+          'Google Chat: subscriptionName is required when transport is "pubsub"',
+        );
+      }
+      if (!isValidSubscriptionPath(subscriptionName)) {
+        throw new Error(
+          "Google Chat: subscriptionName must match 'projects/<project>/subscriptions/<sub>'",
+        );
+      }
+    }
+
     this.auth = new GoogleAuth({
       credentials: parsed as Record<string, unknown>,
       scopes: [CHAT_SCOPE],
     });
     this.serviceEmail = parsed.client_email;
     this.audience = audience || null;
+    this.transport = transport;
+    this.subscriptionName = subscriptionName;
+    this.saCredentials = {
+      client_email: parsed.client_email,
+      private_key: parsed.private_key,
+      project_id: typeof parsed.project_id === 'string' ? parsed.project_id : undefined,
+    };
   }
 
   /**
-   * Webhook-driven - nothing to connect on start. WebhookReceiver routes
-   * inbound traffic via handleWebhookPayload.
+   * Start inbound delivery.
+   *
+   * - transport 'webhook' (default): no-op. WebhookReceiver routes inbound
+   *   traffic via handleWebhookPayload (push-based, needs a public URL).
+   * - transport 'pubsub': open a Pub/Sub streaming-pull subscription and
+   *   forward MESSAGE events to the unified handler (no public URL needed).
    */
   protected async onStart(): Promise<void> {
-    // No-op: Google Chat delivery is push-based via WebhookReceiver.
+    if (this.transport !== 'pubsub') {
+      // Push-based via WebhookReceiver - nothing to connect.
+      return;
+    }
+    if (!this.subscriptionName || !this.saCredentials) {
+      throw new Error('Google Chat: pubsub transport not initialized (missing config)');
+    }
+    const subscriber = new GoogleChatPubSubSubscriber({
+      subscriptionName: this.subscriptionName,
+      credentials: this.saCredentials,
+      pluginInstanceId: this.config?.id ?? 'google-chat_default',
+      onMessage: (message) => this.emitMessage(message),
+      onFatal: (reason) => {
+        this.setError(`Google Chat Pub/Sub: ${reason}`);
+      },
+    });
+    await subscriber.start();
+    this.pubsubSubscriber = subscriber;
   }
 
   protected async onStop(): Promise<void> {
+    if (this.pubsubSubscriber) {
+      await this.pubsubSubscriber.stop();
+      this.pubsubSubscriber = null;
+    }
     this.auth = null;
     this.serviceEmail = null;
     this.audience = null;
+    this.transport = 'webhook';
+    this.subscriptionName = null;
+    this.saCredentials = null;
   }
 
   getActiveUserCount(): number {

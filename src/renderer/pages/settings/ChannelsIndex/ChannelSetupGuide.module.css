@@ -1,0 +1,21 @@
+.guide :global(.arco-collapse-item-header) {
+  padding-left: 14px;
+  padding-right: 14px;
+  border-radius: 8px;
+  background-color: var(--brand-soft-bg);
+  border: 1px solid var(--brand-soft-border);
+  color: var(--text-primary);
+}
+
+.guide :global(.arco-collapse-item-active > .arco-collapse-item-header) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.guide :global(.arco-collapse-item-content) {
+  background-color: transparent;
+}
+
+.guide :global(.arco-collapse-item-content-box) {
+  padding: 4px 14px 14px;
+}

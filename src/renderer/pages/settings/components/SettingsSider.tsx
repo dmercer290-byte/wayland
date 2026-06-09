@@ -40,6 +40,8 @@ export const BUILTIN_TAB_IDS = [
   'agents',
   'images',
   'voice',
+  // ENGINE
+  'wcore',
   // INTEGRATIONS
   'webui',
   'channels',
@@ -85,6 +87,7 @@ export const LEGACY_ANCHOR_REMAP: Record<string, string> = {
 const GROUP_HEADER_BEFORE: Record<string, string> = {
   assistants: 'settings.sider.groupWorkspace',
   models: 'settings.sider.groupAiModels',
+  wcore: 'settings.sider.groupEngine',
   webui: 'settings.sider.groupIntegrations',
   theme: 'settings.sider.groupAppearance',
   general: 'settings.sider.groupSystem',
@@ -179,6 +182,12 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         label: t('settings.sider.constitution', { defaultValue: 'Constitution' }),
         icon: <ScrollText />,
         path: 'constitution',
+      },
+      wcore: {
+        id: 'wcore',
+        label: t('settings.wcoreConfig.navLabel', { defaultValue: 'Wayland Core' }),
+        icon: <Cpu />,
+        path: 'wcore-config',
       },
       agents: {
         id: 'agents',

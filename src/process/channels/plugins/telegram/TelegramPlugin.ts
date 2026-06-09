@@ -34,6 +34,44 @@ import { extractAction, extractCategory } from './TelegramKeyboards';
 const STARTUP_DROP_PENDING_UPDATES = true;
 
 /**
+ * Build the grammY Bot client options with a realm-safe `fetch`.
+ *
+ * grammY bundles an `abort-controller` polyfill whose `AbortSignal` is NOT an
+ * instance of the runtime's native `AbortSignal`. Handing grammY the runtime's
+ * own `globalThis.fetch` then trips undici's `RequestInit.signal` instanceof
+ * check ("Expected signal to be an instance of AbortSignal"), which failed
+ * EVERY Bot API call (getMe test + live long-polling) in the main process.
+ *
+ * This wrapper forwards grammY's foreign abort signal onto a native
+ * `AbortController` from the SAME realm as `globalThis.fetch`, so abort
+ * semantics (polling cancellation on stop) are preserved and the instanceof
+ * check passes - whether `globalThis.fetch` is undici (Node) or Chromium
+ * (Electron). When no global fetch exists we fall back to grammY's default.
+ */
+function buildBotClientOptions(): ConstructorParameters<typeof Bot>[1] {
+  if (typeof globalThis.fetch !== 'function') return undefined;
+  const nativeFetch = globalThis.fetch.bind(globalThis);
+  const realmSafeFetch: typeof globalThis.fetch = (input, init) => {
+    // grammY's signal is a foreign AbortSignal-like object (its bundled
+    // polyfill), so type it loosely and bridge only when it is not already a
+    // native signal of this realm.
+    const signal = init?.signal as { aborted?: boolean; addEventListener?: (t: string, cb: () => void) => void } | null;
+    if (signal && !(signal instanceof globalThis.AbortSignal)) {
+      const controller = new AbortController();
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener?.('abort', () => controller.abort());
+      return nativeFetch(input, { ...init, signal: controller.signal });
+    }
+    return nativeFetch(input, init);
+  };
+  // grammY types `client.fetch` against node-fetch's `Response`, which does not
+  // structurally overlap the global `Response` even though the value is correct
+  // at runtime (verified end-to-end against the live Bot API). Assert through
+  // `unknown` to bridge the types-vs-runtime gap.
+  return { client: { fetch: realmSafeFetch } } as unknown as ConstructorParameters<typeof Bot>[1];
+}
+
+/**
  * TelegramPlugin - Telegram Bot integration for Personal Assistant
  *
  * Uses grammY library for Telegram Bot API
@@ -69,13 +107,10 @@ export class TelegramPlugin extends BasePlugin {
       throw new Error('Telegram bot token is required');
     }
 
-    // Create bot instance
-    // Pass globalThis.fetch to avoid node-fetch@2 vs abort-controller AbortSignal
-    // instanceof mismatch when running in bundled standalone server mode.
-    // In Electron, globalThis.fetch is Chromium's fetch; in Node.js 22+, it is undici.
-    // Both accept AbortSignal from the abort-controller polyfill via duck-typing.
-    const nativeFetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : undefined;
-    this.bot = new Bot(token, nativeFetch ? { client: { fetch: nativeFetch } } : undefined);
+    // Create bot instance with a realm-safe fetch (see buildBotClientOptions:
+    // grammY's polyfilled AbortSignal otherwise fails undici's instanceof check
+    // and breaks every API call).
+    this.bot = new Bot(token, buildBotClientOptions());
 
     // Setup handlers
     this.setupHandlers();
@@ -754,9 +789,16 @@ export class TelegramPlugin extends BasePlugin {
    * Used by Settings UI to validate token before saving
    */
   static async testConnection(token: string): Promise<{ success: boolean; botInfo?: BotInfo; error?: string }> {
+    // Trim the pasted token: a stray trailing space or newline produces a
+    // malformed request URL that fetch rejects, which grammY raises as an
+    // HttpError and we previously surfaced as a misleading "check your internet
+    // connection" message even when the network was perfectly fine.
+    const trimmedToken = (token ?? '').trim();
+    if (!trimmedToken) {
+      return { success: false, error: 'Enter a bot token (get one from @BotFather).' };
+    }
     try {
-      const nativeFetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : undefined;
-      const bot = new Bot(token, nativeFetch ? { client: { fetch: nativeFetch } } : undefined);
+      const bot = new Bot(trimmedToken, buildBotClientOptions());
       const me = await bot.api.getMe();
 
       return {
@@ -771,13 +813,19 @@ export class TelegramPlugin extends BasePlugin {
       let errorMessage = 'Connection failed';
 
       if (error instanceof GrammyError) {
-        if (error.error_code === 401) {
-          errorMessage = 'Invalid bot token';
-        } else {
-          errorMessage = error.description || error.message;
-        }
+        errorMessage =
+          error.error_code === 401
+            ? 'Invalid bot token - check it was copied in full from @BotFather.'
+            : error.description || error.message;
       } else if (error instanceof HttpError) {
-        errorMessage = 'Network error - please check your internet connection';
+        // grammY raises HttpError for ANY failed request (DNS, TLS, proxy,
+        // timeout, or a malformed token URL) - do not assume it is the
+        // internet. Surface the underlying detail so the real cause is visible.
+        const cause = (error as { error?: { message?: string }; message?: string }) ?? {};
+        const detail = cause.error?.message || cause.message || 'unknown error';
+        errorMessage = `Could not reach Telegram (network, proxy, or malformed token): ${detail}`;
+      } else if (error?.message) {
+        errorMessage = error.message;
       }
 
       return {

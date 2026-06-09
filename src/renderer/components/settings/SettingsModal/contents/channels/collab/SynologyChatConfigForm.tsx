@@ -15,6 +15,8 @@ import { AlertTriangle, Copy } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -32,11 +34,13 @@ const PreferenceRow: React.FC<{
 
 export interface SynologyChatConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 }
 
 const SynologyChatConfigForm: React.FC<SynologyChatConfigFormProps> = ({
   pluginStatus,
+  modelSelection,
   onStatusChange,
 }) => {
   const { t } = useTranslation();
@@ -268,6 +272,8 @@ const SynologyChatConfigForm: React.FC<SynologyChatConfigFormProps> = ({
           {t('settings.channels.synologyChat.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='synology-chat' modelSelection={modelSelection} />
+
     </div>
   );
 };

@@ -8,10 +8,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import SmsTwilioConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/messaging/SmsTwilioConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const SmsSetup: React.FC = () => {
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
+  const modelSelection = useChannelModelSelection('assistant.sms-twilio.defaultModel');
 
   const loadStatus = useCallback(async () => {
     try {
@@ -44,7 +46,7 @@ const SmsSetup: React.FC = () => {
       displayName='SMS (Twilio)'
       pluginId={pluginStatus?.id ?? 'sms-twilio_default'}
     >
-      <SmsTwilioConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <SmsTwilioConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

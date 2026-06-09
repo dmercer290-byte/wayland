@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CheckCircle2, ChevronDown, Copy, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import type { IChannelPairingRequest, IChannelPluginStatus, IChannelUser } from '@process/channels/types';
-import { acpConversation, channel } from '@/common/adapter/ipcBridge';
-import { ConfigStorage } from '@/common/config/storage';
-import GeminiModelSelector from '@/renderer/pages/conversation/platforms/gemini/GeminiModelSelector';
+import { channel } from '@/common/adapter/ipcBridge';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
 import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
-import { Button, Dropdown, Empty, Input, Menu, Message, Spin, Tooltip } from '@arco-design/web-react';
+import { Button, Empty, Input, Message, Spin, Tooltip } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -69,14 +68,6 @@ const TelegramConfigForm: React.FC<TelegramConfigFormProps> = ({
   const [pendingPairings, setPendingPairings] = useState<IChannelPairingRequest[]>([]);
   const [authorizedUsers, setAuthorizedUsers] = useState<IChannelUser[]>([]);
 
-  // Agent selection (used for Telegram conversations)
-  const [availableAgents, setAvailableAgents] = useState<
-    Array<{ backend: string; name: string; customAgentId?: string; isPreset?: boolean; isExtension?: boolean }>
-  >([]);
-  const [selectedAgent, setSelectedAgent] = useState<{ backend: string; name?: string; customAgentId?: string }>({
-    backend: 'gemini',
-  });
-
   // Load pending pairings
   const loadPendingPairings = useCallback(async () => {
     setPairingLoading(true);
@@ -112,58 +103,6 @@ const TelegramConfigForm: React.FC<TelegramConfigFormProps> = ({
     void loadPendingPairings();
     void loadAuthorizedUsers();
   }, [loadPendingPairings, loadAuthorizedUsers]);
-
-  // Load available agents + saved selection
-  useEffect(() => {
-    const loadAgentsAndSelection = async () => {
-      try {
-        const [agentsResp, saved] = await Promise.all([
-          acpConversation.getAvailableAgents.invoke(),
-          ConfigStorage.get('assistant.telegram.agent'),
-        ]);
-
-        if (agentsResp.success && agentsResp.data) {
-          const list = agentsResp.data
-            .filter((a) => !a.isPreset)
-            .map((a) => ({
-              backend: a.backend,
-              name: a.name,
-              customAgentId: a.customAgentId,
-              isPreset: a.isPreset,
-              isExtension: a.isExtension,
-            }));
-          setAvailableAgents(list);
-        }
-
-        if (saved && typeof saved === 'object' && 'backend' in saved && typeof (saved as any).backend === 'string') {
-          setSelectedAgent({
-            backend: (saved as any).backend as string,
-            customAgentId: (saved as any).customAgentId,
-            name: (saved as any).name,
-          });
-        } else if (typeof saved === 'string') {
-          setSelectedAgent({ backend: saved as string });
-        }
-      } catch (error) {
-        console.error('[TelegramConfig] Failed to load agents:', error);
-      }
-    };
-
-    void loadAgentsAndSelection();
-  }, []);
-
-  const persistSelectedAgent = async (agent: { backend: string; customAgentId?: string; name?: string }) => {
-    try {
-      await ConfigStorage.set('assistant.telegram.agent', agent);
-      await channel.syncChannelSettings
-        .invoke({ platform: 'telegram', agent })
-        .catch((err) => console.warn('[TelegramConfig] syncChannelSettings failed:', err));
-      Message.success(t('settings.assistant.agentSwitched', 'Agent switched successfully'));
-    } catch (error) {
-      console.error('[TelegramConfig] Failed to save agent:', error);
-      Message.error(t('common.saveFailed', 'Failed to save'));
-    }
-  };
 
   // Listen for pairing requests
   useEffect(() => {
@@ -320,10 +259,6 @@ const TelegramConfigForm: React.FC<TelegramConfigFormProps> = ({
     return `${remaining} min`;
   };
 
-  const isGeminiAgent = selectedAgent.backend === 'gemini' || selectedAgent.backend === 'wcore';
-  const agentOptions: Array<{ backend: string; name: string; customAgentId?: string; isExtension?: boolean }> =
-    availableAgents.length > 0 ? availableAgents : [{ backend: 'gemini', name: 'Gemini CLI' }];
-
   return (
     <div className='flex flex-col gap-24px'>
       <PreferenceRow
@@ -397,85 +332,17 @@ const TelegramConfigForm: React.FC<TelegramConfigFormProps> = ({
         </div>
       </PreferenceRow>
 
-      {/* Agent Selection */}
-      <div className='flex flex-col gap-8px'>
-        <PreferenceRow
-          label={t('settings.agent', 'Agent')}
-          description={t('settings.assistant.agentDescTelegram', 'Used for Telegram conversations')}
-        >
-          <Dropdown
-            trigger='click'
-            position='br'
-            droplist={
-              <Menu
-                selectedKeys={[
-                  selectedAgent.customAgentId
-                    ? `${selectedAgent.backend}|${selectedAgent.customAgentId}`
-                    : selectedAgent.backend,
-                ]}
-              >
-                {agentOptions.map((a) => {
-                  const key = a.customAgentId ? `${a.backend}|${a.customAgentId}` : a.backend;
-                  return (
-                    <Menu.Item
-                      key={key}
-                      onClick={() => {
-                        const currentKey = selectedAgent.customAgentId
-                          ? `${selectedAgent.backend}|${selectedAgent.customAgentId}`
-                          : selectedAgent.backend;
-                        if (key === currentKey) {
-                          return;
-                        }
-                        const next = { backend: a.backend, customAgentId: a.customAgentId, name: a.name };
-                        setSelectedAgent(next);
-                        void persistSelectedAgent(next);
-                      }}
-                    >
-                      {a.name}
-                    </Menu.Item>
-                  );
-                })}
-              </Menu>
-            }
-          >
-            <Button type='secondary' className='min-w-160px flex items-center justify-between gap-8px'>
-              <span className='truncate'>
-                {selectedAgent.name ||
-                  availableAgents.find(
-                    (a) =>
-                      (a.customAgentId ? `${a.backend}|${a.customAgentId}` : a.backend) ===
-                      (selectedAgent.customAgentId
-                        ? `${selectedAgent.backend}|${selectedAgent.customAgentId}`
-                        : selectedAgent.backend)
-                  )?.name ||
-                  selectedAgent.backend}
-              </span>
-              <ChevronDown size={14} />
-            </Button>
-          </Dropdown>
-        </PreferenceRow>
-      </div>
-
-      {/* Default Model Selection */}
-      <PreferenceRow
-        label={t('settings.assistant.defaultModel', 'Default Model')}
-        description={t('settings.assistant.defaultModelDesc', 'Model used for Telegram conversations')}
-      >
-        <GeminiModelSelector
-          selection={isGeminiAgent ? modelSelection : undefined}
-          disabled={!isGeminiAgent}
-          label={
-            !isGeminiAgent
-              ? t('settings.assistant.autoFollowCliModel', 'Automatically follow the model when CLI is running')
-              : undefined
-          }
-          variant='settings'
-        />
-      </PreferenceRow>
+      {/* Agent + Default Model Selection (shared across all channels) */}
+      <ChannelAgentModelSelector
+        platform='telegram'
+        modelSelection={modelSelection}
+        agentDescription={t('settings.assistant.agentDescTelegram', 'Used for Telegram conversations')}
+        modelDescription={t('settings.assistant.defaultModelDesc', 'Model used for Telegram conversations')}
+      />
 
       {/* Next Steps Guide - show when bot is enabled and no authorized users yet */}
       {pluginStatus?.enabled && pluginStatus?.connected && authorizedUsers.length === 0 && (
-        <div className='bg-blue-50 dark:bg-blue-900/20 rd-12px p-16px border border-blue-200 dark:border-blue-800'>
+        <div className='bg-fill-1 rd-12px p-16px border border-b-1'>
           <SectionHeader title={t('settings.assistant.nextSteps', 'Next Steps')} />
           <div className='text-14px text-t-secondary space-y-8px'>
             <p className='m-0'>

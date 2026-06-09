@@ -105,6 +105,17 @@ export class TeammateManager extends EventEmitter {
   /** Maps slotId → original name before rename, for "formerly: X" hints in prompts */
   private readonly renamedAgents = new Map<string, string>();
 
+  /**
+   * Per-conversation high-water mark of the ACP cumulative usage gauge
+   * (`acp_context_usage.used` + `cost.amount`). ACP re-emits these CUMULATIVE
+   * values on every update, so writing one `token_usage` row per event with the
+   * raw `used`/`cost` made the meter (useTeamCostMeter, which SUMS rows)
+   * N-count. We now write the per-event DELTA against this baseline (clamped
+   * >= 0) and advance the baseline, so summing the rows reconstructs the true
+   * running total exactly once.
+   */
+  private readonly tokenUsageBaselines = new Map<string, { used: number; cost: number }>();
+
   /** Maximum time (ms) to wait for a turnCompleted event before force-releasing a wake */
   private static readonly WAKE_TIMEOUT_MS = 60 * 1000;
 
@@ -540,20 +551,36 @@ export class TeammateManager extends EventEmitter {
 
     // W1e: token-usage events flow through the response stream as `acp_context_usage`.
     // Capture them as `'token_usage'` rows so the W2d cost meter can sum tokens
-    // and cost across teammates. We don't have a clean prompt/completion split
-    // from this stream (ACP emits `used` total + optional `cost`), so the split
-    // fields default to 0 with the actual total preserved as `total_tokens`.
+    // and cost across teammates. ACP emits `used`/`cost` as a per-conversation
+    // CUMULATIVE gauge re-sent on every update, and useTeamCostMeter SUMS the
+    // rows, so we write the per-event DELTA against a per-conversation baseline
+    // (clamped >= 0) and advance the baseline - the sum then equals the true
+    // running total exactly once instead of N-counting (R1). We still lack a
+    // clean prompt/completion split (ACP gives `used` total only), so the split
+    // fields stay 0 with the per-turn delta preserved as `total_tokens`.
     if (msg.type === 'acp_context_usage') {
       const usage = msg.data as
         | { used?: number; size?: number; cost?: { amount?: number; currency?: string } }
         | null;
       if (usage && typeof usage.used === 'number') {
+        const cumulativeUsed = usage.used;
         const costAmount = typeof usage.cost?.amount === 'number' ? usage.cost.amount : 0;
         const currency = usage.cost?.currency ?? 'USD';
         // Only USD cost estimates are meaningful for the W2d meter; other
         // currencies are recorded but normalized to 0 in cost_estimate_usd.
-        const costUsd = currency === 'USD' ? costAmount : 0;
-        if (this.eventLogger) {
+        const cumulativeCostUsd = currency === 'USD' ? costAmount : 0;
+
+        const baseline = this.tokenUsageBaselines.get(msg.conversation_id) ?? { used: 0, cost: 0 };
+        const deltaTokens = Math.max(0, cumulativeUsed - baseline.used);
+        const deltaCostUsd = Math.max(0, cumulativeCostUsd - baseline.cost);
+        // Advance to the new high-water mark; never regress (survives the
+        // cumulative gauge dropping after a session reset / compaction).
+        this.tokenUsageBaselines.set(msg.conversation_id, {
+          used: Math.max(baseline.used, cumulativeUsed),
+          cost: Math.max(baseline.cost, cumulativeCostUsd),
+        });
+
+        if (this.eventLogger && (deltaTokens > 0 || deltaCostUsd > 0)) {
           void this.eventLogger.append({
             teamId: this.teamId,
             eventType: 'token_usage',
@@ -561,10 +588,10 @@ export class TeammateManager extends EventEmitter {
             payload: {
               slot_id: agent.slotId,
               backend: agent.agentType,
-              prompt_tokens: usage.used,
+              prompt_tokens: deltaTokens,
               completion_tokens: 0,
-              cost_estimate_usd: costUsd,
-              total_tokens: usage.used,
+              cost_estimate_usd: deltaCostUsd,
+              total_tokens: deltaTokens,
               currency,
               context_window: typeof usage.size === 'number' ? usage.size : 0,
             },

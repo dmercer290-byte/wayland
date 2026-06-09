@@ -103,13 +103,23 @@ export class ChannelManager {
   }
 
   /**
-   * Get the singleton instance of ChannelManager
+   * Get the singleton instance of ChannelManager.
+   *
+   * Backed by globalThis, not just the module-static field: vite duplicates
+   * this module across chunks (it is statically imported by channelBridge but
+   * dynamically imported by conversationBridge), and a per-copy static would
+   * yield TWO managers - one that boot-init starts plugins in, another that the
+   * renderer's getPluginStatus IPC queries. That split made live plugin state
+   * (connectionState, pairing QR) invisible to the UI. A global anchor makes
+   * every copy resolve to the same instance.
    */
   static getInstance(): ChannelManager {
-    if (!ChannelManager.instance) {
-      ChannelManager.instance = new ChannelManager();
+    const g = globalThis as typeof globalThis & { __waylandChannelManager?: ChannelManager };
+    if (!g.__waylandChannelManager) {
+      g.__waylandChannelManager = ChannelManager.instance ?? new ChannelManager();
     }
-    return ChannelManager.instance;
+    ChannelManager.instance = g.__waylandChannelManager;
+    return g.__waylandChannelManager;
   }
 
   /**
@@ -422,6 +432,33 @@ export class ChannelManager {
         };
         pluginRuntimeConfig = { ...pluginRuntimeConfig, mode: 'webhook' };
       }
+    } else if (pluginType === 'email-imap') {
+      // EmailImapPlugin.resolveCredentials reads EVERY field (host, port, tls,
+      // useSameAuth, smtp*) out of config.credentials. The generic extension
+      // fallback below splits scalars (port/tls/useSameAuth) into runtimeConfig
+      // and only keeps strings in credentials, so the plugin would never see
+      // them and silently fall back to defaults. Keep the whole block together
+      // in credentials. Passwords are whitespace-stripped to match the form +
+      // resolveCredentials (Gmail/Outlook app passwords paste with spaces).
+      const stripPw = (v: unknown): string | undefined =>
+        typeof v === 'string' ? v.replace(/\s+/g, '') : undefined;
+      const str = (v: unknown): string | undefined => (typeof v === 'string' ? v.trim() : undefined);
+      const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+      const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
+
+      credentials = {
+        imapHost: str(config.imapHost),
+        imapPort: num(config.imapPort),
+        imapUser: str(config.imapUser),
+        imapPassword: stripPw(config.imapPassword),
+        imapTls: bool(config.imapTls),
+        useSameAuth: bool(config.useSameAuth),
+        smtpHost: str(config.smtpHost),
+        smtpPort: num(config.smtpPort),
+        smtpTls: bool(config.smtpTls),
+        smtpUser: str(config.smtpUser),
+        smtpPassword: stripPw(config.smtpPassword),
+      };
     } else {
       // Extension or unknown plugin type:
       // - prefer manifest-declared credential/config fields

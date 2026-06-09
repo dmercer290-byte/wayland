@@ -109,6 +109,19 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 
+// The per-agent "show in toolbar" toggle reads / writes the persisted hidden
+// set through ConfigStorage('agents.hidden'). Back it with an in-memory store
+// so the toggle can be driven end-to-end without the IPC bridge.
+let mockHiddenStore: string[] = [];
+vi.mock('@/common/config/storage', () => ({
+  ConfigStorage: {
+    get: vi.fn(async (key: string) => (key === 'agents.hidden' ? mockHiddenStore : undefined)),
+    set: vi.fn(async (key: string, value: unknown) => {
+      if (key === 'agents.hidden') mockHiddenStore = value as string[];
+    }),
+  },
+}));
+
 // SettingsPageShell is page chrome (breadcrumb, mobile nav, router hooks) -
 // stub it to a plain wrapper so the test focuses on the Agents page itself.
 vi.mock('../../../src/renderer/pages/settings/components/SettingsPageShell', () => ({
@@ -178,6 +191,7 @@ beforeEach(() => {
   // (false) so the card renders its real surface instead of the loading Spin.
   mockProviders = [{ providerId: 'flux-router' }];
   mockLoading = false;
+  mockHiddenStore = [];
 });
 
 afterEach(() => {
@@ -351,5 +365,64 @@ describe('AgentsSettings (Packet 2D)', () => {
     expect(
       screen.getByText('No agents detected yet. Wayland Core is always available once a model is connected.')
     ).toBeTruthy();
+  });
+
+  it('renders a "show in toolbar" toggle for each detected agent, on by default', async () => {
+    render(<AgentsSettings />);
+    await waitFor(() => expect(screen.getByText('Wayland Core')).toBeTruthy());
+
+    // A featured agent (Codex) and a tile agent (Gemini) both expose a toggle.
+    const codexToggle = await screen.findByTestId('agent-toolbar-toggle-codex');
+    const geminiToggle = await screen.findByTestId('agent-toolbar-toggle-gemini');
+    // Default (empty hidden set) means every agent is shown -> checked.
+    expect(codexToggle.getAttribute('aria-checked')).toBe('true');
+    expect(geminiToggle.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('persists hiding a detected agent through ConfigStorage', async () => {
+    render(<AgentsSettings />);
+    await waitFor(() => expect(screen.getByText('Wayland Core')).toBeTruthy());
+
+    await act(async () => {
+      (await screen.findByTestId('agent-toolbar-toggle-codex')).click();
+    });
+
+    // Toggling off persists the agent key into the hidden set and reflects in
+    // the toggle's DOM (reactive via the shared SWR cache).
+    await waitFor(() => expect(mockHiddenStore).toContain('codex'));
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-toolbar-toggle-codex').getAttribute('aria-checked')).toBe('false')
+    );
+
+    // Toggling back on removes it from the hidden set.
+    await act(async () => {
+      screen.getByTestId('agent-toolbar-toggle-codex').click();
+    });
+    await waitFor(() => expect(mockHiddenStore).not.toContain('codex'));
+  });
+
+  it('locks the Wayland Core toggle on so the toolbar keeps at least one agent', async () => {
+    render(<AgentsSettings />);
+    await waitFor(() => expect(screen.getByText('Wayland Core')).toBeTruthy());
+
+    const wcoreToggle = await screen.findByTestId('agent-toolbar-toggle-wcore');
+    expect(wcoreToggle.getAttribute('aria-checked')).toBe('true');
+    // A disabled Switch ignores clicks - the store never records wcore as hidden.
+    expect(wcoreToggle.getAttribute('disabled')).not.toBeNull();
+    await act(async () => {
+      wcoreToggle.click();
+    });
+    expect(mockHiddenStore).not.toContain('wcore');
+  });
+
+  it('reflects a pre-hidden agent as toggled off', async () => {
+    mockHiddenStore = ['gemini'];
+    render(<AgentsSettings />);
+    await waitFor(() => expect(screen.getByText('Wayland Core')).toBeTruthy());
+
+    const geminiToggle = await screen.findByTestId('agent-toolbar-toggle-gemini');
+    await waitFor(() => expect(geminiToggle.getAttribute('aria-checked')).toBe('false'));
+    // A hidden agent stays detected and listed on the page.
+    expect(screen.getByText('Gemini CLI')).toBeTruthy();
   });
 });

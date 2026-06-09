@@ -108,6 +108,34 @@ describe('channels/credentialCrypto', () => {
       expect(decrypted).toEqual(original);
     });
 
+    it('roundtrips an email-imap credential block without mangling the app password', () => {
+      // Regression: the IMAP plugin was reported to reject a VALID Gmail app
+      // password after a save. This proves the encrypt→store→load→decrypt
+      // round-trip returns the password byte-for-byte. imapPassword matches the
+      // "password" sensitive substring so it MUST come back encrypted, while
+      // host/port/tls identifiers pass through untouched.
+      const original = {
+        imapHost: 'imap.gmail.com',
+        imapPort: 993,
+        imapUser: 'waylandbot@ferroxlabs.com',
+        imapPassword: 'yahrvkqutevsrjvy',
+        imapTls: true,
+        useSameAuth: true,
+      };
+      const encrypted = encryptCredentials(original);
+      // The stored password must be ciphertext, never plaintext at rest.
+      expect(encrypted!.imapPassword).toEqual(expect.stringMatching(/^enc:v1:/));
+      expect(encrypted!.imapPassword).not.toBe('yahrvkqutevsrjvy');
+      // Non-secret connection fields are not encrypted.
+      expect(encrypted!.imapHost).toBe('imap.gmail.com');
+      expect(encrypted!.imapPort).toBe(993);
+      expect(encrypted!.imapTls).toBe(true);
+
+      const decrypted = decryptCredentials(encrypted);
+      expect(decrypted).toEqual(original);
+      expect(decrypted!.imapPassword).toBe('yahrvkqutevsrjvy');
+    });
+
     it('returns undefined when given undefined', () => {
       expect(decryptCredentials(undefined)).toBeUndefined();
       expect(mockSecrets.decryptString).not.toHaveBeenCalled();

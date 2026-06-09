@@ -311,5 +311,24 @@
     "unknown": "Verwendet eigene Anmeldung dieses Tools",
     "fluxError": "Flux nicht verfugbar",
     "fluxErrorNotice": "Flux-Routing fur diese Anfrage fehlgeschlagen. Prüfe deine Flux-Verbindung oder wechsle das Modell."
+  },
+  "activation": {
+    "title": "Wecke deine Agenten",
+    "subtitle": "Verbinde einen Modellanbieter, um Aufgaben auszuführen. Wähle den Weg, der zu dir passt.",
+    "flux": {
+      "label": "Flux Router verbinden",
+      "sublabel": "Kostenloser Schlüssel mit 1 $ Startguthaben. Ohne Karte – jede Aufgabe wird an das passendste Spezialmodell geleitet.",
+      "action": "Verbinden"
+    },
+    "ownKey": {
+      "label": "Eigenen Schlüssel verwenden",
+      "sublabel": "Nutze einen API-Schlüssel von OpenAI, Anthropic, Google oder über 100 weiteren Anbietern.",
+      "action": "Durchsuchen"
+    },
+    "claudeCode": {
+      "label": "Claude Code verwenden",
+      "sublabel": "Läuft über deine bestehende Claude-Code-Anmeldung – kein zusätzlicher Schlüssel nötig.",
+      "action": "Verwenden"
+    }
   }
 }

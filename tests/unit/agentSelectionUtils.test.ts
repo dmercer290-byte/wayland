@@ -19,6 +19,7 @@ import {
   savePreferredMode,
   savePreferredModelId,
   getAgentKey,
+  filterVisibleAgents,
 } from '../../src/renderer/pages/guid/hooks/agentSelectionUtils';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,53 @@ describe('getAgentKey', () => {
 
   it('returns "custom" when backend is custom but no customAgentId', () => {
     expect(getAgentKey({ backend: 'custom' })).toBe('custom');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// filterVisibleAgents - the Guid-page toolbar strip filter + its guard rails
+// ---------------------------------------------------------------------------
+
+describe('filterVisibleAgents', () => {
+  const agents = [
+    { backend: 'wcore' as const },
+    { backend: 'claude' as const },
+    { backend: 'codex' as const },
+    { backend: 'copilot' as const },
+  ];
+
+  it('passes undefined through (agents still loading)', () => {
+    expect(filterVisibleAgents(undefined, new Set(), 'wcore')).toBeUndefined();
+  });
+
+  it('returns every agent when nothing is hidden', () => {
+    expect(filterVisibleAgents(agents, new Set(), 'wcore')).toEqual(agents);
+  });
+
+  it('removes hidden agents from the strip', () => {
+    const visible = filterVisibleAgents(agents, new Set(['codex', 'copilot']), 'wcore');
+    expect(visible?.map((a) => a.backend)).toEqual(['wcore', 'claude']);
+  });
+
+  it('never hides the currently-selected agent, even if it is in the hidden set', () => {
+    // codex is both hidden AND selected - it must stay in the strip so the user
+    // is not left on a backend that vanished from the toolbar.
+    const visible = filterVisibleAgents(agents, new Set(['codex']), 'codex');
+    expect(visible?.map((a) => a.backend)).toContain('codex');
+  });
+
+  it('falls back to the full set when every agent would be hidden', () => {
+    const visible = filterVisibleAgents(agents, new Set(['wcore', 'claude', 'codex', 'copilot']), 'none');
+    expect(visible).toEqual(agents);
+  });
+
+  it('keys custom and remote agents by their prefixed id', () => {
+    const mixed = [
+      { backend: 'remote' as const, customAgentId: 'r1' },
+      { backend: 'claude' as const, customAgentId: 'c1' },
+    ];
+    const visible = filterVisibleAgents(mixed, new Set(['remote:r1']), 'custom:c1');
+    expect(visible).toEqual([{ backend: 'claude', customAgentId: 'c1' }]);
   });
 });
 

@@ -344,14 +344,13 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
       }
 
       const provider = result.provider;
-      // Build the `TProviderWithModel` the chat-start pipeline expects. We
-      // synthesize a `capabilities` array (text) - the legacy modelList path
-      // exposed `provider.capabilities`, but the registry doesn't carry
-      // explicit IProvider-shaped capabilities; chat-start consumers only
-      // read the fields below. A previous-curated lookup in `modelList`
-      // remains as a last-resort fallback for richer fields (e.g. an
-      // existing `modelProtocols` block on a `new-api` row), but the
-      // resolved registry data wins for credentials.
+      // Build the `TProviderWithModel` the chat-start pipeline expects from the
+      // NON-SECRET handle (audit C4): the decrypted key is no longer returned to
+      // the renderer, so `next` carries only the binding (provider / account /
+      // model) and `apiKey` stays empty. The main process re-resolves the key
+      // at dispatch (`hydrateModelForSpawn`). A previous-curated lookup in
+      // `modelList` remains as a last-resort fallback for richer non-secret
+      // fields (e.g. an existing `modelProtocols` block on a `new-api` row).
       const legacyMatch =
         modelList.find((p) => p.platform === provider.platform && p.model?.includes(model.id)) ||
         modelList.find((p) => p.model?.includes(model.id));
@@ -361,9 +360,10 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
         platform: provider.platform,
         name: provider.name,
         baseUrl: provider.baseUrl,
-        apiKey: provider.apiKey,
+        // Handle only - no plaintext key crosses IPC; resolved in main at spawn.
+        apiKey: '',
         useModel: provider.modelId,
-        ...(provider.bedrockConfig ? { bedrockConfig: provider.bedrockConfig } : {}),
+        accountId: provider.accountId,
       } as TProviderWithModel;
 
       setCurrentModel(next).catch((error) => {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Radar } from 'lucide-react';
+import { Gauge } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Tooltip } from '@arco-design/web-react';
@@ -39,7 +39,7 @@ const SiderMissionControlEntry: React.FC<SiderMissionControlEntryProps> = ({
           onClick={onClick}
           data-testid='sider-mission-control-entry'
         >
-          <Radar size={20} className='block leading-none shrink-0' style={{ lineHeight: 0 }} />
+          <Gauge size={20} className='block leading-none shrink-0' style={{ lineHeight: 0 }} />
         </div>
       </Tooltip>
     );
@@ -56,7 +56,7 @@ const SiderMissionControlEntry: React.FC<SiderMissionControlEntryProps> = ({
         data-testid='sider-mission-control-entry'
       >
         <span className='w-28px h-28px flex items-center justify-center shrink-0'>
-          <Radar size={20} className='block leading-none' style={{ lineHeight: 0 }} />
+          <Gauge size={20} className='block leading-none' style={{ lineHeight: 0 }} />
         </span>
         <span className='collapsed-hidden text-t-primary text-14px font-medium leading-24px'>{label}</span>
       </div>

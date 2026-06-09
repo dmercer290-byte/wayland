@@ -184,6 +184,92 @@ export abstract class BasePlugin {
   }
 
   /**
+   * Status-change callback (set by PluginManager). Lets a plugin push an async
+   * status update to the renderer between the start/stop boundaries the manager
+   * already emits - e.g. a freshly rotated WhatsApp pairing QR.
+   */
+  private statusChangeHandler: (() => void) | null = null;
+
+  onStatusChange(handler: () => void): void {
+    this.statusChangeHandler = handler;
+  }
+
+  /** Subclasses call this when something the status surfaces changes (e.g. the QR). */
+  protected notifyStatusChange(): void {
+    this.statusChangeHandler?.();
+  }
+
+  /**
+   * Target the plugin can proactively message the operator at on connect (the
+   * "self target"), so the user has a live thread to reply into without first
+   * messaging the channel. Returns null for channels that cannot initiate a
+   * thread (bot accounts like Telegram/Discord/Slack have no chat id until the
+   * user messages them first).
+   *
+   * - WhatsApp / iMessage / Signal: the linked account's own self-chat address.
+   * - Email: the inbox's own address.
+   * - meta-business WhatsApp + all bot channels: null.
+   *
+   * Used by ChannelWelcomeService to decide welcome-on-connect vs
+   * welcome-on-first-contact.
+   */
+  getSelfTarget(): string | null {
+    return null;
+  }
+
+  /**
+   * Stable identity of the connected account, used to key the once-per-account
+   * "already welcomed?" marker so the welcome handshake is sent once per account
+   * rather than once per app restart.
+   *
+   * - WhatsApp: the linked account's own JID.
+   * - Email: the inbox address.
+   * - Bot channels: the bot/account id (defaults to getBotInfo().id).
+   *
+   * Returns null when the account is not yet known (e.g. before connect); in
+   * that case the welcome is deferred until the identity is available.
+   */
+  getAccountIdentity(): string | null {
+    return this.getBotInfo()?.username ?? null;
+  }
+
+  /**
+   * Whether unauthorized non-owner contacts may pair with this channel.
+   *
+   * Default true: bot channels (Telegram/Discord/Slack) and dedicated bot
+   * numbers exist to be talked to, so a stranger messaging them is a deliberate
+   * pairing request and the gate sends the pairing prompt.
+   *
+   * Returns false for a PERSONAL linked account (WhatsApp personal mode): the
+   * channel is the operator's own number, so an unknown contact must get NOTHING
+   * (no pairing prompt, no pairing row, no welcome, no reply). ActionExecutor
+   * uses this as the single discriminator for the pairing gate. It is kept
+   * separate from getSelfTarget() because a dedicated bot number also has a
+   * self-chat, so self-target presence cannot tell safe from dangerous.
+   */
+  allowsContactPairing(): boolean {
+    return true;
+  }
+
+  /**
+   * Pairing QR for channels that use device-link pairing (e.g. WhatsApp).
+   * Returns null for channels without QR pairing. Surfaced in the plugin status
+   * so the renderer can render it.
+   */
+  getQrCode(): string | null {
+    return null;
+  }
+
+  /**
+   * Live transport-connection state for socket-backed channels (e.g. WhatsApp).
+   * Returns null for channels without a separate transport state. Surfaced in
+   * the plugin status so the renderer can show "connected" vs "waiting for QR".
+   */
+  getConnectionState(): string | null {
+    return null;
+  }
+
+  /**
    * Emit an incoming message to the handler
    * Called by subclass when a message is received from the platform
    */

@@ -182,6 +182,14 @@
 }
 
 /* ---- Status badge ---- */
+.cardActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -263,6 +271,7 @@
 
 .tileText {
   min-width: 0;
+  flex: 1;
 }
 
 .tileName {

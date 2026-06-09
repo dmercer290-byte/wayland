@@ -18,6 +18,8 @@ import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher'
 import BaseAgentManager from '@process/task/BaseAgentManager';
 import { IpcAgentEventEmitter } from '@process/task/IpcAgentEventEmitter';
 import { teamEventBus } from '@process/team/teamEventBus';
+import { getCostRecorder } from '@process/services/cost/CostRecorder';
+import { parseGatewayUsage } from '@process/services/cost/gatewayUsage';
 
 export interface RemoteAgentManagerData {
   conversation_id: string;
@@ -59,6 +61,7 @@ class RemoteAgentManager extends BaseAgentManager<RemoteAgentManagerData> {
       onStreamEvent: (msg) => this.handleStreamEvent(msg),
       onSignalEvent: (msg) => this.handleSignalEvent(msg),
       onSessionKeyUpdate: (key) => this.handleSessionKeyUpdate(key),
+      onUsage: (usage) => this.handleUsage(usage),
     });
 
     try {
@@ -143,6 +146,27 @@ class RemoteAgentManager extends BaseAgentManager<RemoteAgentManagerData> {
 
   private handleSessionKeyUpdate(sessionKey: string): void {
     this.saveSessionKey(sessionKey);
+  }
+
+  /**
+   * Record per-turn token usage when the remote gateway concretely reports it
+   * on chat:final. The gateway surfaces no model id to this manager, so the
+   * split cannot be priced - we record tokens only with cost_source 'unknown'
+   * (never a priced unknown total). When the untyped usage payload carries no
+   * recognizable token field, nothing is recorded.
+   */
+  private handleUsage(usage: unknown): void {
+    const parsed = parseGatewayUsage(usage);
+    if (!parsed) return;
+    getCostRecorder()?.recordTurnFinish({
+      conversationId: this.conversation_id,
+      backend: 'remote',
+      costSource: 'unknown',
+      inputTokens: parsed.inputTokens,
+      outputTokens: parsed.outputTokens,
+      cacheReadTokens: parsed.cacheReadTokens,
+      ts: Date.now(),
+    });
   }
 
   private async saveSessionKey(sessionKey: string): Promise<void> {
@@ -240,6 +264,17 @@ class RemoteAgentManager extends BaseAgentManager<RemoteAgentManagerData> {
 
     ipcBridge.conversation.responseStream.emit(message);
     teamEventBus.emit('responseStream', message);
+
+    // Deliver the error to channels AND release the per-conversation send queue
+    // (ChannelMessageService only releases on 'finish'), mirroring WCore/Acp so a
+    // remote-agent start/connection failure doesn't hang the channel.
+    channelEventBus.emitAgentMessage(this.conversation_id, message);
+    channelEventBus.emitAgentMessage(this.conversation_id, {
+      type: 'finish',
+      conversation_id: this.conversation_id,
+      msg_id: uuid(),
+      data: null,
+    });
   }
 
   async ensureYoloMode(): Promise<boolean> {

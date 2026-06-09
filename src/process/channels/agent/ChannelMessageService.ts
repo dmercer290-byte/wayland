@@ -11,6 +11,7 @@ import type { IAgentManager } from '@process/task/IAgentManager';
 import { composeMessage, transformMessage, type TMessage } from '@/common/chat/chatLib';
 import { uuid } from '@/common/utils';
 import { channelEventBus, type IAgentMessageEvent } from './ChannelEventBus';
+import { isAutoApproveChannelSource } from '@process/channels/types';
 
 /**
  * Streaming callback for progress updates
@@ -42,6 +43,13 @@ interface IStreamState {
 
 const TOOL_CONTINUATION_WAIT_MS = 15_000;
 
+// Upper bound on how long a queued send will wait for the PREVIOUS turn on the
+// same conversation to finish. A wedged turn (an agent that never emits a
+// finish) must never deadlock every later message - past this cap we dispatch
+// anyway and the stale stream is released. Kept above TOOL_CONTINUATION_WAIT_MS
+// so a healthy turn always resolves first.
+const QUEUE_MAX_WAIT_MS = 20_000;
+
 function isNonAnswerMessage(message: TMessage): boolean {
   if (message.type === 'agent_status') {
     return message.content.status !== 'error';
@@ -71,6 +79,17 @@ export class ChannelMessageService {
    * Active message stream cache: conversationId -> stream state
    */
   private activeStreams: Map<string, IStreamState> = new Map();
+
+  /**
+   * Per-conversation send queue tail. Rapid consecutive messages to the SAME
+   * conversation must run one-at-a-time: the agent task processes a single turn
+   * at a time, and there is only one active-stream slot per conversation, so
+   * dispatching a second message before the first turn completes orphans one of
+   * them (the classic "second message sticks on Thinking" bug). We chain each
+   * send onto the previous one for that conversation so each turn gets its own
+   * clean stream lifecycle.
+   */
+  private sendQueues: Map<string, Promise<unknown>> = new Map();
 
   /**
    * Global event listener cleanup function
@@ -196,6 +215,40 @@ export class ChannelMessageService {
     message: string,
     onStream: StreamCallback
   ): Promise<string> {
+    // Serialize sends per conversation: wait for any in-flight turn on this
+    // conversation to finish before dispatching the next message, so rapid
+    // consecutive messages each get a clean stream + turn instead of colliding.
+    // The wait is BOUNDED (QUEUE_MAX_WAIT_MS) so a wedged prior turn that never
+    // emits a finish can never deadlock later messages - past the cap we
+    // dispatch anyway, releasing any stale active stream first.
+    const previous = this.sendQueues.get(conversationId) ?? Promise.resolve();
+    const gate = Promise.race([
+      previous.catch(() => {}),
+      new Promise<void>((resolve) => setTimeout(resolve, QUEUE_MAX_WAIT_MS)),
+    ]);
+    const run = gate.then(() => {
+      const stale = this.activeStreams.get(conversationId);
+      if (stale) this.resolveStream(conversationId, stale);
+      return this.dispatchMessage(_sessionId, conversationId, message, onStream);
+    });
+    const tracked = run.catch(() => {});
+    this.sendQueues.set(conversationId, tracked);
+    void tracked.then(() => {
+      // Clear the queue entry only when this send is the current tail (a newer
+      // message may have already chained onto it).
+      if (this.sendQueues.get(conversationId) === tracked) {
+        this.sendQueues.delete(conversationId);
+      }
+    });
+    return run;
+  }
+
+  private async dispatchMessage(
+    _sessionId: string,
+    conversationId: string,
+    message: string,
+    onStream: StreamCallback
+  ): Promise<string> {
     // Ensure service is initialized
     this.initialize();
 
@@ -205,16 +258,13 @@ export class ChannelMessageService {
     // Get task
     let task: IAgentManager;
     try {
-      // Check conversation source, enable yoloMode (auto-approve) if it's from a Channel
+      // Check conversation source, enable yoloMode (auto-approve) if it's from a
+      // Channel. Channels have no interactive human to confirm tool-permission
+      // prompts, so every channel source must auto-approve; otherwise tool-using
+      // turns hang on an unconfirmable prompt until the queue times out.
       const db = await getDatabase();
       const dbResult = db.getConversation(conversationId);
-      const isFromChannel =
-        dbResult.success &&
-        (dbResult.data?.source === 'lark' ||
-          dbResult.data?.source === 'telegram' ||
-          dbResult.data?.source === 'dingtalk' ||
-          dbResult.data?.source === 'weixin' ||
-          dbResult.data?.source === 'wecom');
+      const isFromChannel = dbResult.success && isAutoApproveChannelSource(dbResult.data?.source);
 
       task = await workerTaskManager.getOrBuildTask(conversationId, {
         yoloMode: isFromChannel,

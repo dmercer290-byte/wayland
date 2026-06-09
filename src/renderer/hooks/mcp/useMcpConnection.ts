@@ -120,8 +120,90 @@ export const useMcpConnection = (
     [saveMcpServers, message, t, onAuthRequired]
   );
 
+  // Passive, non-destructive status refresh. Probes the given ENABLED servers
+  // concurrently to populate live status + tool counts, then writes all results
+  // in a SINGLE save. Unlike handleTestMcpConnection it does NOT toast and does
+  // NOT auto-disable a server on failure (a transient probe must never silently
+  // turn off the user's MCP). Servers already `connected` and probed within
+  // STALE_MS are skipped unless `force` is set, so visiting the page does not
+  // re-spawn every stdio server on each render.
+  const refreshServerStatuses = useCallback(
+    async (servers: IMcpServer[], options?: { force?: boolean }) => {
+      const force = options?.force ?? false;
+      const STALE_MS = 5 * 60 * 1000;
+      const now = Date.now();
+      const targets = servers.filter(
+        (s) =>
+          s.enabled === true &&
+          (force ||
+            s.status !== 'connected' ||
+            typeof s.lastConnected !== 'number' ||
+            now - s.lastConnected > STALE_MS)
+      );
+      if (targets.length === 0) {
+        return;
+      }
+
+      setTestingServers((prev) => {
+        const next = { ...prev };
+        for (const s of targets) next[s.id] = true;
+        return next;
+      });
+
+      const updates = await Promise.all(
+        targets.map(async (server): Promise<{ id: string; patch: Partial<IMcpServer> }> => {
+          try {
+            const response = await mcpService.testMcpConnection.invoke(server);
+            if (response.success && response.data) {
+              const result = response.data;
+              if (result.needsAuth) {
+                return { id: server.id, patch: { status: 'disconnected' } };
+              }
+              if (result.success) {
+                return {
+                  id: server.id,
+                  patch: {
+                    status: 'connected',
+                    tools: result.tools?.map((tool) => ({
+                      name: tool.name,
+                      description: tool.description,
+                      ...(tool._meta ? { _meta: tool._meta } : {}),
+                    })),
+                    lastConnected: Date.now(),
+                  },
+                };
+              }
+              // Probe failed: surface the error state but leave `enabled` alone.
+              return { id: server.id, patch: { status: 'error' } };
+            }
+            return { id: server.id, patch: { status: 'error' } };
+          } catch {
+            return { id: server.id, patch: { status: 'error' } };
+          }
+        })
+      );
+
+      try {
+        await saveMcpServers((prevServers) =>
+          prevServers.map((s) => {
+            const update = updates.find((u) => u.id === s.id);
+            return update ? { ...s, ...update.patch, updatedAt: Date.now() } : s;
+          })
+        );
+      } finally {
+        setTestingServers((prev) => {
+          const next = { ...prev };
+          for (const s of targets) next[s.id] = false;
+          return next;
+        });
+      }
+    },
+    [saveMcpServers]
+  );
+
   return {
     testingServers,
     handleTestMcpConnection,
+    refreshServerStatuses,
   };
 };

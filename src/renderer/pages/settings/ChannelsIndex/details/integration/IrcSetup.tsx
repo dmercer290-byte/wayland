@@ -14,10 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import IrcConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/integration/IrcConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const IrcSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.irc.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -52,7 +54,7 @@ const IrcSetup: React.FC = () => {
         'Connect to any IRC server with optional SASL PLAIN auth. The bot joins configured channels and relays PRIVMSG to Wayland.',
       )}
     >
-      <IrcConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <IrcConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

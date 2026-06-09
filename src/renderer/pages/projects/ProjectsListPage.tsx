@@ -6,8 +6,9 @@
 
 import { ipcBridge } from '@/common';
 import type { IProject, ICreateProjectParams } from '@/common/types/project';
+import PageShell from '@/renderer/components/layout/PageShell';
 import { Button, Message, Modal } from '@arco-design/web-react';
-import { FolderPlus, Plus } from 'lucide-react';
+import { FolderKanban, FolderPlus, Plus } from 'lucide-react';
 import React, { useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -108,24 +109,26 @@ const ProjectsListPage: React.FC = () => {
     [updateProject]
   );
 
-  return (
-    <div className='flex flex-col h-full w-full overflow-hidden'>
-      <div className='flex items-center justify-between px-24px py-20px flex-shrink-0'>
-        <div className='flex flex-col gap-2px'>
-          <h1 className='text-20px font-700 text-t-primary m-0'>{t('projects.list.title')}</h1>
-          <span className='text-13px text-t-secondary'>{t('projects.list.subtitle')}</span>
-        </div>
-        <Button type='primary' onClick={openCreate}>
-          <span className='flex items-center gap-6px'>
-            <Plus size={16} />
-            {t('projects.list.newButton')}
-          </span>
-        </Button>
-      </div>
+  const newProjectButton = (
+    <Button type='primary' onClick={openCreate}>
+      <span className='flex items-center gap-6px'>
+        <Plus size={16} />
+        {t('projects.list.newButton')}
+      </span>
+    </Button>
+  );
 
-      <div className='flex-1 overflow-auto px-24px pb-24px'>
+  return (
+    <PageShell
+      title={t('projects.list.title')}
+      icon={<FolderKanban size={20} />}
+      subtitle={t('projects.list.subtitle')}
+      actions={newProjectButton}
+      width='full'
+    >
+      <div className='pb-24px'>
         {!loading && projects.length === 0 ? (
-          <div className='flex flex-col items-center justify-center gap-16px h-full text-center'>
+          <div className='flex flex-col items-center justify-center gap-16px min-h-[360px] text-center'>
             <div className='flex items-center justify-center w-64px h-64px rd-16px bg-fill-1 text-t-tertiary'>
               <FolderPlus size={28} />
             </div>
@@ -164,7 +167,7 @@ const ProjectsListPage: React.FC = () => {
         onClose={() => setWizardOpen(false)}
         onComplete={completeNewProject}
       />
-    </div>
+    </PageShell>
   );
 };
 

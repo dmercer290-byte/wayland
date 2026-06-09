@@ -244,7 +244,8 @@
   "channels": {
     "label": "Каналы",
     "telegram": {
-      "help": "Общайтесь с ИИ-ассистентом Wayland через Telegram. Чтобы начать, создайте бота с помощью @BotFather."
+      "help": "Общайтесь с ИИ-ассистентом Wayland через Telegram. Чтобы начать, создайте бота с помощью @BotFather.",
+      "howToTalk": "Откройте Telegram, найдите своего бота и отправьте любое сообщение. Wayland ответит прямо там."
     },
     "slack": {
       "comingSoonTitle": "Поддержка Slack появится в {{phase}}",
@@ -282,7 +283,8 @@
           "help": "Требуется для Events API. Basic Information → App Credentials → Signing Secret. Используется для проверки HMAC X-Slack-Signature при каждой доставке webhook.",
           "required": "Для транспорта Events API требуется signing secret"
         }
-      }
+      },
+      "howToTalk": "Откройте Slack, напишите боту или упомяните его в канале. Wayland ответит прямо там."
     },
     "discord": {
       "comingSoonTitle": "Поддержка Discord скоро появится",
@@ -312,7 +314,8 @@
           "placeholder": "публичный ключ ed25519 в шестнадцатеричном виде",
           "help": "Необязательно. Требуется только если вы позже переключитесь на конечную точку HTTP-взаимодействий вместо Gateway."
         }
-      }
+      },
+      "howToTalk": "Откройте Discord, напишите боту в личные сообщения или упомяните его в канале сервера. Wayland ответит прямо там."
     },
     "webhook": {
       "comingSoonTitle": "Канал webhook появится в {{phase}}",
@@ -387,6 +390,19 @@
           "placeholder": "длинная случайная строка",
           "help": "Выбранная оператором строка, которую Meta возвращает во время рукопожатия GET /webhook. Должна совпадать с тем, что вы вставляете в панель управления Meta.",
           "required": ""
+        }
+      },
+      "mode": {
+        "label": "Режим аккаунта",
+        "personal": "Личный (только вы)",
+        "dedicated": "Выделенный (другие могут писать)",
+        "personalHelp": "Wayland привязывает ваш собственный WhatsApp. Только вы можете общаться с ним через чат с самим собой. Сообщения от других контактов игнорируются.",
+        "dedicatedHelp": "Используйте отдельный номер WhatsApp, созданный для вашего агента. Укажите свой личный номер, чтобы Wayland знал, что вы владелец; другие могут подключиться, чтобы общаться с ним.",
+        "ownerNumbers": {
+          "label": "Ваш личный номер",
+          "help": "Ваш собственный номер WhatsApp в полном международном формате. Wayland распознаёт сообщения с этих номеров как сообщения владельца. Разделяйте несколько номеров запятыми.",
+          "savedHidden": "Сохранённые номера скрыты. Введите заново, чтобы изменить.",
+          "placeholder": "+15551234567"
         }
       },
       "qrPairing": {
@@ -468,7 +484,8 @@
           "placeholder": "/usr/local/bin/signal-cli",
           "help": "Оставьте пустым, чтобы использовать встроенную среду выполнения или signal-cli из вашего PATH."
         }
-      }
+      },
+      "howToTalk": "Откройте Signal и проверьте чат Заметки для себя. Wayland только что поздоровался там; ответьте в этом чате."
     },
     "matrix": {
       "comingSoonTitle": "Matrix появится в {{phase}}",
@@ -563,7 +580,8 @@
     },
     "imessage": {
       "comingSoonTitle": "iMessage появится в {{phase}}",
-      "comingSoonBody": "Только для macOS, экспериментально. Мост AppleScript к Messages.app. Apple незаметно ограничивает скорость скриптовых отправок, поэтому обмен сообщениями ограничен."
+      "comingSoonBody": "Только для macOS, экспериментально. Мост AppleScript к Messages.app. Apple незаметно ограничивает скорость скриптовых отправок, поэтому обмен сообщениями ограничен.",
+      "howToTalk": "Отправьте iMessage на разрешённый идентификатор вашего Mac. Wayland ответит прямо там."
     },
     "viber": {
       "comingSoonTitle": "Viber появится в {{phase}}",
@@ -847,7 +865,11 @@
           "label": "SMTP TLS",
           "help": "STARTTLS при порте = 587, неявный TLS при порте = 465."
         }
-      }
+      },
+      "howToTalk": "Проверьте свой почтовый ящик. Wayland только что написал вам; отвечайте на это письмо в любое время."
+    },
+    "welcome": {
+      "message": "Привет, это Wayland. Я на связи. Отвечайте на это сообщение в любое время, и я помогу."
     }
   },
   "webui.description": "Используйте Wayland как «круглосуточного удалённого ассистента», управляйте задачами с любого устройства в любое время.",
@@ -1586,7 +1608,8 @@
     "agents": "Агенты",
     "constitution": "Конституция",
     "images": "Генерация изображений",
-    "voice": "Голос"
+    "voice": "Голос",
+    "groupEngine": "ENGINE"
   },
   "channelsIndex": {
     "title": "Каналы",
@@ -1802,7 +1825,17 @@
       "errorNoModels": "{{provider}} подключён, но не вернул моделей. Попробуйте обновить его на странице управления.",
       "errorUnknown": "Не удалось подключиться к {{provider}}. Повторите попытку.",
       "baseUrlLabel": "Базовый URL (необязательно)",
-      "baseUrlPlaceholder": "https://your-endpoint.example/v1"
+      "baseUrlPlaceholder": "https://your-endpoint.example/v1",
+      "catalog": {
+        "entry": "Browse 100+ more providers…",
+        "title": "All connectable providers",
+        "subtitle": "Search the full provider catalog. Each connects with just an API key.",
+        "searchPlaceholder": "Search providers…",
+        "loading": "Loading providers…",
+        "error": "Couldn’t load the provider catalog.",
+        "retry": "Retry",
+        "noMatch": "No providers match \"{{query}}\""
+      }
     },
     "cloud": {
       "subtitle": {
@@ -2052,6 +2085,12 @@
       "active": "Активен",
       "detected": "Обнаружен"
     },
+    "toolbarToggle": {
+      "label": "Показывать на панели",
+      "show": "Показать на панели агентов",
+      "hide": "Скрыть с панели агентов",
+      "lockedTooltip": "Wayland Core всегда остаётся на панели, чтобы у вас всегда был агент для общения."
+    },
     "scope": {
       "any": "Запускает любую подключённую модель",
       "claude": "Запускает модели Claude",
@@ -2127,5 +2166,237 @@
   "voicePage": {
     "title": "Голос",
     "subtitle": "Настройки преобразования речи в текст и текста в речь для поля чата. Включите разделы, чтобы активировать голосовой ввод и вывод."
+  },
+  "wcoreConfig": {
+    "navLabel": "Wayland Core",
+    "title": "Wayland Core",
+    "tagline": "Forged to run. Hardened to last. Built to evolve.",
+    "back": "Settings",
+    "railGroup": "Engine",
+    "engineRunning": "engine running",
+    "engineStopped": "engine stopped",
+    "stubNote": "Configured here soon — managed in the engine.",
+    "rail": {
+      "overview": "Overview",
+      "services": "Services & Keys",
+      "tools": "Tools",
+      "memory": "Memory",
+      "security": "Security & Permissions",
+      "profiles": "Profiles",
+      "constitution": "Constitution",
+      "runtime": "Runtime",
+      "allWorking": "all working"
+    },
+    "overview": {
+      "title": "Overview",
+      "subtitle": "The engine behind every chat, workflow and agent. It is already running with smart defaults — this surface is where you tune what is under the hood.",
+      "inheritedTitle": "Allocated by Wayland Desktop",
+      "inheritedBody": "For this session, Desktop hands the engine your model (as an override) and injects Skills + Assistants/Constitution through its system prompt. Your Desktop MCP library is NOT passed through — only Wayland’s own operational MCPs are.",
+      "readOnly": "read-only",
+      "manageInDesktop": "Manage in Desktop Settings",
+      "inheritModels": "Models (override)",
+      "inheritMcp": "MCP Servers",
+      "inheritSkills": "Skills",
+      "inheritAssistants": "Assistants & Constitution",
+      "inheritManaged": "Managed in Desktop Settings — inherited",
+      "deeperHint": "Everything above ships working. Open Tools, Services & Keys, or Security on the left to go deeper — or leave it; the engine just runs.",
+      "scEngine": "Engine",
+      "scEngineRunning": "Running",
+      "scEngineStopped": "Stopped",
+      "scEngineMeta": "embedded · spawned in-process",
+      "scVersion": "Version",
+      "scVersionMeta": "wayland-core · pinned",
+      "scProfile": "Active Profile",
+      "scProfileDefault": "Default",
+      "inheritModelsDetail": "{{names}} + {{catalog}} catalog · {{allocated}}",
+      "inheritModelsEmpty": "{{catalog}} provider catalog · {{allocated}}",
+      "inheritMcpDetail": "{{count}} servers — {{names}} — inherited",
+      "configuredLabel": "Configured in the engine",
+      "smartDefaults": "smart defaults active",
+      "chipToolsOn": "tools on",
+      "chipWebSearch": "web search",
+      "chipWebSearchVal": "DuckDuckGo",
+      "chipMemory": "memory",
+      "chipMemoryVal": "on · local",
+      "chipApprovals": "approvals",
+      "chipApprovalsVal": "Auto-edit",
+      "chipProfiles": "profiles configured",
+      "allocatedSession": "Allocated by Desktop · this session",
+      "skillsDetail": "Injected via system prompt · {{allocated}}",
+      "assistantsDetail": "Injected via system prompt · {{allocated}}",
+      "mcpDetail": "Wayland operational MCPs · your Desktop MCP library is separate",
+      "engineOwnedLine": "Tools, Memory, Security and Profiles are the engine’s own — written to ~/.wayland-core/config.toml and shared with the Wayland Core CLI."
+    },
+    "services": {
+      "subtitle": "The engine tool backends — web search, vision, voice, image. Wayland ships working out of the box; plug in a key to unlock higher limits.",
+      "webSearchGroup": "Web Search",
+      "ddgTitle": "DuckDuckGo · active — free web search is on",
+      "ddgBody": "No key needed — Wayland searches the web right now. Add a key below only to go faster or run higher volume.",
+      "connected": "Connected",
+      "getFreeKey": "Get a free key",
+      "keyPlaceholder": "Paste API key…",
+      "replaceKeyPlaceholder": "Replace key…",
+      "save": "Save",
+      "replace": "Replace",
+      "remove": "Remove",
+      "saveFailed": "Could not save the key.",
+      "brave": {
+        "desc": "Independent search index — privacy-first, generous free tier."
+      },
+      "tavily": {
+        "desc": "Search built for agents — clean, ranked results for LLMs."
+      },
+      "exa": {
+        "desc": "Neural search — find pages by meaning, not just keywords."
+      },
+      "firecrawl": {
+        "desc": "Crawl and scrape any site into clean, LLM-ready content."
+      },
+      "voiceGroup": "Voice & Audio",
+      "imageGroup": "Image Generation",
+      "visionTitle": "Vision is already on",
+      "visionBody": "Connect a vision-capable model (Anthropic, Gemini or OpenAI) in Models and the engine can see images. No separate key needed.",
+      "elevenlabs": {
+        "desc": "Natural text-to-speech voices for spoken replies."
+      },
+      "groq": {
+        "desc": "Fast speech-to-text (Whisper) and low-latency voice."
+      },
+      "fal": {
+        "desc": "FLUX image generation, fast and low cost."
+      },
+      "huggingface": {
+        "desc": "FLUX and open image models via Hugging Face."
+      }
+    },
+    "tools": {
+      "subtitle": "Everything the engine can actually do — sensible defaults already on. Toggle a tool to grant or revoke it across all profiles. Tools that need a credential link straight to where you set it.",
+      "filterAll": "All",
+      "filterLabel": "Filter tools by category",
+      "catCount": "{{total}} tools · {{on}} on",
+      "chipOnDdg": "on · DuckDuckGo",
+      "chipNeedsAuth": "needs auth",
+      "chipNeedsKey": "needs key",
+      "toggleLabel": "Enable {{tool}}",
+      "catalogNote": "Tool list reflects the engine’s built-in catalogue. Enable/disable state is read from and written to your config.toml.",
+      "descRead": "Read any file in the workspace",
+      "descWrite": "Create or overwrite files",
+      "descEdit": "Surgical string-replace edits",
+      "descGlob": "Find files by pattern",
+      "descGrep": "Search file contents by regex",
+      "descBash": "Run shell commands in the sandbox",
+      "descScript": "Execute multi-line scripts (python/node)",
+      "descWebSearch": "Search the web · free default, add a key for high volume",
+      "descWebFetch": "Fetch & read a URL as clean markdown",
+      "descVision": "Describe & reason over images",
+      "descImageGen": "Generate images from a prompt",
+      "descTranscribe": "Speech & audio to text (Whisper)",
+      "descTts": "Text to speech · Piper (local)",
+      "descPdf": "Extract text & tables from PDFs",
+      "descVideo": "Sample & analyze video frames",
+      "descGit": "Stage, commit, branch, diff",
+      "descGithub": "PRs, issues, releases",
+      "descGitlab": "Merge requests & pipelines",
+      "descKubectl": "Inspect & manage Kubernetes",
+      "descAws": "AWS CLI operations",
+      "descGcloud": "Google Cloud CLI operations",
+      "descPostgres": "Run SQL against your database",
+      "descNotion": "Read & write Notion pages",
+      "descLinear": "Create & update Linear issues",
+      "descDiscord": "Send messages to channels",
+      "descSpotify": "Control playback & playlists",
+      "descMeet": "Schedule & join meetings",
+      "descHass": "Control smart-home devices",
+      "descCron": "Schedule recurring agent runs",
+      "descDelegate": "Spawn sub-agents for parallel work",
+      "descTodo": "Track multi-step task progress",
+      "descSessionSearch": "Search past sessions & transcripts",
+      "descMemory": "Read & write long-term memory",
+      "catFile": "File & Code",
+      "catWeb": "Web",
+      "catMedia": "Vision & Media",
+      "catDev": "Dev",
+      "catProd": "Productivity",
+      "catAgent": "Agent"
+    },
+    "memory": {
+      "subtitle": "The engine remembers across sessions — facts, preferences, and project context that persist and compound. On by default, stored locally.",
+      "providerLocal": "Local (SQLite + BM25)",
+      "providerHoncho": "Honcho",
+      "providerMem0": "Mem0",
+      "longTerm": "Long-term memory",
+      "longTermDesc": "Persist learnings between sessions",
+      "provider": "Provider",
+      "providerDesc": "Where memories are stored & recalled · local by default",
+      "recallBudget": "Recall budget",
+      "recallBudgetDesc": "Max tokens of memory injected per turn",
+      "tokensVal": "{{count}} tokens",
+      "autoConsolidate": "Auto-consolidate",
+      "autoConsolidateDesc": "Nightly dream-cycle: promote patterns, prune stale"
+    },
+    "security": {
+      "subtitle": "Control how much the engine can do without asking, and exactly which secrets reach the sandbox. Safe defaults already in place.",
+      "envInvalid": "Not a valid env var name.",
+      "envSensitive": "That looks like a secret — secret-bearing names can’t be passed to the sandbox.",
+      "approvalAsk": "Ask every time",
+      "approvalAuto": "Auto-edit",
+      "approvalYolo": "YOLO",
+      "approvalsMode": "Approvals Mode",
+      "defaultPolicy": "Default approval policy",
+      "defaultPolicyDesc": "How edits & commands are confirmed",
+      "approvalHint": "Auto-edit — file edits apply automatically; shell commands and network actions still ask. Recommended for most work.",
+      "envAllowlist": "Env-passthrough Allowlist",
+      "envPill": "which env vars reach bash",
+      "envEmpty": "No env vars are passed to the sandbox yet. Add a non-secret name below.",
+      "envExposed": "Exposed to the sandboxed shell",
+      "envRemove": "Remove {{name}}",
+      "envPlaceholder": "e.g. GITHUB_TOKEN_NAME, PATH, NODE_ENV (no secrets)",
+      "envAdd": "Add",
+      "envSecretsNote": "Only variable names are stored, never values — and secret-bearing names (API keys, tokens, passwords) are refused.",
+      "privateUrls": "Private URLs",
+      "blockPrivate": "Block private & loopback fetches",
+      "blockPrivateDesc": "Stop the engine reaching 10.x, 192.168.x, localhost, and metadata endpoints"
+    },
+    "profiles": {
+      "subtitle": "Directory-isolated configurations. Each profile carries its own model, tools, keys, skills and memory — switch context instantly without cross-contamination.",
+      "activateFailed": "Failed.",
+      "deleteFailed": "Failed.",
+      "nameInvalid": "Names use letters, digits, - and _ only (max 64).",
+      "createFailed": "Failed.",
+      "yourProfiles": "Your Profiles",
+      "active": "Active",
+      "activate": "Activate",
+      "clone": "Clone",
+      "delete": "Delete",
+      "newProfile": "New profile",
+      "cloneTitle": "Clone profile",
+      "newTitle": "New profile",
+      "createOk": "Create",
+      "cloningFrom": "Cloning from “{{from}}”.",
+      "namePlaceholder": "profile-name",
+      "toolsChip": "{{count}} инструментов",
+      "skillsChip": "{{count}} навыков"
+    },
+    "runtime": {
+      "subtitle": "Where the engine actually runs. Embedded locally by default — switch to a remote box or a hosted headless server when you need to.",
+      "modeLocal": "Local",
+      "modeRemote": "Remote",
+      "modeHeadless": "Headless server",
+      "runtimeMode": "Runtime mode",
+      "runtimeModeDesc": "Currently: embedded local engine",
+      "endpoint": "wcore endpoint",
+      "endpointDesc": "Embedded · spawned in-process",
+      "running": "Running",
+      "concurrency": "Concurrency",
+      "concurrencyDesc": "Max parallel sub-agents",
+      "agentsVal": "{{count}} agents",
+      "powerUser": "Power User",
+      "rawEngine": "Raw engine mode",
+      "rawEngineDesc": "Run the embedded engine on its own config — don’t override with Desktop’s model & skills.",
+      "headlessTitle": "Headless server mode",
+      "headlessBody": "Run Wayland Core as a long-lived server (one container per tenant) and reach it over LAN, Tailscale, or the hosted Pro tier."
+    },
+    "scopeWritesTo": "Writes to",
+    "scopeSharedCli": "— used by the Wayland Core CLI too."
   }
 }

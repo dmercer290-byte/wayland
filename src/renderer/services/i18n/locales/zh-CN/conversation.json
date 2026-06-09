@@ -311,5 +311,24 @@
     "unknown": "使用此工具自身的登录",
     "fluxError": "Flux 不可用",
     "fluxErrorNotice": "本轮 Flux 路由失败。请检查 Flux 连接或切换模型。"
+  },
+  "activation": {
+    "title": "唤醒你的智能体",
+    "subtitle": "连接一个模型提供商即可开始运行任务。选择最适合你的方式。",
+    "flux": {
+      "label": "连接 Flux Router",
+      "sublabel": "免费密钥并赠送 1 美元启动额度。无需绑卡——将每个任务路由到最合适的专长模型。",
+      "action": "连接"
+    },
+    "ownKey": {
+      "label": "使用我自己的密钥",
+      "sublabel": "使用来自 OpenAI、Anthropic、Google 等 100 多家提供商的 API 密钥。",
+      "action": "浏览"
+    },
+    "claudeCode": {
+      "label": "使用 Claude Code",
+      "sublabel": "基于你现有的 Claude Code 登录运行——无需额外管理密钥。",
+      "action": "使用"
+    }
   }
 }

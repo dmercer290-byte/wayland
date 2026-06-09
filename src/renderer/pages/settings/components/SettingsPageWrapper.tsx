@@ -57,6 +57,12 @@ export function getBuiltinSettingsNavItems(isDesktop: boolean, t: TranslateFn): 
       icon: <ScrollText size={16} />,
       path: 'constitution',
     },
+    wcore: {
+      id: 'wcore',
+      label: t('settings.wcoreConfig.navLabel', { defaultValue: 'Wayland Core' }),
+      icon: <Cpu size={16} />,
+      path: 'wcore-config',
+    },
     agents: {
       id: 'agents',
       label: t('settings.sider.agents', { defaultValue: 'Agents' }),
@@ -237,10 +243,7 @@ const SettingsPageWrapper: React.FC<SettingsPageWrapperProps> = ({ children, cla
     className
   );
 
-  const contentClass = classNames(
-    'settings-page-content mx-auto w-full',
-    contentClassName || 'md:max-w-[1120px]'
-  );
+  const contentClass = classNames('settings-page-content mx-auto w-full', contentClassName || 'md:max-w-[1120px]');
 
   return (
     <SettingsViewModeProvider value='page'>

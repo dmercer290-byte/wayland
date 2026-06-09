@@ -14,10 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import TwitchConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/social/TwitchConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const TwitchSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.twitch.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -52,7 +54,7 @@ const TwitchSetup: React.FC = () => {
         'Twitch chat via IRC (tmi.js). Connect a bot account with OAuth to read and send messages in one or more channels.',
       )}
     >
-      <TwitchConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <TwitchConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

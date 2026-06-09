@@ -65,6 +65,14 @@ typings/
 # dotenv environment variables file
 .env
 .env.test
+.env.local
+.env.*.local
+
+# Secrets / signing material (never tracked)
+*.pem
+*.p8
+*.p12
+*.mobileprovision
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -222,3 +230,8 @@ design-mockups/
 # IJFW / tooling scratch dirs (local memory, sessions, wiki; never tracked)
 .wayland-core/
 /ijfw/
+
+# Editor / agent tooling configs (machine-local, never shared)
+.cursor/
+.codex/
+.windsurfrules

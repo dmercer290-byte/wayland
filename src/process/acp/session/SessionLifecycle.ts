@@ -358,14 +358,23 @@ export class SessionLifecycle {
   private async tryLoadOrCreate(mcpServers: McpServer[]): Promise<NewSessionResponse | LoadSessionResponse> {
     if (this._sessionId && this._client) {
       try {
-        return await this._client.loadSession({
+        const loaded = await this._client.loadSession({
           sessionId: this._sessionId,
           cwd: this.host.agentConfig.cwd,
           mcpServers,
           additionalDirectories: this.host.agentConfig.additionalDirectories,
         });
+        // Resume succeeded. Tell the host so it drops any speculative history
+        // replay it armed for this resume attempt.
+        this.host.callbacks.onSignal({ type: 'session_loaded' });
+        return loaded;
       } catch {
-        this.host.callbacks.onSignal({ type: 'session_expired' });
+        // loadSession failed. The common cause is a stale in-memory session id
+        // after an app restart (claude-agent-acp sessions don't survive a
+        // process restart). Fall through to a FRESH session below and signal
+        // recovery (not expiry) so the host replays history and continues the
+        // turn instead of surfacing a terminal "Session expired" error.
+        this.host.callbacks.onSignal({ type: 'session_recovered' });
       }
     }
     return this._client!.createSession({

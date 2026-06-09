@@ -8,6 +8,8 @@
 
 import { Copy, RefreshCw } from 'lucide-react';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 import { channel } from '@/common/adapter/ipcBridge';
 import { Alert, Button, Input, Message } from '@arco-design/web-react';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -35,11 +37,13 @@ const PreferenceRow: React.FC<{
 
 type WebhookConfigFormProps = {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange?: (status: IChannelPluginStatus | null) => void;
 };
 
 const WebhookConfigForm: React.FC<WebhookConfigFormProps> = ({
   pluginStatus,
+  modelSelection,
   onStatusChange: _onStatusChange,
 }) => {
   const { t } = useTranslation();
@@ -246,6 +250,8 @@ const WebhookConfigForm: React.FC<WebhookConfigFormProps> = ({
           {t('settings.channels.webhook.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='webhook' modelSelection={modelSelection} />
+
     </div>
   );
 };

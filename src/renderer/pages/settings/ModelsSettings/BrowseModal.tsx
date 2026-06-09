@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Input, Modal } from '@arco-design/web-react';
-import { AlertTriangle, Check, ChevronLeft } from 'lucide-react';
+import { Button, Input, List, Modal, Spin } from '@arco-design/web-react';
+import { AlertTriangle, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { IModelRegistryConnectResult } from '@/common/adapter/ipcBridge';
 import type { ConnectError, ProviderId } from '@process/providers/types';
+import type { CatalogProviderEntry } from '@process/providers/catalog/catalogProvider';
 import { useModelRegistry } from '@renderer/hooks/useModelRegistry';
 import FluxRouterMark from '@renderer/components/icons/FluxRouterMark';
 import CloudCredentialForm, { isCloudFormProvider, type CloudProviderId } from './CloudCredentialForm';
@@ -41,7 +42,18 @@ const ERROR_KEY: Record<ConnectError, string> = {
 };
 
 /** Which inner view the modal is showing. */
-type View = { kind: 'grid' } | { kind: 'key'; provider: ProviderMeta } | { kind: 'cloud'; provider: CloudProviderId };
+type View =
+  | { kind: 'grid' }
+  | { kind: 'catalog' }
+  | { kind: 'key'; provider: ProviderMeta }
+  | { kind: 'cloud'; provider: CloudProviderId };
+
+/** Fetch lifecycle for the named-provider catalog list. */
+type CatalogState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'ready'; entries: CatalogProviderEntry[] }
+  | { status: 'error' };
 
 /**
  * The Browse-all-providers modal (prototype `#overlay-browse`, spec §4.6).
@@ -58,10 +70,15 @@ type View = { kind: 'grid' } | { kind: 'key'; provider: ProviderMeta } | { kind:
  */
 const BrowseModal: React.FC<Props> = ({ visible, onClose, initialProvider }) => {
   const { t } = useTranslation();
-  const { providers, connect } = useModelRegistry();
+  const { providers, connect, getProviderCatalog } = useModelRegistry();
 
   const [view, setView] = useState<View>({ kind: 'grid' });
   const [query, setQuery] = useState('');
+
+  // Catalog (~100 named providers) view state. The list is searched by a
+  // separate query so leaving the grid search untouched on back-navigation.
+  const [catalogState, setCatalogState] = useState<CatalogState>({ status: 'idle' });
+  const [catalogQuery, setCatalogQuery] = useState('');
 
   // Single-key view state.
   const [keyValue, setKeyValue] = useState('');
@@ -93,6 +110,8 @@ const BrowseModal: React.FC<Props> = ({ visible, onClose, initialProvider }) => 
       setBaseUrlValue('');
       setConnecting(false);
       setErrorKey(null);
+      setCatalogState({ status: 'idle' });
+      setCatalogQuery('');
     }
   }, [visible, initialProvider]);
 
@@ -125,6 +144,41 @@ const BrowseModal: React.FC<Props> = ({ visible, onClose, initialProvider }) => 
     setKeyValue('');
     setBaseUrlValue('');
     setErrorKey(null);
+  }, []);
+
+  // ---- Catalog (~100 named providers) -----------------------------------
+  // Fetch lazily the first time the user opens the catalog view, and on retry
+  // after a fetch error. The IPC returns the full connectable catalog sorted by
+  // displayName; selecting an entry connects with just an api key (the engine
+  // resolves its baseUrl from the catalog), so no manual endpoint is needed.
+  const loadCatalog = useCallback(async () => {
+    setCatalogState({ status: 'loading' });
+    try {
+      const entries = await getProviderCatalog();
+      setCatalogState(Array.isArray(entries) ? { status: 'ready', entries } : { status: 'error' });
+    } catch {
+      setCatalogState({ status: 'error' });
+    }
+  }, [getProviderCatalog]);
+
+  const openCatalog = useCallback(() => {
+    setCatalogQuery('');
+    setView({ kind: 'catalog' });
+    // Fetch once; a previously-loaded list stays cached across back-navigation.
+    setCatalogState((s) => {
+      if (s.status === 'ready' || s.status === 'loading') return s;
+      void loadCatalog();
+      return { status: 'loading' };
+    });
+  }, [loadCatalog]);
+
+  // Pick a catalog entry: open the same key view, key-only (no baseUrl). The
+  // catalog's real displayName is carried onto the generic-fallback tile.
+  const handlePickCatalog = useCallback((entry: CatalogProviderEntry) => {
+    setKeyValue('');
+    setBaseUrlValue('');
+    setErrorKey(null);
+    setView({ kind: 'key', provider: { ...providerMeta(entry.id), displayName: entry.displayName } });
   }, []);
 
   // ---- Single-key connect ------------------------------------------------
@@ -168,16 +222,20 @@ const BrowseModal: React.FC<Props> = ({ visible, onClose, initialProvider }) => 
   const headerTitle =
     view.kind === 'grid'
       ? t('settings.modelsPage.browse.title')
-      : view.kind === 'key'
-        ? view.provider.displayName
-        : providerMeta(view.provider).displayName;
+      : view.kind === 'catalog'
+        ? t('settings.modelsPage.browse.catalog.title')
+        : view.kind === 'key'
+          ? view.provider.displayName
+          : providerMeta(view.provider).displayName;
 
   const headerSub =
     view.kind === 'grid'
       ? t('settings.modelsPage.browse.subtitle')
-      : view.kind === 'key'
-        ? t('settings.modelsPage.browse.keySubtitle', { provider: view.provider.displayName })
-        : undefined;
+      : view.kind === 'catalog'
+        ? t('settings.modelsPage.browse.catalog.subtitle')
+        : view.kind === 'key'
+          ? t('settings.modelsPage.browse.keySubtitle', { provider: view.provider.displayName })
+          : undefined;
 
   // ---- Tile renderer -----------------------------------------------------
   const renderTile = (provider: ProviderMeta) => {
@@ -216,6 +274,44 @@ const BrowseModal: React.FC<Props> = ({ visible, onClose, initialProvider }) => 
           </span>
         )}
       </Button>
+    );
+  };
+
+  // ---- Catalog row renderer ---------------------------------------------
+  const renderCatalogRow = (entry: CatalogProviderEntry) => {
+    const meta = providerMeta(entry.id);
+    const connected = connectedIds.has(entry.id);
+    return (
+      <List.Item
+        key={entry.id}
+        className={styles.catalogRow}
+        data-provider={entry.id}
+        onClick={() => handlePickCatalog(entry)}
+        role='button'
+        tabIndex={0}
+        aria-label={t('settings.modelsPage.browse.connectAria', { provider: entry.displayName })}
+        onKeyDown={(e: React.KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handlePickCatalog(entry);
+          }
+        }}
+      >
+        <span
+          className={styles.tileAvatar}
+          style={{ background: meta.bg, color: meta.darkText ? '#1a1a1a' : '#fff' }}
+          aria-hidden
+        >
+          {meta.mono}
+        </span>
+        <span className={styles.tileName}>{entry.displayName}</span>
+        {connected && (
+          <span className={styles.connectedTag}>
+            <Check size={10} aria-hidden='true' />
+            {t('settings.modelsPage.browse.connected')}
+          </span>
+        )}
+      </List.Item>
     );
   };
 
@@ -269,7 +365,78 @@ const BrowseModal: React.FC<Props> = ({ visible, onClose, initialProvider }) => 
                 <div className={styles.grid}>{items.map(renderTile)}</div>
               </div>
             ))}
+            {/* Escape hatch into the full named-provider catalog (~100 entries).
+                Hidden while the user is searching - the grid filter already
+                covers the curated tiles, and the catalog has its own search. */}
+            {!query.trim() && (
+              <Button
+                type='outline'
+                long
+                className={styles.catalogEntry}
+                onClick={openCatalog}
+                data-testid='browse-catalog-entry'
+              >
+                <span>{t('settings.modelsPage.browse.catalog.entry')}</span>
+                <ChevronRight size={15} aria-hidden='true' />
+              </Button>
+            )}
           </div>
+        </>
+      )}
+
+      {view.kind === 'catalog' && (
+        <>
+          <div className={styles.searchWrap}>
+            <Input.Search
+              allowClear
+              value={catalogQuery}
+              onChange={setCatalogQuery}
+              placeholder={t('settings.modelsPage.browse.catalog.searchPlaceholder')}
+              aria-label={t('settings.modelsPage.browse.catalog.searchPlaceholder')}
+            />
+          </div>
+          {catalogState.status === 'loading' && (
+            <div className={styles.catalogStatus}>
+              <Spin />
+              <span>{t('settings.modelsPage.browse.catalog.loading')}</span>
+            </div>
+          )}
+          {catalogState.status === 'error' && (
+            <div className={styles.catalogStatus} role='alert'>
+              <AlertTriangle size={16} aria-hidden='true' />
+              <span>{t('settings.modelsPage.browse.catalog.error')}</span>
+              <Button size='small' onClick={() => void loadCatalog()}>
+                {t('settings.modelsPage.browse.catalog.retry')}
+              </Button>
+            </div>
+          )}
+          {catalogState.status === 'ready' &&
+            (() => {
+              const q = catalogQuery.trim().toLowerCase();
+              const entries = q
+                ? catalogState.entries.filter(
+                    (e) => e.displayName.toLowerCase().includes(q) || e.id.toLowerCase().includes(q)
+                  )
+                : catalogState.entries;
+              if (entries.length === 0) {
+                return (
+                  <div className={styles.noMatch}>
+                    {t('settings.modelsPage.browse.catalog.noMatch', { query: catalogQuery.trim() })}
+                  </div>
+                );
+              }
+              return (
+                <List
+                  className={styles.catalogList}
+                  size='small'
+                  bordered={false}
+                  dataSource={entries}
+                  virtualListProps={{ height: 360, itemHeight: 52 }}
+                  aria-label={t('settings.modelsPage.browse.catalog.title')}
+                  render={(entry: CatalogProviderEntry) => renderCatalogRow(entry)}
+                />
+              );
+            })()}
         </>
       )}
 

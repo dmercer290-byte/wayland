@@ -11,12 +11,15 @@ import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
 import { teamEventBus } from '@process/team/teamEventBus';
 import type { TProviderWithModel } from '@/common/config/storage';
+import { ProcessConfig } from '@process/utils/initStorage';
 import { BaseApprovalStore, type IApprovalKey } from '@/common/chat/approval';
 import { ToolConfirmationOutcome } from '../agent/gemini/cli/tools/tools';
 import { WCoreAgent, type StdioMcpOption } from '@process/agent/wcore';
 import type { WCoreCapabilities } from '@process/agent/wcore/protocol';
 import { buildSystemInstructionsWithSkillsIndex } from './agentUtils';
 import { getDatabase } from '@process/services/database';
+import { ProviderRepository } from '@process/providers/storage/ProviderRepository';
+import { isProviderKeyAuthFailure } from '@process/providers/detection/authFailure';
 import { addMessage, addOrUpdateMessage } from '@process/utils/message';
 import { uuid } from '@/common/utils';
 import BaseAgentManager from './BaseAgentManager';
@@ -28,6 +31,7 @@ import { extractAndStripThinkTags } from './ThinkTagDetector';
 import { ConversationTurnCompletionService } from './ConversationTurnCompletionService';
 import { cronBusyGuard } from '@process/services/cron/CronBusyGuard';
 import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher';
+import { getCostRecorder } from '@process/services/cost/CostRecorder';
 
 // ---------------------------------------------------------------------------
 // Truncation-heuristic constants (HC-4 - see audit at
@@ -187,6 +191,19 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       if (teamGuide) stdioMcpServers.push(teamGuide);
     }
 
+    // Raw-engine (power-user) mode: when `wcore.rawEngineMode` is
+    // true, the embedded engine runs on its OWN config.toml exactly like the
+    // standalone CLI - so we SKIP both (a) the Desktop model override (applied
+    // in buildSpawnConfig via the `rawEngineMode` flag passed below) and (b) the
+    // Constitution/skills/specialist prompt overlay built here. The renderer
+    // (RuntimePane) only persists the preference; this seam enacts it. A storage
+    // read failure falls back to the normal (overridden) path - never raw.
+    // Use ProcessConfig (main-process store) NOT ConfigStorage (renderer-bridged):
+    // ConfigStorage.get round-trips to the renderer and HANGS when WCore is
+    // spawned from a channel (a pure main-process path with no renderer in the
+    // loop), wedging every channel-triggered turn. `.catch` cannot save a hang.
+    const rawEngineMode = (await ProcessConfig.get('wcore.rawEngineMode').catch(() => false)) === true;
+
     // Prepend Wayland Constitution + specialist overlay AND inject the
     // builtin-skills index + `wayland_search_skills` MCP advert into the
     // system prompt. wcore delivers these via `init_history` as
@@ -194,16 +211,18 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     // undefined when there is nothing to inject (no Constitution, no preset,
     // no skills, no library) - in that case we keep the prior "no
     // presetRules" behaviour for fresh installs. (H1: WCoreManager advertise
-    // the second channel.)
-    const systemInstructions = await buildSystemInstructionsWithSkillsIndex({
-      presetContext: mergedData.presetRules,
-      enabledSkills: mergedData.enabledSkills,
-      excludeBuiltinSkills: mergedData.excludeBuiltinSkills,
-      enableTeamGuide: mergedData.enableTeamGuide,
-      backend: 'wcore',
-      presetAssistantId: mergedData.presetAssistantId,
-    });
-    const effectivePresetRules = systemInstructions ?? mergedData.presetRules;
+    // the second channel.) Skipped entirely in raw-engine mode.
+    const systemInstructions = rawEngineMode
+      ? undefined
+      : await buildSystemInstructionsWithSkillsIndex({
+          presetContext: mergedData.presetRules,
+          enabledSkills: mergedData.enabledSkills,
+          excludeBuiltinSkills: mergedData.excludeBuiltinSkills,
+          enableTeamGuide: mergedData.enableTeamGuide,
+          backend: 'wcore',
+          presetAssistantId: mergedData.presetAssistantId,
+        });
+    const effectivePresetRules = rawEngineMode ? undefined : (systemInstructions ?? mergedData.presetRules);
 
     const agent = new WCoreAgent({
       workspace: mergedData.workspace,
@@ -211,6 +230,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       proxy: mergedData.proxy,
       yoloMode: mergedData.yoloMode,
       presetRules: effectivePresetRules,
+      rawEngineMode,
       maxTokens: mergedData.maxTokens,
       maxTurns: mergedData.maxTurns,
       sessionId: mergedData.sessionId,
@@ -570,6 +590,30 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     })();
   }
 
+  /**
+   * Record this wcore turn's cost to the ledger. wcore emits a per-turn
+   * input/output token split at finish (not a cumulative gauge), so we take the
+   * computed path: the recorder prices the split via ModelPricing keyed on the
+   * model id actually used (`this.model.useModel`), falling back to
+   * cost_source='unknown' (tokens only) when the model is unpriced.
+   */
+  private recordCost(data: unknown): void {
+    if (!data || typeof data !== 'object' || !('input_tokens' in data)) return;
+    const usage = data as { input_tokens?: number; output_tokens?: number };
+    const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+    const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+    if (inputTokens + outputTokens <= 0) return;
+    getCostRecorder()?.recordTurnFinish({
+      conversationId: this.conversation_id,
+      backend: 'wcore',
+      modelId: this.model?.useModel,
+      costSource: 'computed',
+      inputTokens,
+      outputTokens,
+      ts: Date.now(),
+    });
+  }
+
   private handleProcessExit(code: number | null, activeMsgId: string): void {
     mainError('[WCoreManager]', `wcore process exited unexpectedly (code=${code}) during active turn ${activeMsgId}`);
 
@@ -593,6 +637,44 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     };
     ipcBridge.conversation.responseStream.emit(finishMessage);
     this.emitToEventBuses(finishMessage);
+  }
+
+  /** Guards against re-invalidating the same provider on repeated error frames. */
+  private authKeyInvalidated = false;
+
+  /**
+   * On an unambiguous provider key auth failure (401 / invalid x-api-key), mark
+   * the model's provider `error/unauthorized` so Models & Providers stops
+   * showing it connected and the next spawn does not reuse the dead key.
+   * Mirrors AcpAgentManager.maybeInvalidateProviderKeyOnAuthError but keyed on
+   * the single provider this wcore turn used (`this.model.id`). Deliberately
+   * narrow: only fires on unambiguous key failures (not transient 429/5xx), and
+   * never touches the Flux route. Reversible: re-keying the provider runs a
+   * connection test and restores `connected`.
+   */
+  private maybeInvalidateProviderKeyOnAuthError(text: string): void {
+    if (this.authKeyInvalidated) return;
+    if (!isProviderKeyAuthFailure(text)) return;
+    const providerId = this.model?.id;
+    // No provider id, or the turn was routed through Flux (whose key is not this
+    // provider's): leave provider state untouched.
+    if (!providerId || providerId === 'flux-router') return;
+    this.authKeyInvalidated = true;
+
+    void (async () => {
+      try {
+        const db = await getDatabase();
+        const repo = new ProviderRepository(db.getDriver());
+        repo.updateRegistryProviderState(providerId, 'error', 'unauthorized');
+        mainWarn(
+          '[WCoreManager]',
+          `Provider '${providerId}' key rejected by Wayland Core (401/invalid x-api-key); ` +
+            'marked error/unauthorized. Re-key it in Models & Providers to restore.'
+        );
+      } catch (err) {
+        mainWarn('[WCoreManager]', 'maybeInvalidateProviderKeyOnAuthError failed', err);
+      }
+    })();
   }
 
   private startHeartbeat(): void {
@@ -621,10 +703,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     this.heartbeatMissedCount++;
 
     if (this.heartbeatMissedCount >= this.heartbeatMaxMissed) {
-      mainError(
-        '[WCoreManager]',
-        `wcore process unresponsive after ${this.heartbeatMaxMissed} missed pongs, killing`
-      );
+      mainError('[WCoreManager]', `wcore process unresponsive after ${this.heartbeatMaxMissed} missed pongs, killing`);
       this.agent?.kill();
       return;
     }
@@ -668,6 +747,19 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
           data: data.data,
         });
         return;
+      }
+
+      // When the inference provider rejects the key (401 / invalid x-api-key),
+      // flip that provider off "connected" so the UI stops showing it healthy
+      // and the next spawn does not reuse the dead key. Side-effect only: the
+      // error still flows through the pipeline below to the renderer, which
+      // surfaces the auth-failure remedy card (WCoreChat). Unlike Claude Code,
+      // Wayland Core has no subscription/OAuth fallback, so a dead key is fatal
+      // for the turn and the provider must be marked unhealthy.
+      if (data.type === 'error') {
+        this.maybeInvalidateProviderKeyOnAuthError(
+          typeof data.data === 'string' ? data.data : String(data.data ?? '')
+        );
       }
 
       // System-level events (empty msg_id) are not part of a conversation turn.
@@ -756,13 +848,12 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
         this.heartbeatActive = false;
         this.heartbeatMissedCount = 0;
         this.saveContextUsage(processedData.data);
+        this.recordCost(processedData.data);
 
         // Capture before handleTurnEnd resets msg state, then emit truncation flag
         // after the turn-end flush so the renderer's text-message merge attaches
         // the flag to the already-accumulated content rather than racing it.
-        const truncMsgId = this.detectTruncation(processedData.data, this.currentMsgContent)
-          ? this.currentMsgId
-          : null;
+        const truncMsgId = this.detectTruncation(processedData.data, this.currentMsgContent) ? this.currentMsgId : null;
 
         void this.handleTurnEnd();
 

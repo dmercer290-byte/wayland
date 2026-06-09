@@ -112,6 +112,22 @@ describe('buildTurnSkillContext', () => {
     expect(ctx).toEqual({ advert: '', autoLoaded: [] });
   });
 
+  it('stays silent on greetings / conversational filler (below min content terms)', async () => {
+    // Stopwords stripped: "hello/there/thanks/so/much" leave < 2 content terms,
+    // so a chatty turn surfaces nothing (the "skills prompt on every hello" bug).
+    for (const greeting of ['hello there', 'hey can you help me out', 'thanks so much for that', 'this is a test']) {
+      const ctx = await buildTurnSkillContext(greeting);
+      expect(ctx).toEqual({ advert: '', autoLoaded: [] });
+    }
+  });
+
+  it('stays silent when the top match only shares ONE query term (incidental hit)', async () => {
+    // "stripe" alone hits stripe-webhook-signing, but the rest of the turn is
+    // unrelated - one shared word is not enough to justify injecting a skill.
+    const ctx = await buildTurnSkillContext('stripe dashboard analytics revenue report');
+    expect(ctx).toEqual({ advert: '', autoLoaded: [] });
+  });
+
   it('returns empty when nothing in the library matches', async () => {
     const ctx = await buildTurnSkillContext('zzzzz qqqqq xxxxx nonsense gibberish');
     expect(ctx.autoLoaded).toEqual([]);

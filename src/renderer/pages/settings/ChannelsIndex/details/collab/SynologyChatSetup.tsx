@@ -14,10 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import SynologyChatConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/collab/SynologyChatConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const SynologyChatSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.synology-chat.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -52,7 +54,7 @@ const SynologyChatSetup: React.FC = () => {
         'NAS-hosted team chat via Synology DSM. Configure an outgoing webhook in Synology Chat to receive messages, and provide the incoming webhook URL to send replies.',
       )}
     >
-      <SynologyChatConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <SynologyChatConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

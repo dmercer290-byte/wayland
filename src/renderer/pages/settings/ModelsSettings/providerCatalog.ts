@@ -6,7 +6,7 @@
  * the same key-prefix recognition rules as a pure, browser-safe function, plus
  * the display name / avatar styling each provider needs in the UI.
  */
-import type { ProviderId } from '@process/providers/types';
+import type { NativeProviderId, ProviderId } from '@process/providers/types';
 
 /**
  * A Browse-modal group (prototype `#overlay-browse`, spec §4.6). Every provider
@@ -37,8 +37,12 @@ export type ProviderMeta = {
   group: ProviderGroup;
 };
 
-/** Provider metadata keyed by id. Display names mirror the Browse picker. */
-export const PROVIDER_META: Record<ProviderId, ProviderMeta> = {
+/**
+ * Native provider metadata keyed by id. Display names mirror the Browse picker.
+ * Keyed by {@link NativeProviderId} — catalog providers have no static entry and
+ * resolve through `providerMeta()`'s generic fallback.
+ */
+export const PROVIDER_META: Record<NativeProviderId, ProviderMeta> = {
   anthropic: { id: 'anthropic', displayName: 'Anthropic', mono: 'A', bg: '#d4a27f', darkText: true, group: 'frontier' },
   openai: { id: 'openai', displayName: 'OpenAI', mono: 'O', bg: '#10a37f', darkText: false, group: 'frontier' },
   'google-gemini': {
@@ -176,12 +180,20 @@ export const PROVIDER_META: Record<ProviderId, ProviderMeta> = {
     darkText: false,
     group: 'open',
   },
+  'ollama-local': {
+    id: 'ollama-local',
+    displayName: 'Ollama (Local)',
+    mono: 'Ol',
+    bg: '#0f1117',
+    darkText: false,
+    group: 'open',
+  },
 };
 
 /** Look up provider metadata, falling back to a generic tile for unknown ids. */
 export function providerMeta(id: ProviderId): ProviderMeta {
   return (
-    PROVIDER_META[id] ?? {
+    PROVIDER_META[id as NativeProviderId] ?? {
       id,
       displayName: id,
       mono: id.charAt(0).toUpperCase(),

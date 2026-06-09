@@ -53,13 +53,59 @@ export type TurnSkillContext = {
   autoLoaded: SkillIndex[];
 };
 
-const TURN_ADVERT_LIMIT = 5;
+/** Max skills listed in the per-turn advert (kept small so it stays cheap). */
+const TURN_ADVERT_LIMIT = 3;
 /** Absolute BM25 floor a top hit must clear before we auto-load its body. */
 const AUTOLOAD_MIN_SCORE = 4.0;
 /** Top-1 must beat top-2 by this factor to count as a clear winner (no blind auto-load on ties). */
 const AUTOLOAD_MARGIN = 1.4;
 /** Body char cap for an auto-loaded skill - honors the ~3k-token/turn budget. */
 const AUTOLOAD_BODY_CHAR_CAP = 3000;
+/**
+ * Minimum distinct content terms a turn must contain before we retrieve at all.
+ * Greetings and conversational filler ("hello", "this is a test", "thanks so
+ * much") fall below this and surface nothing.
+ */
+const MIN_QUERY_TERMS = 2;
+/**
+ * The top hit must share at least this many DISTINCT query terms or we surface
+ * nothing. Corpus-size independent (unlike an absolute BM25 floor): a genuinely
+ * relevant turn shares 2+ content words with a skill, while a chatty turn whose
+ * "match" comes from a single incidental word shares exactly one. This is what
+ * kills the "5 irrelevant skills on every message" spam.
+ */
+const MATCH_MIN_TERMS = 2;
+/** Advert only hits within this fraction of the top score (the coherent cluster, not the weak tail). */
+const ADVERT_RATIO = 0.55;
+
+/**
+ * Conversational stopwords stripped from the retrieval query. These carry no
+ * skill intent but, because the skill corpus is terse, several of them are rare
+ * in it (high idf) - so left in, a long chatty sentence accumulates BM25 score
+ * on unrelated skills (the "5 irrelevant skills on every message" bug). Plain
+ * English stopwords plus chat filler; deliberately excludes domain words.
+ */
+const QUERY_STOPWORDS = new Set(
+  (
+    'about above after again against all also am an and any are arent as at be because been before being ' +
+    'below between both but by can cant cannot could couldnt did didnt do does doesnt doing dont down during ' +
+    'each few for from further had hadnt has hasnt have havent having he her here hers herself him himself his ' +
+    'how however i id if ill im ive into is isnt it its itself just lets me more most must my myself no nor not ' +
+    'of off on once only or other ought our ours ourselves out over own same shant she should shouldnt so some ' +
+    'such than that thats the their theirs them themselves then there theres these they theyll theyre theyve ' +
+    'this those through to too under until up very was wasnt we well were werent weve what whats when where ' +
+    'which while who whom why will with wont would wouldnt you youd youll youre youve your yours yourself ' +
+    'yourselves hi hey hello howdy yeah yep nope ok okay cool nice thanks thank sure gonna wanna gotta got get ' +
+    'getting let make made making want wants need needs going give stuff thing things really actually basically ' +
+    'maybe perhaps please'
+  ).split(' ')
+);
+
+/** Distinct, length>2, non-stopword query tokens - the signal we retrieve on. */
+function discriminativeQueryTerms(text: string): string[] {
+  const tokens: string[] = text.toLowerCase().match(/\b[a-z0-9_-]+\b/g) ?? [];
+  return [...new Set(tokens.filter((t) => t.length > 2 && !QUERY_STOPWORDS.has(t)))];
+}
 
 // Module-level BM25 index cache, rebuilt only when the library size changes.
 let turnRetriever: SkillRetriever | null = null;
@@ -83,8 +129,15 @@ export async function buildTurnSkillContext(
   opts?: { alwaysOnNames?: string[] }
 ): Promise<TurnSkillContext> {
   const empty: TurnSkillContext = { advert: '', autoLoaded: [] };
-  const query = (userText ?? '').trim();
-  if (query.length < 3) return empty;
+
+  // Gate 1: ignore greetings / conversational filler. A turn needs at least
+  // MIN_QUERY_TERMS distinct content words (stopwords stripped) before we even
+  // hit the index - "hello", "this is a test", "thanks so much" surface nothing.
+  const terms = discriminativeQueryTerms(userText ?? '');
+  if (terms.length < MIN_QUERY_TERMS) return empty;
+  // Retrieve on the discriminative terms only, so common words can't accumulate
+  // BM25 score on unrelated skills.
+  const query = terms.join(' ');
 
   let entries;
   try {
@@ -103,6 +156,12 @@ export async function buildTurnSkillContext(
 
   const hits = turnRetriever.retrieve(query, TURN_ADVERT_LIMIT + 3);
   if (hits.length === 0) return empty;
+
+  // Gate 2: relevance. The best match must genuinely share multiple query terms,
+  // not ride in on a single incidental word - otherwise this turn has no truly
+  // relevant skill and we surface nothing instead of the least-bad guesses.
+  const topScore = hits[0].score;
+  if (hits[0].matchedTerms < MATCH_MIN_TERMS) return empty;
 
   const alwaysOn = new Set(opts?.alwaysOnNames ?? []);
 
@@ -127,9 +186,12 @@ export async function buildTurnSkillContext(
     }
   }
 
-  // Advert excludes always-on skills and the just-auto-loaded one (no redundancy).
+  // Advert only the coherent cluster near the top (>= ADVERT_RATIO of the top
+  // score), excluding always-on and just-auto-loaded skills. The weak tail is
+  // dropped, so a turn surfaces 1-3 real matches, not 5.
+  const advertFloor = ADVERT_RATIO * topScore;
   const advertHits = hits
-    .filter((h) => !alwaysOn.has(h.name) && !autoLoaded.some((a) => a.name === h.name))
+    .filter((h) => h.score >= advertFloor && !alwaysOn.has(h.name) && !autoLoaded.some((a) => a.name === h.name))
     .slice(0, TURN_ADVERT_LIMIT);
 
   if (advertHits.length === 0 && !autoBody) return empty;

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Plus } from 'lucide-react';
+import { Clock, Plus } from 'lucide-react';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ import { formatSchedule, formatNextRun } from '@renderer/pages/cron/cronUtils';
 import { systemSettings, type ICronJob } from '@/common/adapter/ipcBridge';
 import { ACP_BACKENDS_ALL, type AcpBackendAll, type AcpBackendConfig } from '@/common/types/acpTypes';
 import { getAgentLogo } from '@renderer/utils/model/agentLogo';
+import PageShell from '@/renderer/components/layout/PageShell';
 import CronStatusTag from './CronStatusTag';
 import CreateTaskDialog from './CreateTaskDialog';
 
@@ -103,47 +104,23 @@ const ScheduledTasksPage: React.FC = () => {
   );
 
   return (
-    <div
-      className={classNames(
-        'w-full min-h-full box-border overflow-y-auto',
-        isMobile ? 'px-16px py-14px' : 'px-12px py-24px md:px-40px md:py-32px'
-      )}
+    <PageShell
+      title={t('cron.scheduledTasks')}
+      icon={<Clock size={20} />}
+      subtitle={t('cron.page.description')}
+      width='full'
+      actions={
+        <Button
+          type='primary'
+          className='shrink-0'
+          icon={<Plus size={14} />}
+          onClick={() => setCreateDialogVisible(true)}
+        >
+          {t('cron.page.newTask')}
+        </Button>
+      }
     >
-      <div
-        className={classNames(
-          'mx-auto flex w-full max-w-800px box-border flex-col',
-          isMobile ? 'gap-14px' : 'gap-16px'
-        )}
-      >
-        <div className={classNames('flex w-full flex-col', isMobile ? 'gap-6px' : 'gap-8px')}>
-          <div className='flex w-full items-start justify-between gap-12px sm:gap-16px max-[520px]:flex-wrap'>
-            <h1
-              className={classNames(
-                'm-0 min-w-0 flex-1 font-bold text-t-primary',
-                isMobile ? 'text-24px leading-[1.2]' : 'text-28px leading-[1.15]'
-              )}
-            >
-              {t('cron.scheduledTasks')}
-            </h1>
-            <Button
-              type='primary'
-              className='shrink-0'
-              icon={<Plus size={14} />}
-              onClick={() => setCreateDialogVisible(true)}
-            >
-              {t('cron.page.newTask')}
-            </Button>
-          </div>
-          <p
-            className={classNames(
-              'm-0 w-full text-t-secondary',
-              isMobile ? 'text-13px leading-20px' : 'text-14px leading-22px'
-            )}
-          >
-            {t('cron.page.description')}
-          </p>
-        </div>
-
+      <div className={classNames('flex w-full box-border flex-col', isMobile ? 'gap-14px' : 'gap-16px')}>
         <div className='grid w-full box-border grid-cols-[minmax(0,1fr)_auto] items-center gap-x-12px gap-y-10px rounded-12px border border-solid border-[var(--color-border-2)] bg-fill-2 px-14px py-12px sm:rounded-14px sm:px-16px max-[520px]:grid-cols-1'>
           <span
             className={classNames(
@@ -284,7 +261,7 @@ const ScheduledTasksPage: React.FC = () => {
           initialWorkflowSlug={createInitialWorkflowSlug}
         />
       </div>
-    </div>
+    </PageShell>
   );
 };
 

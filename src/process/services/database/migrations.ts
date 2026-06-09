@@ -2077,6 +2077,113 @@ const migration_v46: IMigration = {
 };
 
 /**
+ * Migration v46 -> v47: Per-account channel welcome marker.
+ *
+ * Records that a channel account has already received its one-time "Hey, it's
+ * Wayland" welcome handshake, keyed by platform + account identity (WhatsApp:
+ * own JID; Email: inbox address; bots: bot/account id). Without this, the
+ * welcome was guarded only by an in-memory boolean that reset on every app
+ * restart, so the user got re-greeted on each launch. The row is cleared only
+ * on a genuine re-pair (logged out / account change), never on a normal stop.
+ */
+const migration_v47: IMigration = {
+  version: 47,
+  name: 'Add channel_welcome table for once-per-account welcome marker',
+  up: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS channel_welcome (
+      platform TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      welcomed_at INTEGER NOT NULL,
+      PRIMARY KEY (platform, account_id)
+    )`);
+    console.log('[Migration v47] Created channel_welcome table');
+  },
+  down: (db) => {
+    db.exec('DROP TABLE IF EXISTS channel_welcome');
+    console.log('[Migration v47] Dropped channel_welcome table');
+  },
+};
+
+/**
+ * Migration v47 -> v48: Per-turn cost observability ledger.
+ *
+ * One row per backend turn finish, written by the CostRecorder. `cost_usd` and
+ * `tokens_total` are already per-turn values: the engine path stores a delta
+ * against a per-conversation cumulative baseline, the computed path prices a
+ * per-turn token split, and the unknown path records tokens with cost 0.
+ *
+ * No foreign keys by design: conversation/cron/team ids are soft references so
+ * the table survives row deletes in those tables and PRAGMA foreign_key_check
+ * (run after every migration batch) stays clean. Indexed on the four columns
+ * the analytics queries group/filter by.
+ */
+const migration_v48: IMigration = {
+  version: 48,
+  name: 'Add cost_events table for per-turn cost observability',
+  up: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS cost_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id TEXT NOT NULL,
+      backend TEXT NOT NULL,
+      model_id TEXT,
+      cost_usd REAL NOT NULL,
+      tokens_total INTEGER NOT NULL,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      cache_read_tokens INTEGER,
+      cost_source TEXT NOT NULL,
+      cron_id TEXT,
+      team_id TEXT,
+      created_at INTEGER NOT NULL
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_cost_events_created_at ON cost_events(created_at)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_cost_events_conversation ON cost_events(conversation_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_cost_events_model ON cost_events(model_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_cost_events_backend ON cost_events(backend)');
+    console.log('[Migration v48] Created cost_events table');
+  },
+  down: (db) => {
+    db.exec('DROP TABLE IF EXISTS cost_events');
+    console.log('[Migration v48] Dropped cost_events table');
+  },
+};
+
+/**
+ * Migration v48 -> v49: Spend budgets / caps.
+ *
+ * One row per user-defined budget. `scope` is the dimension capped (global /
+ * model / backend / team); `scope_key` binds the dimension value (model id,
+ * backend, or team id) and is NULL for global. `action` is 'warn' (default,
+ * non-blocking notification) or 'pause' (opt-in resumable pre-turn gate).
+ *
+ * No foreign keys by design (matches cost_events): scope_key is a soft
+ * reference so the table survives deletes in the model/team tables and PRAGMA
+ * foreign_key_check stays clean.
+ */
+const migration_v49: IMigration = {
+  version: 49,
+  name: 'Add budgets table for spend caps',
+  up: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS budgets (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      scope_key TEXT,
+      limit_usd REAL NOT NULL,
+      period TEXT NOT NULL,
+      action TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_budgets_scope ON budgets(scope, scope_key)');
+    console.log('[Migration v49] Created budgets table');
+  },
+  down: (db) => {
+    db.exec('DROP TABLE IF EXISTS budgets');
+    console.log('[Migration v49] Dropped budgets table');
+  },
+};
+
+/**
  * All migrations in order
  */
 // prettier-ignore
@@ -2088,7 +2195,8 @@ export const ALL_MIGRATIONS: IMigration[] = [
   migration_v25, migration_v26, migration_v27, migration_v28, migration_v29, migration_v30,
   migration_v31, migration_v32, migration_v33, migration_v34, migration_v35, migration_v36,
   migration_v37, migration_v38, migration_v39, migration_v40, migration_v41, migration_v42,
-  migration_v43, migration_v44, migration_v45, migration_v46,
+  migration_v43, migration_v44, migration_v45, migration_v46, migration_v47,
+  migration_v48, migration_v49,
 ];
 
 /**

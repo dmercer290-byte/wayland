@@ -15,6 +15,8 @@ import { AlertTriangle } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -32,11 +34,13 @@ const PreferenceRow: React.FC<{
 
 export interface MattermostConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 }
 
 const MattermostConfigForm: React.FC<MattermostConfigFormProps> = ({
   pluginStatus,
+  modelSelection,
   onStatusChange,
 }) => {
   const { t } = useTranslation();
@@ -230,6 +234,8 @@ const MattermostConfigForm: React.FC<MattermostConfigFormProps> = ({
           {t('settings.channels.mattermost.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='mattermost' modelSelection={modelSelection} />
+
     </div>
   );
 };

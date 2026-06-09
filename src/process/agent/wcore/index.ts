@@ -10,9 +10,11 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parse, stringify } from 'smol-toml';
 import type { TProviderWithModel } from '@/common/config/storage';
-import { getEnhancedEnv } from '@process/utils/shellEnv';
 import { resolveWCoreBinary } from './binaryResolver';
-import { buildSpawnConfig } from './envBuilder';
+import { buildEngineSpawnEnv, buildSpawnConfig } from './envBuilder';
+import { resolveActiveConfigDir } from './profilePaths';
+import { getToolKeyStore } from './toolKeyStore';
+import { hydrateModelForSpawn } from '@process/providers/ipc/modelRegistryIpc';
 import type { WCoreEvent, WCoreCommand, WCoreCapabilities } from './protocol';
 
 const WCORE_PROJECT_CONFIG = '.wcore.toml';
@@ -99,6 +101,14 @@ export type WCoreAgentOptions = {
   sessionId?: string;
   resume?: string;
   /**
+   * Raw-engine (power-user) mode. When true, the spawn omits every Desktop
+   * override (provider/model/auth/tokens/system-prompt/auto-approve) so the
+   * embedded engine runs on its own `config.toml` like the standalone CLI.
+   * `WCoreManager` reads `ConfigStorage` key `wcore.rawEngineMode` and also
+   * skips the Constitution/skills/specialist prompt overlay when this is set.
+   */
+  rawEngineMode?: boolean;
+  /**
    * Stdio MCP servers to register with the wcore session after start.
    * Caller decides which MCPs belong here (team coordination, team-guide,
    * future project MCPs, etc.) - WCoreAgent just forwards them.
@@ -152,19 +162,46 @@ export class WCoreAgent {
     return this.readyPromise;
   }
 
+  /**
+   * Resolve the forwarded tool-backend keys (`ENV_NAME → value`) to inject into
+   * the engine spawn env. Best-effort: any failure (DB unavailable, encryption
+   * backend missing) yields an empty map so the engine still spawns with full
+   * provider auth - tool search keys are optional, provider auth is not.
+   */
+  private async loadForwardedToolKeys(): Promise<Record<string, string>> {
+    try {
+      const store = await getToolKeyStore();
+      return store.collectForwardedEnv();
+    } catch (err) {
+      console.warn('[WCoreAgent] Failed to load tool-backend keys:', err);
+      return {};
+    }
+  }
+
   async start(): Promise<void> {
     const binaryPath = resolveWCoreBinary();
     if (!binaryPath) {
       throw new Error('wcore binary not found');
     }
 
-    const { args, env, projectConfig, resolvedMaxTokens } = buildSpawnConfig(this.options.model, {
+    // Resolve the provider key in main at dispatch (audit C4/C5): the model
+    // blob carries only a non-secret handle, so the decrypted key is fetched
+    // here and lives only for this spawn - it never crossed IPC to the renderer
+    // and is never persisted. Per-call resolution keeps concurrent chats on
+    // different accounts isolated (audit C6); raw-engine mode ignores the model
+    // (it uses the engine's own config.toml), so skip the lookup there.
+    const spawnModel = this.options.rawEngineMode
+      ? this.options.model
+      : await hydrateModelForSpawn(this.options.model);
+
+    const { args, env, projectConfig, resolvedMaxTokens } = buildSpawnConfig(spawnModel, {
       workspace: this.options.workspace,
       maxTokens: this.options.maxTokens,
       maxTurns: this.options.maxTurns,
       autoApprove: this.options.yoloMode,
       sessionId: this.options.sessionId,
       resume: this.options.resume,
+      rawEngine: this.options.rawEngineMode,
     });
     this.resolvedMaxTokens = resolvedMaxTokens;
 
@@ -173,8 +210,23 @@ export class WCoreAgent {
       this.writeProjectConfig(projectConfig);
     }
 
+    // SEC-1: spawn with an allowlisted env (provider auth creds + forwarded
+    // tool-backend keys) instead of a blanket process.env spread. Tool-key
+    // load is best-effort - a DB hiccup must never block the engine spawn.
+    const toolKeys = await this.loadForwardedToolKeys();
+    // Design B (directory-isolated profiles): point the engine's config root at
+    // the active profile's dir so it reads that profile's own config.toml +
+    // memory.db + skills. Resolves to the native dir for the `default` profile
+    // (backward-compatible). Best-effort - a resolution failure falls back to
+    // the engine's own default config dir rather than blocking the spawn.
+    let waylandHome: string | undefined;
+    try {
+      waylandHome = await resolveActiveConfigDir();
+    } catch (err) {
+      console.warn('[WCoreAgent] Failed to resolve active profile config dir:', err);
+    }
     this.childProcess = spawn(binaryPath, args, {
-      env: getEnhancedEnv(env),
+      env: buildEngineSpawnEnv({ providerEnv: env, toolKeys, waylandHome }),
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: this.options.workspace,
     });

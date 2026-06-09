@@ -14,10 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import NostrConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/social/NostrConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const NostrSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.nostr.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -52,7 +54,7 @@ const NostrSetup: React.FC = () => {
         'Decentralized encrypted DMs via Nostr relays. Bring your own private key (nsec or hex) and connect to any wss:// relay.',
       )}
     >
-      <NostrConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <NostrConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

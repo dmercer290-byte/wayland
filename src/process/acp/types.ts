@@ -155,6 +155,12 @@ export type AuthRequiredData = {
 export type SessionSignal =
   | { type: 'turn_finished' }
   | { type: 'session_expired' }
+  // loadSession failed (e.g. stale in-memory session id after an app restart);
+  // a fresh session was created instead. Host should replay history and NOT
+  // surface a terminal error.
+  | { type: 'session_recovered' }
+  // loadSession succeeded; host should drop any speculative replay it armed.
+  | { type: 'session_loaded' }
   | { type: 'auth_required'; auth: AuthRequiredData }
   | { type: 'error'; message: string; recoverable: boolean };
 

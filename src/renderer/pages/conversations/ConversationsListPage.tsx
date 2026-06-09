@@ -14,8 +14,9 @@ import {
   isConversationPinned,
 } from '@/renderer/pages/conversation/GroupedHistory/utils/groupingHelpers';
 import { getActivityTime } from '@/renderer/utils/chat/timeline';
+import PageShell from '@/renderer/components/layout/PageShell';
 import { Input, Message, Modal, Spin } from '@arco-design/web-react';
-import { MessageSquare, Plus } from 'lucide-react';
+import { MessageSquare, MessagesSquare, Plus } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -262,30 +263,27 @@ const ConversationsListPage: React.FC = () => {
 
   const isEmpty = !loading && searched.length === 0;
 
-  return (
-    <div className='flex flex-col h-full w-full overflow-hidden'>
-      {/* Header */}
-      <div className='flex items-center justify-between px-24px py-20px shrink-0'>
-        <div className='flex flex-col gap-2px'>
-          <h1 className='text-20px font-700 text-t-primary m-0'>
-            {t('conversations.list.title', { defaultValue: 'Conversations' })}
-          </h1>
-          <span className='text-13px text-t-secondary'>
-            {t('conversations.list.subtitle', { defaultValue: 'Every chat and session' })}
-          </span>
-        </div>
-        <button
-          type='button'
-          className='flex items-center gap-6px h-32px px-12px rd-8px border-none cursor-pointer bg-[rgb(var(--primary-6))] text-white'
-          onClick={() => navigate('/guid', { state: { resetAssistant: true } })}
-        >
-          <Plus size={16} />
-          <span className='text-13px'>{t('conversations.list.newButton', { defaultValue: 'New Chat' })}</span>
-        </button>
-      </div>
+  const newChatButton = (
+    <button
+      type='button'
+      className='flex items-center gap-6px h-32px px-12px rd-8px border-none cursor-pointer bg-[rgb(var(--primary-6))] text-white'
+      onClick={() => navigate('/guid', { state: { resetAssistant: true } })}
+    >
+      <Plus size={16} />
+      <span className='text-13px'>{t('conversations.list.newButton', { defaultValue: 'New Chat' })}</span>
+    </button>
+  );
 
+  return (
+    <PageShell
+      title={t('conversations.list.title', { defaultValue: 'Conversations' })}
+      icon={<MessagesSquare size={20} />}
+      subtitle={t('conversations.list.subtitle', { defaultValue: 'Every chat and session' })}
+      actions={newChatButton}
+      width='full'
+    >
       {/* Search */}
-      <div className='px-24px pb-12px shrink-0 max-w-[560px] w-full'>
+      <div className='pb-12px shrink-0 max-w-[560px] w-full'>
         <Input.Search
           allowClear
           value={query}
@@ -295,7 +293,7 @@ const ConversationsListPage: React.FC = () => {
       </div>
 
       {/* Body */}
-      <div className='flex-1 overflow-auto px-24px pb-32px'>
+      <div className='pb-32px'>
         <Spin loading={loading} style={{ display: 'block' }}>
           {isEmpty ? (
             <div className='flex flex-col items-center justify-center gap-12px py-64px text-center'>
@@ -376,7 +374,7 @@ const ConversationsListPage: React.FC = () => {
       </Modal>
 
       {assignProjectNode}
-    </div>
+    </PageShell>
   );
 };
 

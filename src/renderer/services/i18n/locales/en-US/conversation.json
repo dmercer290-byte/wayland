@@ -311,5 +311,47 @@
     "unknown": "Using this tool's own login",
     "fluxError": "Flux unavailable",
     "fluxErrorNotice": "Flux routing failed for this turn. Check your Flux connection or switch models."
+  },
+  "activation": {
+    "title": "Wake your agents",
+    "subtitle": "Connect a model provider to start running tasks. Pick the path that fits you.",
+    "flux": {
+      "label": "Connect Flux Router",
+      "sublabel": "Free key with a $1 starter credit, no card required. Routes every task to the best-fit specialist model.",
+      "action": "Connect"
+    },
+    "ownKey": {
+      "label": "Use my own key",
+      "sublabel": "Bring an API key from OpenAI, Anthropic, Google, or any of 100+ providers.",
+      "action": "Browse"
+    },
+    "claudeCode": {
+      "label": "Use Claude Code",
+      "sublabel": "Run on your existing Claude Code login, no extra key to manage.",
+      "action": "Use"
+    }
+  },
+  "acpAuthFailure": {
+    "title": "{{backend}} can't sign in here",
+    "subscriptionExplainer": "The vendor blocks subscription logins inside third-party tools like this one. To keep using {{backend}} here, route it through Flux Router, add a provider API key, or sign in to the CLI directly.",
+    "genericExplainer": "{{backend}} could not authenticate. Route it through Flux Router, add a provider API key, or sign in to the CLI to fix this.",
+    "wcoreExplainer": "Wayland Core could not authenticate. The inference provider rejected the API key (401). Unlike Claude Code, Wayland Core has no subscription sign-in to fall back on, so add a working provider key or route it through Flux Router.",
+    "flux": {
+      "label": "Route through Flux",
+      "sublabel": "Free and card-free. Flux runs the model for you, no provider key needed.",
+      "action": "Route"
+    },
+    "addKey": {
+      "label": "Add a {{provider}} API key",
+      "sublabel": "Open Settings and paste an API key from your provider console.",
+      "action": "Add key"
+    },
+    "cliLogin": {
+      "label": "Sign in to the CLI",
+      "sublabel": "Run {{cmd}} in your terminal, then send the message again.",
+      "action": "Copy command",
+      "copied": "Command copied"
+    },
+    "dismiss": "Dismiss"
   }
 }

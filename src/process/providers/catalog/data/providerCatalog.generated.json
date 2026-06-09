@@ -1,0 +1,701 @@
+[
+  {
+    "id": "302ai",
+    "displayName": "302.AI",
+    "baseUrl": "https://api.302.ai/v1",
+    "envVar": "302AI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "abacus",
+    "displayName": "Abacus",
+    "baseUrl": "https://routellm.abacus.ai/v1",
+    "envVar": "ABACUS_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "abliteration-ai",
+    "displayName": "abliteration.ai",
+    "baseUrl": "https://api.abliteration.ai/v1",
+    "envVar": "ABLIT_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "alibaba",
+    "displayName": "Alibaba",
+    "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "envVar": "DASHSCOPE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "alibaba-cn",
+    "displayName": "Alibaba (China)",
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "envVar": "DASHSCOPE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "alibaba-coding-plan",
+    "displayName": "Alibaba Coding Plan",
+    "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
+    "envVar": "ALIBABA_CODING_PLAN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "alibaba-coding-plan-cn",
+    "displayName": "Alibaba Coding Plan (China)",
+    "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+    "envVar": "ALIBABA_CODING_PLAN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "alibaba-token-plan",
+    "displayName": "Alibaba Token Plan",
+    "baseUrl": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    "envVar": "ALIBABA_TOKEN_PLAN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "ambient",
+    "displayName": "Ambient",
+    "baseUrl": "https://api.ambient.xyz/v1",
+    "envVar": "AMBIENT_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "anyapi",
+    "displayName": "AnyAPI",
+    "baseUrl": "https://api.anyapi.ai/v1",
+    "envVar": "ANYAPI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "auriko",
+    "displayName": "Auriko",
+    "baseUrl": "https://api.auriko.ai/v1",
+    "envVar": "AURIKO_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "bailing",
+    "displayName": "Bailing",
+    "baseUrl": "https://api.tbox.cn/api/llm/v1/chat/completions",
+    "envVar": "BAILING_API_TOKEN",
+    "apiPath": ""
+  },
+  {
+    "id": "baseten",
+    "displayName": "Baseten",
+    "baseUrl": "https://inference.baseten.co/v1",
+    "envVar": "BASETEN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "berget",
+    "displayName": "Berget.AI",
+    "baseUrl": "https://api.berget.ai/v1",
+    "envVar": "BERGET_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "chutes",
+    "displayName": "Chutes",
+    "baseUrl": "https://llm.chutes.ai/v1",
+    "envVar": "CHUTES_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "clarifai",
+    "displayName": "Clarifai",
+    "baseUrl": "https://api.clarifai.com/v2/ext/openai/v1",
+    "envVar": "CLARIFAI_PAT",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "claudinio",
+    "displayName": "Claudinio",
+    "baseUrl": "https://api.claudin.io/v1",
+    "envVar": "CLAUDINIO_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "cloudferro-sherlock",
+    "displayName": "CloudFerro Sherlock",
+    "baseUrl": "https://api-sherlock.cloudferro.com/openai/v1",
+    "envVar": "CLOUDFERRO_SHERLOCK_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "cortecs",
+    "displayName": "Cortecs",
+    "baseUrl": "https://api.cortecs.ai/v1",
+    "envVar": "CORTECS_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "crof",
+    "displayName": "CrofAI",
+    "baseUrl": "https://crof.ai/v1",
+    "envVar": "CROF_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "digitalocean",
+    "displayName": "DigitalOcean",
+    "baseUrl": "https://inference.do-ai.run/v1",
+    "envVar": "DIGITALOCEAN_ACCESS_TOKEN",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "dinference",
+    "displayName": "DInference",
+    "baseUrl": "https://api.dinference.com/v1",
+    "envVar": "DINFERENCE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "drun",
+    "displayName": "D.Run (China)",
+    "baseUrl": "https://chat.d.run/v1",
+    "envVar": "DRUN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "evroc",
+    "displayName": "evroc",
+    "baseUrl": "https://models.think.evroc.com/v1",
+    "envVar": "EVROC_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "fastrouter",
+    "displayName": "FastRouter",
+    "baseUrl": "https://go.fastrouter.ai/api/v1",
+    "envVar": "FASTROUTER_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "firepass",
+    "displayName": "Fireworks (Firepass)",
+    "baseUrl": "https://api.fireworks.ai/inference/v1",
+    "envVar": "FIREPASS_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "fireworks-ai",
+    "displayName": "Fireworks AI",
+    "baseUrl": "https://api.fireworks.ai/inference/v1",
+    "envVar": "FIREWORKS_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "friendli",
+    "displayName": "Friendli",
+    "baseUrl": "https://api.friendli.ai/serverless/v1",
+    "envVar": "FRIENDLI_TOKEN",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "frogbot",
+    "displayName": "FrogBot",
+    "baseUrl": "https://app.frogbot.ai/api/v1",
+    "envVar": "FROGBOT_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "github-copilot",
+    "displayName": "GitHub Copilot",
+    "baseUrl": "https://api.githubcopilot.com",
+    "envVar": "GITHUB_TOKEN"
+  },
+  {
+    "id": "github-models",
+    "displayName": "GitHub Models",
+    "baseUrl": "https://models.github.ai/inference",
+    "envVar": "GITHUB_TOKEN",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "gmicloud",
+    "displayName": "GMI Cloud",
+    "baseUrl": "https://api.gmi-serving.com/v1",
+    "envVar": "GMICLOUD_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "helicone",
+    "displayName": "Helicone",
+    "baseUrl": "https://ai-gateway.helicone.ai/v1",
+    "envVar": "HELICONE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "hpc-ai",
+    "displayName": "HPC-AI",
+    "baseUrl": "https://api.hpc-ai.com/inference/v1",
+    "envVar": "HPC_AI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "iflowcn",
+    "displayName": "iFlow",
+    "baseUrl": "https://apis.iflow.cn/v1",
+    "envVar": "IFLOW_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "inception",
+    "displayName": "Inception",
+    "baseUrl": "https://api.inceptionlabs.ai/v1",
+    "envVar": "INCEPTION_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "inceptron",
+    "displayName": "Inceptron",
+    "baseUrl": "https://api.inceptron.io/v1",
+    "envVar": "INCEPTRON_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "inference",
+    "displayName": "Inference",
+    "baseUrl": "https://inference.net/v1",
+    "envVar": "INFERENCE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "io-net",
+    "displayName": "IO.NET",
+    "baseUrl": "https://api.intelligence.io.solutions/api/v1",
+    "envVar": "IOINTELLIGENCE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "jiekou",
+    "displayName": "Jiekou.AI",
+    "baseUrl": "https://api.jiekou.ai/openai",
+    "envVar": "JIEKOU_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "kilo",
+    "displayName": "Kilo Gateway",
+    "baseUrl": "https://api.kilo.ai/api/gateway",
+    "envVar": "KILO_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "kuae-cloud-coding-plan",
+    "displayName": "KUAE Cloud Coding Plan",
+    "baseUrl": "https://coding-plan-endpoint.kuaecloud.net/v1",
+    "envVar": "KUAE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "lilac",
+    "displayName": "Lilac",
+    "baseUrl": "https://api.getlilac.com/v1",
+    "envVar": "LILAC_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "llama",
+    "displayName": "Llama",
+    "baseUrl": "https://api.llama.com/compat/v1",
+    "envVar": "LLAMA_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "llmgateway",
+    "displayName": "LLM Gateway",
+    "baseUrl": "https://api.llmgateway.io/v1",
+    "envVar": "LLMGATEWAY_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "lucidquery",
+    "displayName": "LucidQuery AI",
+    "baseUrl": "https://lucidquery.com/api/v1",
+    "envVar": "LUCIDQUERY_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "meganova",
+    "displayName": "Meganova",
+    "baseUrl": "https://api.meganova.ai/v1",
+    "envVar": "MEGANOVA_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "mixlayer",
+    "displayName": "Mixlayer",
+    "baseUrl": "https://models.mixlayer.ai/v1",
+    "envVar": "MIXLAYER_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "moark",
+    "displayName": "Moark",
+    "baseUrl": "https://moark.com/v1",
+    "envVar": "MOARK_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "modelscope",
+    "displayName": "ModelScope",
+    "baseUrl": "https://api-inference.modelscope.cn/v1",
+    "envVar": "MODELSCOPE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "moonshotai",
+    "displayName": "Moonshot AI",
+    "baseUrl": "https://api.moonshot.ai/v1",
+    "envVar": "MOONSHOT_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "moonshotai-cn",
+    "displayName": "Moonshot AI (China)",
+    "baseUrl": "https://api.moonshot.cn/v1",
+    "envVar": "MOONSHOT_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "morph",
+    "displayName": "Morph",
+    "baseUrl": "https://api.morphllm.com/v1",
+    "envVar": "MORPH_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "nano-gpt",
+    "displayName": "NanoGPT",
+    "baseUrl": "https://nano-gpt.com/api/v1",
+    "envVar": "NANO_GPT_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "nearai",
+    "displayName": "NEAR AI Cloud",
+    "baseUrl": "https://cloud-api.near.ai/v1",
+    "envVar": "NEARAI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "nebius",
+    "displayName": "Nebius Token Factory",
+    "baseUrl": "https://api.tokenfactory.nebius.com/v1",
+    "envVar": "NEBIUS_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "neuralwatt",
+    "displayName": "Neuralwatt",
+    "baseUrl": "https://api.neuralwatt.com/v1",
+    "envVar": "NEURALWATT_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "nova",
+    "displayName": "Nova",
+    "baseUrl": "https://api.nova.amazon.com/v1",
+    "envVar": "NOVA_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "novita-ai",
+    "displayName": "NovitaAI",
+    "baseUrl": "https://api.novita.ai/openai",
+    "envVar": "NOVITA_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "ollama-cloud",
+    "displayName": "Ollama Cloud",
+    "baseUrl": "https://ollama.com/v1",
+    "envVar": "OLLAMA_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "opencode",
+    "displayName": "OpenCode Zen",
+    "baseUrl": "https://opencode.ai/zen/v1",
+    "envVar": "OPENCODE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "opencode-go",
+    "displayName": "OpenCode Go",
+    "baseUrl": "https://opencode.ai/zen/go/v1",
+    "envVar": "OPENCODE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "orcarouter",
+    "displayName": "OrcaRouter",
+    "baseUrl": "https://api.orcarouter.ai/v1",
+    "envVar": "ORCAROUTER_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "ovhcloud",
+    "displayName": "OVHcloud AI Endpoints",
+    "baseUrl": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+    "envVar": "OVHCLOUD_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "perplexity-agent",
+    "displayName": "Perplexity Agent",
+    "baseUrl": "https://api.perplexity.ai/v1",
+    "envVar": "PERPLEXITY_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "poe",
+    "displayName": "Poe",
+    "baseUrl": "https://api.poe.com/v1",
+    "envVar": "POE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "poolside",
+    "displayName": "Poolside",
+    "baseUrl": "https://inference.poolside.ai/v1",
+    "envVar": "POOLSIDE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "qihang-ai",
+    "displayName": "QiHang",
+    "baseUrl": "https://api.qhaigc.net/v1",
+    "envVar": "QIHANG_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "qiniu-ai",
+    "displayName": "Qiniu",
+    "baseUrl": "https://api.qnaigc.com/v1",
+    "envVar": "QINIU_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "regolo-ai",
+    "displayName": "Regolo AI",
+    "baseUrl": "https://api.regolo.ai/v1",
+    "envVar": "REGOLO_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "requesty",
+    "displayName": "Requesty",
+    "baseUrl": "https://router.requesty.ai/v1",
+    "envVar": "REQUESTY_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "routing-run",
+    "displayName": "routing.run",
+    "baseUrl": "https://ai.routing.sh/v1",
+    "envVar": "ROUTING_RUN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "sarvam",
+    "displayName": "Sarvam AI",
+    "baseUrl": "https://api.sarvam.ai/v1",
+    "envVar": "SARVAM_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "scaleway",
+    "displayName": "Scaleway",
+    "baseUrl": "https://api.scaleway.ai/v1",
+    "envVar": "SCALEWAY_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "siliconflow",
+    "displayName": "SiliconFlow",
+    "baseUrl": "https://api.siliconflow.com/v1",
+    "envVar": "SILICONFLOW_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "siliconflow-cn",
+    "displayName": "SiliconFlow (China)",
+    "baseUrl": "https://api.siliconflow.cn/v1",
+    "envVar": "SILICONFLOW_CN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "stackit",
+    "displayName": "STACKIT",
+    "baseUrl": "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1",
+    "envVar": "STACKIT_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "stepfun",
+    "displayName": "StepFun",
+    "baseUrl": "https://api.stepfun.com/v1",
+    "envVar": "STEPFUN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "stepfun-ai",
+    "displayName": "StepFun AI",
+    "baseUrl": "https://api.stepfun.ai/step_plan/v1",
+    "envVar": "STEPFUN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "submodel",
+    "displayName": "submodel",
+    "baseUrl": "https://llm.submodel.ai/v1",
+    "envVar": "SUBMODEL_INSTAGEN_ACCESS_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "synthetic",
+    "displayName": "Synthetic",
+    "baseUrl": "https://api.synthetic.new/openai/v1",
+    "envVar": "SYNTHETIC_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "tencent-coding-plan",
+    "displayName": "Tencent Coding Plan (China)",
+    "baseUrl": "https://api.lkeap.cloud.tencent.com/coding/v3",
+    "envVar": "TENCENT_CODING_PLAN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "tencent-tokenhub",
+    "displayName": "Tencent TokenHub",
+    "baseUrl": "https://tokenhub.tencentmaas.com/v1",
+    "envVar": "TENCENT_TOKENHUB_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "the-grid-ai",
+    "displayName": "The Grid AI",
+    "baseUrl": "https://api.thegrid.ai/v1",
+    "envVar": "THEGRIDAI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "umans-ai-coding-plan",
+    "displayName": "Umans AI Coding Plan",
+    "baseUrl": "https://api.code.umans.ai/v1",
+    "envVar": "UMANS_AI_CODING_PLAN_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "upstage",
+    "displayName": "Upstage",
+    "baseUrl": "https://api.upstage.ai/v1/solar",
+    "envVar": "UPSTAGE_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "vivgrid",
+    "displayName": "Vivgrid",
+    "baseUrl": "https://api.vivgrid.com/v1",
+    "envVar": "VIVGRID_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "vultr",
+    "displayName": "Vultr",
+    "baseUrl": "https://api.vultrinference.com/v1",
+    "envVar": "VULTR_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "wafer.ai",
+    "displayName": "Wafer",
+    "baseUrl": "https://pass.wafer.ai/v1",
+    "envVar": "WAFER_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "wandb",
+    "displayName": "Weights & Biases",
+    "baseUrl": "https://api.inference.wandb.ai/v1",
+    "envVar": "WANDB_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "xiaomi",
+    "displayName": "Xiaomi",
+    "baseUrl": "https://api.xiaomimimo.com/v1",
+    "envVar": "XIAOMI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "xiaomi-token-plan-ams",
+    "displayName": "Xiaomi Token Plan (Europe)",
+    "baseUrl": "https://token-plan-ams.xiaomimimo.com/v1",
+    "envVar": "XIAOMI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "xiaomi-token-plan-cn",
+    "displayName": "Xiaomi Token Plan (China)",
+    "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+    "envVar": "XIAOMI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "xiaomi-token-plan-sgp",
+    "displayName": "Xiaomi Token Plan (Singapore)",
+    "baseUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "envVar": "XIAOMI_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "xpersona",
+    "displayName": "Xpersona",
+    "baseUrl": "https://www.xpersona.co/v1",
+    "envVar": "XPERSONA_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "zai",
+    "displayName": "Z.AI",
+    "baseUrl": "https://api.z.ai/api/paas/v4",
+    "envVar": "ZHIPU_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "zai-coding-plan",
+    "displayName": "Z.AI Coding Plan",
+    "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+    "envVar": "ZHIPU_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "zenmux",
+    "displayName": "ZenMux",
+    "baseUrl": "https://zenmux.ai/api/v1",
+    "envVar": "ZENMUX_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "zhipuai",
+    "displayName": "Zhipu AI",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "envVar": "ZHIPU_API_KEY",
+    "apiPath": "/chat/completions"
+  },
+  {
+    "id": "zhipuai-coding-plan",
+    "displayName": "Zhipu AI Coding Plan",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "envVar": "ZHIPU_API_KEY",
+    "apiPath": "/chat/completions"
+  }
+]

@@ -37,6 +37,8 @@ import MentionDropdown, { MentionSelectorBadge } from './components/MentionDropd
 import FeedbackReportModal from '@/renderer/components/settings/SettingsModal/contents/FeedbackReportModal';
 import SpeechInputButton from '@/renderer/components/chat/SpeechInputButton';
 import { appendSpeechTranscript } from '@/renderer/hooks/system/useSpeechInput';
+import { useHiddenAgents } from '@renderer/hooks/assistant/useHiddenAgents';
+import { filterVisibleAgents } from './hooks/agentSelectionUtils';
 import { useGuidAgentSelection } from './hooks/useGuidAgentSelection';
 import { useGuidInput } from './hooks/useGuidInput';
 import { useGuidMention } from './hooks/useGuidMention';
@@ -134,6 +136,16 @@ const GuidPage: React.FC = () => {
     resetAssistant: resetAssistantRequested,
     locationKey: location.key,
   });
+
+  // Agents the user toggled off on the Agents settings page are removed from
+  // the toolbar strip but stay detected. Guard rails: the currently-selected
+  // agent is never hidden out from under the user, and we never collapse the
+  // strip to empty (if every agent ends up hidden, fall back to the full set).
+  const { hiddenSet } = useHiddenAgents();
+  const visibleAgents = useMemo(
+    () => filterVisibleAgents(agentSelection.availableAgents, hiddenSet, agentSelection.selectedAgentKey),
+    [agentSelection.availableAgents, agentSelection.selectedAgentKey, hiddenSet]
+  );
 
   // Cold-boot launchpad gate (cross-audit smoke HIGH).
   //
@@ -1036,11 +1048,11 @@ const GuidPage: React.FC = () => {
                 />
               ) : null}
             </div>
-          ) : !showPresetHero && agentSelection.availableAgents === undefined ? (
+          ) : !showPresetHero && visibleAgents === undefined ? (
             <AgentPillBarSkeleton />
-          ) : !showPresetHero && agentSelection.availableAgents.length > 0 ? (
+          ) : !showPresetHero && visibleAgents.length > 0 ? (
             <AgentPillBar
-              availableAgents={agentSelection.availableAgents}
+              availableAgents={visibleAgents}
               selectedAgentKey={agentSelection.selectedAgentKey}
               getAgentKey={agentSelection.getAgentKey}
               onSelectAgent={handleSelectAgent}

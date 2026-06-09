@@ -16,6 +16,7 @@ import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher'
 import BaseAgentManager from '@process/task/BaseAgentManager';
 import { IpcAgentEventEmitter } from '@process/task/IpcAgentEventEmitter';
 import { teamEventBus } from '@process/team/teamEventBus';
+import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
 
 export interface NanoBotAgentManagerData {
   conversation_id: string;
@@ -80,6 +81,9 @@ class NanoBotAgentManager extends BaseAgentManager<NanoBotAgentManagerData> {
     if (msg.type === 'finish' || msg.type === 'error') {
       teamEventBus.emit('responseStream', msg);
     }
+    // Emit to the Channel event bus so channel-bound conversations get replies
+    // (without this a NanoBot channel turn never delivers and hangs on the queue).
+    channelEventBus.emitAgentMessage(this.conversation_id, msg);
   }
 
   private handleSignalEvent(message: IResponseMessage): void {
@@ -97,6 +101,9 @@ class NanoBotAgentManager extends BaseAgentManager<NanoBotAgentManagerData> {
     if (msg.type === 'finish' || msg.type === 'error') {
       teamEventBus.emit('responseStream', msg);
     }
+    // Forward signals (finish/error) to the Channel event bus so the channel
+    // turn completes and the per-conversation send queue is released.
+    channelEventBus.emitAgentMessage(this.conversation_id, msg);
   }
 
   async sendMessage(data: { content: string; files?: string[]; msg_id?: string; hidden?: boolean; silent?: boolean }) {
@@ -154,6 +161,17 @@ class NanoBotAgentManager extends BaseAgentManager<NanoBotAgentManagerData> {
 
     ipcBridge.conversation.responseStream.emit(message);
     teamEventBus.emit('responseStream', message);
+
+    // Deliver the error to channels AND release the per-conversation send queue
+    // (ChannelMessageService only releases on 'finish'), mirroring WCore/Acp so a
+    // NanoBot start/send failure doesn't hang the channel.
+    channelEventBus.emitAgentMessage(this.conversation_id, message);
+    channelEventBus.emitAgentMessage(this.conversation_id, {
+      type: 'finish',
+      conversation_id: this.conversation_id,
+      msg_id: uuid(),
+      data: null,
+    });
   }
 
   /**

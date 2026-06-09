@@ -85,6 +85,7 @@ export class PairingService {
 
     // Emit event for Settings UI
     channelBridge.pairingRequested.emit(request);
+    await this.emitPendingChanged();
 
     return { code, expiresAt };
   }
@@ -190,6 +191,7 @@ export class PairingService {
     const existingUser = db.getChannelUserByPlatform(request.platformUserId, request.platformType);
     if (existingUser.success && existingUser.data) {
       db.updatePairingRequestStatus(code, 'approved');
+      await this.emitPendingChanged();
       return { success: true, user: existingUser.data };
     }
 
@@ -213,8 +215,46 @@ export class PairingService {
 
     // Emit user authorized event
     channelBridge.userAuthorized.emit(user);
+    await this.emitPendingChanged();
 
     return { success: true, user };
+  }
+
+  /**
+   * Authorize a channel "owner" with no pairing code. Used for trusted
+   * self-conversations - e.g. on a linked-device WhatsApp account the operator
+   * messages their own number, so requiring them to approve a pairing request
+   * with themselves is pointless friction. Idempotent: returns the existing
+   * authorized user if one is already on record.
+   *
+   * SECURITY CONTRACT: this bypasses human approval and trusts `platformUserId`
+   * entirely, so the CALLER MUST guarantee that `platformUserId` is the
+   * operator's OWN identity, established from the authenticated channel session
+   * (e.g. the linked device's own JID) and NOT from any attacker-influenceable
+   * inbound field. Passing a sender-supplied id here is a full authorization
+   * bypass. Current sole caller: ActionExecutor, gated on message.isOwner, which
+   * WhatsAppPlugin sets only when the chat matches the session's own JID/LID.
+   */
+  async authorizeOwner(
+    platformUserId: string,
+    platformType: PluginType,
+    displayName: string
+  ): Promise<IChannelUser | null> {
+    const db = await getDatabase();
+    const existing = db.getChannelUserByPlatform(platformUserId, platformType);
+    if (existing.success && existing.data) return existing.data;
+
+    const user: IChannelUser = {
+      id: `assistant_user_${Date.now()}_${crypto.randomBytes(4).toString('hex').slice(0, 6)}`,
+      platformUserId,
+      platformType,
+      displayName,
+      authorizedAt: Date.now(),
+    };
+    const createResult = db.createChannelUser(user);
+    if (!createResult.success) return null;
+    channelBridge.userAuthorized.emit(user);
+    return user;
   }
 
   /**
@@ -229,8 +269,17 @@ export class PairingService {
       return { success: false, error: 'Pairing request not found' };
     }
 
+    // Only a still-pending request can be rejected. Mirrors approvePairing's
+    // guard so an already-approved or expired code cannot be flipped to
+    // 'rejected' (which would be misleading - reject does NOT revoke an already
+    // authorized user; that is a separate, deliberate action).
+    if (request.status !== 'pending') {
+      return { success: false, error: `Pairing request already ${request.status}` };
+    }
+
     // Update status
     db.updatePairingRequestStatus(code, 'rejected');
+    await this.emitPendingChanged();
 
     return { success: true };
   }
@@ -255,7 +304,11 @@ export class PairingService {
   async cleanupExpired(): Promise<number> {
     const db = await getDatabase();
     const result = db.cleanupExpiredPairingRequests();
-    return result.success ? (result.data ?? 0) : 0;
+    const cleaned = result.success ? (result.data ?? 0) : 0;
+    if (cleaned > 0) {
+      await this.emitPendingChanged();
+    }
+    return cleaned;
   }
 
   /**
@@ -265,6 +318,21 @@ export class PairingService {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
+    }
+  }
+
+  /**
+   * Push the refreshed pending pairing list to the renderer. Called after every
+   * state transition (create / approve / reject / expire) so the Settings UI
+   * stays live without polling. Best-effort: a failed read still resolves with
+   * an empty list rather than throwing into the caller's mutation path.
+   */
+  private async emitPendingChanged(): Promise<void> {
+    try {
+      const pending = await this.getPendingRequests();
+      channelBridge.pairingRequestsChanged.emit(pending);
+    } catch (error) {
+      console.error('[PairingService] emitPendingChanged error:', error);
     }
   }
 

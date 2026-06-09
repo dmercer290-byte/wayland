@@ -36,8 +36,12 @@ const { mockSafeStorage } = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({ safeStorage: mockSafeStorage }));
 
-import { createModelRegistryHandlers, CloudRegistrySource } from '@process/providers/ipc/modelRegistryIpc';
-import type { ModelRegistryDeps } from '@process/providers/ipc/modelRegistryIpc';
+import {
+  createModelRegistryHandlers,
+  CloudRegistrySource,
+  resolveSpawnSecretsFromRepo,
+} from '@process/providers/ipc/modelRegistryIpc';
+import type { ModelRegistryDeps, SpawnHandle } from '@process/providers/ipc/modelRegistryIpc';
 
 describe('CloudRegistrySource - google-auth Gemini catalog (zero-models regression)', () => {
   // A google-auth Gemini connection routes through the cloud-synthesis path but
@@ -780,7 +784,7 @@ describe('modelRegistry IPC - rekey', () => {
 });
 
 describe('modelRegistry IPC - resolveForChatStart', () => {
-  it('returns the chat-start payload for a connected api-key provider', async () => {
+  it('returns the non-secret chat-start handle for a connected api-key provider', async () => {
     const { deps, repo } = makeFakes();
     repo.upsertRegistryProvider({
       providerId: 'openai',
@@ -797,9 +801,50 @@ describe('modelRegistry IPC - resolveForChatStart', () => {
       expect(result.provider.providerId).toBe('openai');
       expect(result.provider.platform).toBe('openai');
       expect(result.provider.modelId).toBe('gpt-4o');
-      expect(result.provider.apiKey).toBe('sk-resolve');
       expect(result.provider.baseUrl).toBe('https://api.openai.com/v1');
+      // Defaults to the single-account row when no accountId is passed (audit C2/C5).
+      expect(result.provider.accountId).toBe('default');
     }
+  });
+
+  // Audit C4: the decrypted key must NEVER cross IPC to the renderer. The handler
+  // returns only a non-secret handle - no apiKey / bedrockConfig / cloudFields.
+  it('never returns decrypted secrets to the renderer (audit C4)', async () => {
+    const { deps, repo } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'openai',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'sk-secret-must-not-leak' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'openai', modelId: 'gpt-4o' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const serialized = JSON.stringify(result.provider);
+      expect(serialized).not.toContain('sk-secret-must-not-leak');
+      expect('apiKey' in result.provider).toBe(false);
+      expect('bedrockConfig' in result.provider).toBe(false);
+      expect('cloudFields' in result.provider).toBe(false);
+    }
+  });
+
+  it('echoes an explicit accountId back on the handle', async () => {
+    const { deps, repo } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'openai',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'sk-resolve' },
+    });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.resolveForChatStart({ providerId: 'openai', modelId: 'gpt-4o', accountId: 'acct_beta' });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.provider.accountId).toBe('acct_beta');
   });
 
   it('preserves a user-saved custom baseUrl over the canonical one', async () => {
@@ -818,7 +863,7 @@ describe('modelRegistry IPC - resolveForChatStart', () => {
     if (result.ok) expect(result.provider.baseUrl).toBe('https://my-host.example.com/v1');
   });
 
-  it('returns the bedrockConfig block for an aws-bedrock provider', async () => {
+  it('returns the bedrock platform handle without leaking the cloud creds (audit C4)', async () => {
     const { deps, repo } = makeFakes();
     repo.upsertRegistryProvider({
       providerId: 'aws-bedrock',
@@ -836,12 +881,10 @@ describe('modelRegistry IPC - resolveForChatStart', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.provider.platform).toBe('bedrock');
-      expect(result.provider.bedrockConfig).toEqual({
-        authMethod: 'accessKey',
-        accessKeyId: 'AKIA',
-        secretAccessKey: 'sk',
-        region: 'us-east-1',
-      });
+      // The bedrock creds (incl. the secret access key) are resolved in main at
+      // spawn, never returned to the renderer.
+      expect('bedrockConfig' in result.provider).toBe(false);
+      expect(JSON.stringify(result.provider)).not.toContain('AKIA');
     }
   });
 
@@ -886,11 +929,10 @@ describe('modelRegistry IPC - resolveForChatStart', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.provider.platform).toBe('gemini-vertex-ai');
-      expect(result.provider.cloudFields).toEqual({
-        projectId: 'p',
-        region: 'us-central1',
-        serviceAccountJson: '{}',
-      });
+      // cloudFields (the vertex service-account creds) are resolved in main at
+      // spawn, never returned to the renderer (audit C4).
+      expect('cloudFields' in result.provider).toBe(false);
+      expect(JSON.stringify(result.provider)).not.toContain('serviceAccountJson');
     }
   });
 
@@ -912,11 +954,10 @@ describe('modelRegistry IPC - resolveForChatStart', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.provider.bedrockConfig).toEqual({
-        authMethod: 'profile',
-        region: 'us-east-1',
-        profile: 'default',
-      });
+      // Profile-auth bedrock still routes to the bedrock platform, but the creds
+      // are resolved at spawn - the handle carries no bedrockConfig (audit C4).
+      expect(result.provider.platform).toBe('bedrock');
+      expect('bedrockConfig' in result.provider).toBe(false);
     }
   });
 
@@ -976,7 +1017,8 @@ describe('modelRegistry IPC - resolveForChatStart', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.provider.platform).toBe('gemini-with-google-auth');
-      expect(result.provider.apiKey).toBe(''); // No key - OAuth tokens live elsewhere.
+      // OAuth tokens live in the main-process auth store; the handle has no key field.
+      expect('apiKey' in result.provider).toBe(false);
     }
   });
 });
@@ -1409,5 +1451,139 @@ describe('connect - baseUrl persistence (Fix B2)', () => {
     const stored = repo.providers.get('openai-compatible');
     expect(stored?.creds).toEqual({ key: 'sk-test' });
     expect((stored?.creds as Record<string, unknown>)?.baseUrl).toBeUndefined();
+  });
+});
+
+describe('resolveSpawnSecretsFromRepo - keyless local provider (Ollama)', () => {
+  function handle(over: Partial<SpawnHandle> = {}): SpawnHandle {
+    return { providerId: 'ollama-local', modelId: 'llama3:latest', ...over };
+  }
+
+  it('resolves a payload (empty apiKey + local baseUrl) for ollama-local with no key', () => {
+    const repo = new FakeRepo();
+    repo.upsertRegistryProvider({
+      providerId: 'ollama-local',
+      connectedVia: 'auto-local',
+      state: 'connected',
+      creds: { key: '', baseUrl: 'http://127.0.0.1:11434/v1' },
+    });
+
+    const secrets = resolveSpawnSecretsFromRepo(repo as never, handle());
+    // Finding 2: a keyless local provider carries NO credential - represented as
+    // `apiKey: undefined`, NOT `''`, so the spawn merge can never inherit a
+    // stale legacy key.
+    expect(secrets).toEqual({ apiKey: undefined, baseUrl: 'http://127.0.0.1:11434/v1' });
+  });
+
+  it('resolves a payload for a custom localhost openai-compatible provider with no key', () => {
+    const repo = new FakeRepo();
+    repo.upsertRegistryProvider({
+      providerId: 'openai-compatible',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: '', baseUrl: 'http://localhost:1234/v1' },
+    });
+
+    const secrets = resolveSpawnSecretsFromRepo(repo as never, handle({ providerId: 'openai-compatible' }));
+    // Finding 2: keyless local resolves to `apiKey: undefined` (no credential).
+    expect(secrets).toEqual({ apiKey: undefined, baseUrl: 'http://localhost:1234/v1' });
+  });
+
+  it('returns null (undecryptable) for a CLOUD provider with an empty key - no regression', () => {
+    const repo = new FakeRepo();
+    repo.upsertRegistryProvider({
+      providerId: 'openai',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: '' },
+    });
+
+    // openai resolves to the cloud base url; an empty key there stays
+    // undecryptable, so the spawn resolver returns null.
+    expect(resolveSpawnSecretsFromRepo(repo as never, handle({ providerId: 'openai' }))).toBeNull();
+  });
+
+  it('returns the real key for a cloud provider that HAS a key', () => {
+    const repo = new FakeRepo();
+    repo.upsertRegistryProvider({
+      providerId: 'openai',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'sk-real' },
+    });
+
+    const secrets = resolveSpawnSecretsFromRepo(repo as never, handle({ providerId: 'openai' }));
+    expect(secrets?.apiKey).toBe('sk-real');
+    expect(secrets?.baseUrl).toBe('https://api.openai.com/v1');
+  });
+});
+
+describe('modelRegistry IPC - refreshAllOnce SSRF gate (ollama-local exemption)', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+  });
+
+  it('refreshes ollama-local (loopback exempt, re-probed) but skips a random localhost custom provider', async () => {
+    // In production the SSRF gate rejects ALL loopback http base urls. The
+    // ollama-local exemption (id + loopback baseUrl) is the ONLY thing that lets
+    // the native local provider through, and it refreshes via a live daemon
+    // re-probe - NOT buildAndPersistCatalog (Finding 1). A random localhost
+    // custom provider stays skipped (SSRF closed).
+    process.env.NODE_ENV = 'production';
+
+    const { deps, repo } = makeFakes();
+    const probeOllama = vi.fn().mockResolvedValue({ running: true, models: ['llama3:latest'] });
+    deps.probeOllama = probeOllama;
+
+    // The native local provider - its hardcoded loopback base url must NOT be
+    // skipped by the local-host SSRF gate (exempt by id + loopback).
+    repo.upsertRegistryProvider({
+      providerId: 'ollama-local',
+      connectedVia: 'auto-local',
+      state: 'connected',
+      creds: { key: '', baseUrl: 'http://127.0.0.1:11434/v1' },
+    });
+
+    // A user's arbitrary localhost custom provider - still skipped (SSRF closed).
+    repo.upsertRegistryProvider({
+      providerId: 'openai-compatible',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'sk-x', baseUrl: 'http://127.0.0.1:9999/v1' },
+    });
+
+    const h = createModelRegistryHandlers(deps);
+    const summary = await h.refreshAllOnce();
+
+    expect(probeOllama).toHaveBeenCalledTimes(1);
+    expect(summary.succeeded).toContain('ollama-local');
+    // Catalog refreshed from the live probe (not wiped to empty).
+    expect(repo.getRegistryCatalog('ollama-local').map((m) => m.id)).toEqual(['llama3:latest']);
+    expect(summary.failed).toContain('openai-compatible');
+    expect(summary.succeeded).not.toContain('openai-compatible');
+  });
+
+  it('does NOT exempt ollama-local when its stored baseUrl is non-loopback (Finding 5)', async () => {
+    process.env.NODE_ENV = 'production';
+    const { deps, repo } = makeFakes();
+    const probeOllama = vi.fn().mockResolvedValue({ running: true, models: ['x'] });
+    deps.probeOllama = probeOllama;
+
+    // A row claiming to be ollama-local but pointing off-loopback (link-local
+    // cloud-metadata) must NOT get the keyless re-probe exemption.
+    repo.upsertRegistryProvider({
+      providerId: 'ollama-local',
+      connectedVia: 'auto-local',
+      state: 'connected',
+      creds: { key: '', baseUrl: 'http://169.254.169.254/v1' },
+    });
+
+    const h = createModelRegistryHandlers(deps);
+    const summary = await h.refreshAllOnce();
+
+    expect(probeOllama).not.toHaveBeenCalled();
+    expect(summary.failed).toContain('ollama-local');
+    expect(summary.succeeded).not.toContain('ollama-local');
   });
 });

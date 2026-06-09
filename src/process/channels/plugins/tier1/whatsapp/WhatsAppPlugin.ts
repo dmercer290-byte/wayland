@@ -50,6 +50,7 @@ import type {
   PluginType,
 } from '../../../types';
 import { BasePlugin } from '../../BasePlugin';
+import { getChannelWelcomeService } from '../../../gateway/ChannelWelcomeService';
 
 /** Backend selector for the whatsapp-bridge subprocess. */
 export type WhatsAppBackend = 'baileys' | 'whatsapp-web' | 'meta-business';
@@ -216,6 +217,19 @@ export class WhatsAppPlugin extends BasePlugin {
   };
 
   private backend: WhatsAppBackend = 'baileys';
+  /**
+   * Channel mode. 'personal' (default) = the linked account is the operator's
+   * own number; only the self-chat is trusted and unknown contacts are ignored
+   * silently (no pairing, no welcome, no reply). 'dedicated' = a separate bot
+   * number others may pair with; the owner is identified via ownerNumbers.
+   */
+  private mode: 'personal' | 'dedicated' = 'personal';
+  /**
+   * Dedicated-mode owner allowlist: bare digits of the operator's personal
+   * WhatsApp number(s). Inbound senders whose bare number matches are
+   * auto-authorized as owner. Unused in personal mode (owner = self-chat).
+   */
+  private ownerNumbers: readonly string[] = [];
   private child: ChildProcess | null = null;
   private rpcId = 0;
   private readonly pending = new Map<
@@ -228,6 +242,22 @@ export class WhatsAppPlugin extends BasePlugin {
   private readonly activeUsers = new Set<string>();
   private accessToken: string | null = null;
   private phoneNumberId: string | null = null;
+  /**
+   * The linked account's own JID/LID, captured from the bridge's
+   * `connection.status: connected` event. Used for the self-chat model: on a
+   * Baileys/whatsapp-web (linked-device) account, Wayland talks to the user in
+   * their own "message yourself" thread, so it must know its own address both
+   * to send the welcome and to scope which inbound messages it answers.
+   */
+  private ownJid: string | null = null;
+  private ownLid: string | null = null;
+  /**
+   * IDs of messages this plugin sent. Baileys echoes our own sends back through
+   * messages.upsert (fromMe), and on a self-chat they share the chatId we
+   * answer in - so without de-duping by id the agent would reply to itself.
+   * Bounded so it cannot grow unboundedly on a long-lived session.
+   */
+  private readonly recentSentIds = new Set<string>();
   /**
    * W-10 (v0.4.3): reconnect ladder for the bridge subprocess. Mirrors
    * OpenClaw's `reconnect.ts` shape - exponential backoff capped at maxMs,
@@ -253,6 +283,17 @@ export class WhatsAppPlugin extends BasePlugin {
       throw new Error(`Unsupported WhatsApp backend: ${requested}`);
     }
     this.backend = requested;
+
+    // Mode + owner allowlist. Default 'personal' (safe) when absent so existing
+    // configs become silent immediately. ownerNumbers is normalized to bare
+    // digits up front so inbound matching is a plain equality check.
+    this.mode = creds.mode === 'dedicated' ? 'dedicated' : 'personal';
+    this.ownerNumbers = Array.isArray(creds.ownerNumbers)
+      ? creds.ownerNumbers
+          .filter((n): n is string => typeof n === 'string')
+          .map((n) => WhatsAppPlugin.bareNumber(n))
+          .filter((n) => n.length > 0)
+      : [];
 
     if (this.backend === 'meta-business') {
       const accessToken = typeof creds.accessToken === 'string' ? creds.accessToken.trim() : '';
@@ -323,6 +364,13 @@ export class WhatsAppPlugin extends BasePlugin {
     this.activeUsers.clear();
     this.lastQr = null;
     this.connectionState = 'disconnected';
+    // Re-learn our own address on the next connect. The welcome marker is NOT
+    // cleared here: a normal stop (app restart / re-enable) must not re-send the
+    // welcome. It is re-armed only on a genuine re-pair (logged_out), handled in
+    // the connection.status notification below.
+    this.ownJid = null;
+    this.ownLid = null;
+    this.recentSentIds.clear();
   }
 
   // ==================== Outbound surface ====================
@@ -353,7 +401,9 @@ export class WhatsAppPlugin extends BasePlugin {
           params.mediaUrl = mediaUrl; // fall-back hint for bridges that accept either
         }
         const result = (await this.rpc('sendMedia', params)) as { messageId: string | null } | null;
-        return result?.messageId ?? '';
+        const id = result?.messageId ?? '';
+        if (id) this.rememberSentId(id);
+        return id;
       } finally {
         if (tempPath) {
           fs.promises.unlink(tempPath).catch(() => {
@@ -367,7 +417,79 @@ export class WhatsAppPlugin extends BasePlugin {
     const result = (await this.rpc('sendText', { chatId, text })) as
       | { messageId: string | null }
       | null;
-    return result?.messageId ?? '';
+    const id = result?.messageId ?? '';
+    if (id) this.rememberSentId(id);
+    return id;
+  }
+
+  /** Remember an id we sent so its echo through messages.upsert is ignored. */
+  private rememberSentId(id: string): void {
+    this.recentSentIds.add(id);
+    if (this.recentSentIds.size > 200) {
+      const oldest = this.recentSentIds.values().next().value;
+      if (oldest !== undefined) this.recentSentIds.delete(oldest);
+    }
+  }
+
+  /**
+   * Normalize a JID / chat id / user-entered number to a bare comparable form:
+   * strip the `:device` suffix and the `@host` part, then keep digits only.
+   * Shared by isSelfChat (personal) and owner-number matching (dedicated) so
+   * both use identical normalization.
+   */
+  private static bareNumber(value: string | null): string {
+    if (!value) return '';
+    return value.replace(/:\d+/, '').replace(/@.*/, '').replace(/\D/g, '');
+  }
+
+  /** Whether a chatId is the linked account's own "message yourself" thread. */
+  private isSelfChat(chatId: string): boolean {
+    const c = WhatsAppPlugin.bareNumber(chatId);
+    if (c.length === 0) return false;
+    return c === WhatsAppPlugin.bareNumber(this.ownJid) || c === WhatsAppPlugin.bareNumber(this.ownLid);
+  }
+
+  /**
+   * Dedicated-mode owner check: whether an inbound sender's bare number matches
+   * a configured owner number. Personal mode never calls this (owner =
+   * self-chat). Returns false when no owner numbers are configured.
+   */
+  private isOwnerNumber(senderId: string, senderRawJid?: string): boolean {
+    if (this.ownerNumbers.length === 0) return false;
+    const candidates = [WhatsAppPlugin.bareNumber(senderRawJid ?? null), WhatsAppPlugin.bareNumber(senderId)].filter(
+      (n) => n.length > 0
+    );
+    return candidates.some((n) => this.ownerNumbers.includes(n));
+  }
+
+  /**
+   * Self-chat target for the welcome handshake. Linked-device backends only -
+   * the Meta cloud bot has no self-thread, so it returns null and is never
+   * welcomed (preserving the original meta-business skip). PluginManager drives
+   * the once-per-account send via ChannelWelcomeService.
+   */
+  override getSelfTarget(): string | null {
+    if (this.backend === 'meta-business') return null;
+    return this.ownJid ?? this.ownLid;
+  }
+
+  /**
+   * Personal mode = the operator's own number: unknown contacts must get
+   * nothing, so pairing is disallowed and the gate stays silent. Dedicated mode
+   * = a separate bot number others may pair with, so pairing is allowed.
+   */
+  override allowsContactPairing(): boolean {
+    return this.mode === 'dedicated';
+  }
+
+  /**
+   * Stable account identity for the welcome marker: the linked account's own
+   * JID. getBotInfo().id is a backend label ("whatsapp-baileys"), not the
+   * account, so it cannot key a per-account marker - override with the JID.
+   */
+  override getAccountIdentity(): string | null {
+    if (this.backend === 'meta-business') return this.phoneNumberId;
+    return this.ownJid ?? this.ownLid;
   }
 
   /**
@@ -549,8 +671,13 @@ export class WhatsAppPlugin extends BasePlugin {
   }
 
   /** Renderer surfaces this in the config form to render the pairing QR. */
-  getQrCode(): string | null {
+  override getQrCode(): string | null {
     return this.lastQr;
+  }
+
+  /** Live WhatsApp transport state so the renderer shows connected vs waiting. */
+  override getConnectionState(): string | null {
+    return this.connectionState;
   }
 
   // ==================== Bridge plumbing ====================
@@ -693,11 +820,30 @@ export class WhatsAppPlugin extends BasePlugin {
           // delay instead of resuming the previous backoff curve.
           this.reconnectAttempts = 0;
           if (this._status === 'starting') this.setStatus('running');
+          // A live connection clears any stale "disconnected" error so the
+          // renderer reflects connected, not the earlier transient drop.
+          this.errorMessage = null;
+          // Capture our own address (needed for the self-chat model). The
+          // notifyStatusChange() below lets PluginManager fire the one-time
+          // welcome handshake now that getSelfTarget()/getAccountIdentity()
+          // resolve, so the user has a live thread to reply into.
+          if (typeof params.jid === 'string') this.ownJid = params.jid;
+          if (typeof params.lid === 'string') this.ownLid = params.lid;
         } else if (state === 'logged_out') {
+          // Genuine re-pair: clear the once-per-account welcome marker so the
+          // next account that links gets re-greeted. ownJid still holds the
+          // logged-out account's id here, so re-arm against it before clearing.
+          const priorAccount = this.ownJid ?? this.ownLid;
+          if (priorAccount) {
+            void getChannelWelcomeService().rearm(this.type, priorAccount);
+          }
           this.setStatus('error', 'WhatsApp session logged out (re-pair required)');
         } else if (state === 'disconnected' && this._status === 'running') {
           this.setError('WhatsApp bridge disconnected');
         }
+        // Push every transport-state change to the renderer so the QR section
+        // can show connecting / connected / waiting accurately.
+        this.notifyStatusChange();
         return;
       }
       case 'qr.update': {
@@ -705,6 +851,8 @@ export class WhatsAppPlugin extends BasePlugin {
         if (qr) {
           this.lastQr = qr;
           console.log('[whatsappPlugin] QR pairing code refreshed');
+          // Push the new QR to the renderer (it rides on the plugin status).
+          this.notifyStatusChange();
         }
         return;
       }
@@ -724,7 +872,17 @@ export class WhatsAppPlugin extends BasePlugin {
       console.warn('[whatsappPlugin] dropping inbound without messageId/chatId');
       return;
     }
-    if (msg.fromMe) return; // ignore self-echoes to avoid loops.
+    // Drop our own sends echoing back (welcome + agent replies) so the agent
+    // never answers itself.
+    if (this.recentSentIds.has(msg.messageId)) return;
+    if (msg.fromMe) {
+      // fromMe is the user's own device: normally noise (their outgoing
+      // messages to other people, plus echoes of our sends). The one exception
+      // is the "message yourself" thread on a linked-device (Baileys/web)
+      // account - that is how the user talks to Wayland, so let it through.
+      const selfChatOk = this.backend !== 'meta-business' && this.isSelfChat(msg.chatId);
+      if (!selfChatOk) return;
+    }
     this.activeUsers.add(msg.senderId);
 
     // W-7: preserve audio/document/video/sticker. Previously these collapsed
@@ -788,6 +946,17 @@ export class WhatsAppPlugin extends BasePlugin {
       // W-4 (v0.4.3): forward isGroup so downstream permission/scoping logic
       // can branch on it. The unified contract already declares this field.
       ...(typeof msg.isGroup === 'boolean' ? { isGroup: msg.isGroup } : {}),
+      // Owner detection is mode-keyed. Personal: the operator's own self-chat is
+      // trusted (skip the pairing gate). Dedicated: the owner talks from a
+      // different device, so trust is decided by the configured owner-number
+      // allowlist instead.
+      ...(this.mode === 'dedicated'
+        ? this.isOwnerNumber(msg.senderId, msg.senderRawJid)
+          ? { isOwner: true }
+          : {}
+        : this.backend !== 'meta-business' && this.isSelfChat(msg.chatId)
+          ? { isOwner: true }
+          : {}),
       // W-5 / W-6: forward reply context. Meta reactions re-use the same
       // field - reactionMessageId is the id of the message the emoji reacts to.
       ...(msg.replyToMessageId

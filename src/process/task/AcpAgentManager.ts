@@ -26,6 +26,9 @@ import { ExtensionRegistry } from '@process/extensions';
 import { getDatabase } from '@process/services/database';
 import { ProviderRepository } from '@process/providers/storage/ProviderRepository';
 import { PROVIDER_ENV_VARS } from '@process/providers/detection/KeyDiscovery';
+import type { ProviderId } from '@process/providers/types';
+import { BACKEND_AUTH_KEYS } from '@process/acp/compat/typeBridge';
+import { selectAuthFailureCulprits } from '@process/providers/detection/authFailure';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { addMessage, addOrUpdateMessage, nextTickToLocalFinish } from '@process/utils/message';
 import { handlePreviewOpenEvent } from '@process/utils/previewUtils';
@@ -44,6 +47,7 @@ import BaseAgentManager from './BaseAgentManager';
 import { IpcAgentEventEmitter } from './IpcAgentEventEmitter';
 import { hasCronCommands } from './CronCommandDetector';
 import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher';
+import { getCostRecorder } from '@process/services/cost/CostRecorder';
 import { extractAndStripThinkTags } from './ThinkTagDetector';
 import type { AgentKillReason } from './IAgentManager';
 import { hasNativeSkillSupport } from '@/common/types/acpTypes';
@@ -111,6 +115,15 @@ class AcpAgentManager extends BaseAgentManager<AcpAgentManagerData, AcpPermissio
   options: AcpAgentManagerData;
   private currentMode: string = 'default';
   private persistedModelId: string | null = null;
+  /**
+   * Latest cumulative usage gauge from `acp_context_usage` this turn. ACP emits
+   * `used`/`cost` as a per-conversation CUMULATIVE high-water mark on every
+   * update, so we stash the most recent values and let the CostRecorder compute
+   * the per-turn delta at finish. `undefined` until the first usage event of a
+   * turn; reset to undefined after each finish records (or skips) it so a turn
+   * with no usage event records nothing.
+   */
+  private lastAcpCumulative: { used?: number; cost?: number } | undefined;
   // Track current message for cron detection (accumulated from streaming chunks)
   private currentMsgId: string | null = null;
   private currentMsgContent: string = '';
@@ -390,6 +403,25 @@ ${collectedResponses.join('\n')}`;
       pendingConfirmations: this.getConfirmations().length,
       modelId: this.persistedModelId ?? this.agent?.getModelInfo?.()?.currentModelId ?? undefined,
     });
+
+    // Cost ledger: ACP backends report `used`/`cost` as a per-conversation
+    // CUMULATIVE gauge, so we pass the latest high-water mark and the recorder
+    // computes the per-turn delta from its baseline (cost_source='engine'). Skip
+    // entirely when no acp_context_usage arrived this turn so a no-usage turn
+    // records nothing. Reset the stash so the next turn starts clean.
+    const cumulative = this.lastAcpCumulative;
+    this.lastAcpCumulative = undefined;
+    if (cumulative && (cumulative.used !== undefined || cumulative.cost !== undefined)) {
+      getCostRecorder()?.recordTurnFinish({
+        conversationId: this.conversation_id,
+        backend: this.options.backend,
+        modelId: this.persistedModelId ?? this.agent?.getModelInfo?.()?.currentModelId ?? undefined,
+        costSource: 'engine',
+        cumulativeUsd: cumulative.cost,
+        cumulativeTokens: cumulative.used,
+        ts: Date.now(),
+      });
+    }
   }
 
   private async sendAgentMessageWithFinishFallback(
@@ -471,6 +503,9 @@ ${collectedResponses.join('\n')}`;
    */
   private emitTurnError(error: { message?: string } | undefined, msgId?: string): void {
     const detail = error?.message ? String(error.message) : 'The agent could not complete this request.';
+    // If the turn failed because an injected provider key was rejected, disable it
+    // so the next spawn falls back to the backend's native auth.
+    this.maybeInvalidateProviderKeyOnAuthError(detail);
     const message = {
       type: 'error' as const,
       conversation_id: this.conversation_id,
@@ -588,8 +623,17 @@ ${collectedResponses.join('\n')}`;
    * live validation), so its key must win. We inject via customEnv, which
    * createSpawnConfig applies OVER the shell env (Object.assign last).
    */
+  /**
+   * Provider keys injected into the most recent spawn (providerId + the env vars
+   * it set). Used to invalidate exactly the offending provider on an auth failure
+   * (see maybeInvalidateProviderKeyOnAuthError) so a dead key stops overriding the
+   * backend's native (subscription/OAuth) auth on the next spawn.
+   */
+  private injectedProviderKeys: Array<{ providerId: ProviderId; envVars: readonly string[] }> = [];
+
   private async buildConnectedProviderEnv(): Promise<Record<string, string>> {
     const env: Record<string, string> = {};
+    this.injectedProviderKeys = [];
     try {
       const db = await getDatabase();
       const repo = new ProviderRepository(db.getDriver());
@@ -604,11 +648,55 @@ ${collectedResponses.join('\n')}`;
         const apiKey = stored.creds.key;
         if (typeof apiKey !== 'string' || apiKey.length === 0) continue;
         for (const name of envVars) env[name] = apiKey;
+        this.injectedProviderKeys.push({ providerId: provider.providerId, envVars });
       }
     } catch (err) {
       mainWarn('[AcpAgentManager]', 'buildConnectedProviderEnv failed', err);
     }
     return env;
+  }
+
+  /**
+   * A spawned backend can authenticate against an injected provider API key OR
+   * its own native login (subscription/OAuth). When the injected key is invalid,
+   * the CLI prefers it and fails with "Invalid API key" (and the desktop user
+   * sees a cryptic "process exited (code: 0)"). On that specific failure, flip
+   * the offending provider to `error/unauthorized` so buildConnectedProviderEnv
+   * stops injecting it next spawn and the backend falls back to native auth.
+   *
+   * Deliberately conservative: only fires on unambiguous key-auth failures (not
+   * transient 429/5xx/network), and only invalidates the provider whose injected
+   * env var matches THIS backend's auth var (a claude spawn also injects
+   * openai/google keys; those must not be touched). Reversible: re-keying the
+   * provider runs a connection test and restores `connected`.
+   */
+  private maybeInvalidateProviderKeyOnAuthError(errorData: unknown): void {
+    if (this.injectedProviderKeys.length === 0) return;
+    const text = typeof errorData === 'string' ? errorData : '';
+    const backendAuthVars = BACKEND_AUTH_KEYS[this.options.backend] ?? [];
+    const culpritIds = selectAuthFailureCulprits(text, backendAuthVars, this.injectedProviderKeys);
+    if (culpritIds.length === 0) return;
+
+    void (async () => {
+      try {
+        const db = await getDatabase();
+        const repo = new ProviderRepository(db.getDriver());
+        for (const providerId of culpritIds) {
+          repo.updateRegistryProviderState(providerId, 'error', 'unauthorized');
+          mainWarn(
+            '[AcpAgentManager]',
+            `Provider '${providerId}' key rejected by backend '${this.options.backend}' ` +
+              '(Invalid API key); marked error/unauthorized and will not be injected next spawn ' +
+              '(falling back to native auth). Re-key the provider to restore it.'
+          );
+        }
+        // Drop them from this spawn's record so we don't re-invalidate on repeats.
+        const culpritSet = new Set<ProviderId>(culpritIds);
+        this.injectedProviderKeys = this.injectedProviderKeys.filter((inj) => !culpritSet.has(inj.providerId));
+      } catch (err) {
+        mainWarn('[AcpAgentManager]', 'maybeInvalidateProviderKeyOnAuthError failed', err);
+      }
+    })();
   }
 
   /** Routing decision for the most recent spawn - surfaced on request_trace (badge). */
@@ -863,9 +951,16 @@ ${collectedResponses.join('\n')}`;
       }
     }
 
-    // Persist context usage to conversation extra for restore on page switch
+    // Persist context usage to conversation extra for restore on page switch.
+    // Also stash the cumulative {used, cost} gauge so handleFinishSignal can
+    // record the per-turn delta to the cost ledger (cost_source='engine').
     if (message.type === 'acp_context_usage') {
-      this.saveContextUsage(message.data as { used: number; size: number });
+      const usage = message.data as { used: number; size: number; cost?: { amount?: number; currency?: string } };
+      this.saveContextUsage(usage);
+      this.lastAcpCumulative = {
+        used: typeof usage.used === 'number' ? usage.used : this.lastAcpCumulative?.used,
+        cost: typeof usage.cost?.amount === 'number' ? usage.cost.amount : this.lastAcpCumulative?.cost,
+      };
     }
 
     // Convert thought events to thinking messages in conversation flow
@@ -1025,6 +1120,12 @@ ${collectedResponses.join('\n')}`;
     if (v.type === 'finish') {
       await this.handleFinishSignal(v, backend);
       return;
+    }
+
+    // An invalid injected provider key surfaces here as an error signal (the
+    // backend rejected the key). Invalidate it so it stops overriding native auth.
+    if (v.type === 'error') {
+      this.maybeInvalidateProviderKeyOnAuthError(v.data);
     }
 
     ipcBridge.acpConversation.responseStream.emit(v);

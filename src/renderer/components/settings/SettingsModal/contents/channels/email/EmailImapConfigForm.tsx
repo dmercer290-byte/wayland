@@ -5,10 +5,21 @@
  */
 
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 import { channel } from '@/common/adapter/ipcBridge';
 import { Alert, Button, Input, InputNumber, Message, Switch } from '@arco-design/web-react';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
+import { detectEmailProvider, type EmailProviderPreset } from '@/common/channels/emailProviderPresets';
 import { useTranslation } from 'react-i18next';
+
+/**
+ * Strip every whitespace character from an app password. Gmail/Outlook display
+ * app passwords in 4-char groups separated by spaces (e.g. "yahr vkqu tevs
+ * rjvy"); the spaces are cosmetic and never part of the secret. Stripping on
+ * input means a verbatim paste authenticates regardless of provider quirks.
+ */
+const stripAppPassword = (value: string): string => value.replace(/\s+/g, '');
 
 /**
  * Preference row layout - mirrors EmailAgentMailConfigForm so the Settings
@@ -36,11 +47,13 @@ const PreferenceRow: React.FC<{
 
 type EmailImapConfigFormProps = {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange?: (status: IChannelPluginStatus | null) => void;
 };
 
 const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
-  pluginStatus: _pluginStatus,
+  pluginStatus,
+  modelSelection,
   onStatusChange: _onStatusChange,
 }) => {
   const { t } = useTranslation();
@@ -61,6 +74,29 @@ const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
   const [smtpTls, setSmtpTls] = useState(true);
 
   const [testing, setTesting] = useState(false);
+
+  // Smart defaults: when the user types their email address, detect the provider
+  // (Gmail/Outlook/iCloud/Proton/...) and auto-fill the IMAP/SMTP host+port+TLS.
+  // appliedHostRef remembers the last auto-filled host so re-typing a different
+  // provider re-fills, but a host the user edited by hand is never clobbered.
+  const [detectedProvider, setDetectedProvider] = useState<EmailProviderPreset | null>(null);
+  const appliedHostRef = useRef<string | null>(null);
+
+  const handleImapUserChange = (value: string): void => {
+    setImapUser(value);
+    const preset = detectEmailProvider(value);
+    setDetectedProvider(preset);
+    if (!preset) return;
+    const hostIsAutofillable = imapHost === '' || imapHost === appliedHostRef.current;
+    if (!hostIsAutofillable) return;
+    appliedHostRef.current = preset.imapHost;
+    setImapHost(preset.imapHost);
+    setImapPort(preset.imapPort);
+    setImapTls(preset.imapTls);
+    setSmtpHost(preset.smtpHost);
+    setSmtpPort(preset.smtpPort);
+    setSmtpTls(preset.smtpTls);
+  };
 
   const handleTestAndEnable = useCallback(async () => {
     if (!imapHost.trim()) {
@@ -106,7 +142,7 @@ const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
       imapHost: imapHost.trim(),
       imapPort,
       imapUser: imapUser.trim(),
-      imapPassword,
+      imapPassword: stripAppPassword(imapPassword),
       imapTls,
       useSameAuth,
       smtpHost: smtpHost.trim() || imapHost.trim(),
@@ -116,7 +152,7 @@ const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
         ? {}
         : {
             smtpUser: smtpUser.trim(),
-            smtpPassword,
+            smtpPassword: stripAppPassword(smtpPassword),
           }),
     };
 
@@ -126,9 +162,16 @@ const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
         pluginId: 'email-imap_default',
         token: JSON.stringify(credentials),
       });
-      if (!testResult.success) {
+      // testPlugin returns an IBridgeResponse envelope: `success` is the IPC
+      // transport status (true unless the bridge threw), while the actual
+      // connection result lives in `data.success`. A failed IMAP login still
+      // arrives with envelope success=true, so we MUST inspect data.success -
+      // otherwise a rejected password is treated as a pass and we proceed to
+      // enable, where the user sees an opaque START-time auth error instead.
+      if (!testResult.success || !testResult.data?.success) {
         Message.error(
-          testResult.msg ??
+          testResult.data?.error ??
+            testResult.msg ??
             t('settings.channels.emailImap.connectionFailed', 'Connection test failed')
         );
         return;
@@ -224,28 +267,44 @@ const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
         )}
         required
       >
-        <Input
-          value={imapUser}
-          onChange={(value) => setImapUser(value)}
-          placeholder={t(
-            'settings.channels.emailImap.credentials.imapUser.placeholder',
-            'agent@example.com'
+        <div style={{ position: 'relative', width: 280 }}>
+          <Input
+            value={imapUser}
+            onChange={handleImapUserChange}
+            placeholder={t(
+              'settings.channels.emailImap.credentials.imapUser.placeholder',
+              'agent@example.com'
+            )}
+            style={{ width: 280 }}
+          />
+          {detectedProvider && (
+            // Absolutely positioned so showing/hiding the hint never reflows the
+            // input (no "box jump" as the user types and the provider is detected).
+            <span
+              className='text-12px text-[var(--success,#22c55e)]'
+              style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, maxWidth: 520, lineHeight: '15px' }}
+            >
+              {t('settings.channels.emailImap.detected', {
+                defaultValue: 'Detected {{provider}} - host and ports filled in.',
+                provider: detectedProvider.label,
+              })}
+              {detectedProvider.note ? ` ${detectedProvider.note}` : ''}
+            </span>
           )}
-          style={{ width: 280 }}
-        />
+        </div>
       </PreferenceRow>
 
       <PreferenceRow
-        label={t('settings.channels.emailImap.credentials.imapPassword.label', 'IMAP Password')}
+        label={t('settings.channels.emailImap.credentials.imapPassword.label', 'IMAP App Password')}
         description={t(
           'settings.channels.emailImap.credentials.imapPassword.help',
-          'Use an app password for Gmail / Outlook - your account login will not work.'
+          'Must be an app password, not your account login. Gmail / Outlook show it in 4-char groups - paste it as-is, spaces are stripped automatically.'
         )}
         required
       >
         <Input.Password
           value={imapPassword}
-          onChange={(value) => setImapPassword(value)}
+          onChange={(value) => setImapPassword(stripAppPassword(value))}
           visibilityToggle
           style={{ width: 280 }}
         />
@@ -328,7 +387,7 @@ const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
           >
             <Input.Password
               value={smtpPassword}
-              onChange={(value) => setSmtpPassword(value)}
+              onChange={(value) => setSmtpPassword(stripAppPassword(value))}
               visibilityToggle
               style={{ width: 280 }}
             />
@@ -351,6 +410,16 @@ const EmailImapConfigForm: React.FC<EmailImapConfigFormProps> = ({
           {t('settings.channels.emailImap.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      {pluginStatus?.enabled && pluginStatus?.connected && (
+        <span className='text-12px text-t-tertiary'>
+          {t(
+            'settings.channels.emailImap.howToTalk',
+            'Check your own inbox. Wayland just emailed you; reply to that email any time.',
+          )}
+        </span>
+      )}
+      <ChannelAgentModelSelector platform='email-imap' modelSelection={modelSelection} />
+
     </div>
   );
 };

@@ -6,6 +6,7 @@ import DangerZone from '@renderer/components/settings/shared/dialogs/DangerZone'
 import HelpBlock from '@renderer/components/settings/shared/forms/HelpBlock';
 import { channel } from '@/common/adapter/ipcBridge';
 import { Message } from '@arco-design/web-react';
+import ChannelSetupGuide from './ChannelSetupGuide';
 
 type ChannelDetailLayoutProps = {
   channelId: string;
@@ -55,6 +56,8 @@ const ChannelDetailLayout: React.FC<ChannelDetailLayoutProps> = ({
         { label: displayName },
       ]}
     >
+      <ChannelSetupGuide channelId={channelId} />
+
       {children}
 
       {showDisconnect && (

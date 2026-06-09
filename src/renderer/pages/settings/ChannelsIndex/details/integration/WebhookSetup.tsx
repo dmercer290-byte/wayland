@@ -11,10 +11,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import WebhookConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/integration/WebhookConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const WebhookSetup: React.FC = () => {
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
+  const modelSelection = useChannelModelSelection('assistant.webhook.defaultModel');
 
   const loadStatus = useCallback(async () => {
     try {
@@ -44,7 +46,7 @@ const WebhookSetup: React.FC = () => {
       displayName='Webhook'
       pluginId={pluginStatus?.id ?? 'webhook_default'}
     >
-      <WebhookConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <WebhookConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

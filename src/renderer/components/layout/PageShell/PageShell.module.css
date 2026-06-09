@@ -1,0 +1,78 @@
+/**
+ * PageShell layout. Single source of truth for top-level page chrome:
+ * black background, responsive padding, width caps, and the rail+body row.
+ */
+
+.shell {
+  width: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: var(--bg-base);
+}
+
+/* Responsive outer padding, mirrors SettingsPageWrapper. */
+.paddingDesktop {
+  padding: var(--space-7) var(--space-8);
+}
+
+.paddingMobile {
+  padding: var(--space-3) var(--space-4);
+}
+
+/* Subtitle rendered just under the header (LibraryPageHeader has no slot). */
+.subtitle {
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-7);
+  font-size: var(--type-13);
+  line-height: var(--lh-snug);
+  color: var(--color-text-3);
+}
+
+.toolbar {
+  margin-bottom: var(--space-4);
+  padding: 0 var(--space-7);
+}
+
+/* Content column. Centered + capped for narrow/standard; edge-to-edge for full. */
+.content {
+  width: 100%;
+  min-width: 0;
+}
+
+.widthNarrow {
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.widthStandard {
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.widthFull {
+  max-width: none;
+}
+
+/* Body becomes a flex row when a filter rail is present. */
+.body {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+
+.rail {
+  flex-shrink: 0;
+  align-self: stretch;
+  position: sticky;
+  top: 0;
+}
+
+.railBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}

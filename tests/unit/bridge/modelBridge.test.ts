@@ -236,4 +236,61 @@ describe('modelBridge fetchModelList', () => {
       msg: 'upstream unavailable',
     });
   });
+
+  // ── Keyless local backends (Ollama / LM Studio / llama.cpp) ──────────────
+  it('lists models for a LOCAL endpoint with an empty key (placeholder injected)', async () => {
+    mockModelsList.mockResolvedValue({ data: [{ id: 'llama3:latest' }, { id: 'qwen2.5:7b' }] });
+
+    const fetchModelList = getFetchModelListHandler();
+    const result = await fetchModelList({
+      base_url: 'http://127.0.0.1:11434/v1',
+      api_key: '',
+      try_fix: false,
+    });
+
+    // The OpenAI mock throws on an empty/whitespace key; reaching models.list()
+    // proves a non-empty placeholder was injected for the local host.
+    expect(mockModelsList).toHaveBeenCalledOnce();
+    expect(result).toEqual({ success: true, data: { mode: ['llama3:latest', 'qwen2.5:7b'] } });
+  });
+
+  it('lists models for a localhost endpoint with no key (LM Studio style)', async () => {
+    mockModelsList.mockResolvedValue({ data: [{ id: 'local-model' }] });
+
+    const fetchModelList = getFetchModelListHandler();
+    const result = await fetchModelList({
+      base_url: 'http://localhost:1234/v1',
+      api_key: undefined as unknown as string,
+      try_fix: false,
+    });
+
+    expect(result).toEqual({ success: true, data: { mode: ['local-model'] } });
+  });
+
+  it('STILL errors for a CLOUD endpoint with an empty key (no keyless regression)', async () => {
+    const fetchModelList = getFetchModelListHandler();
+    const result = await fetchModelList({
+      base_url: 'https://api.openai.com/v1',
+      api_key: '',
+      try_fix: false,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.msg).toContain('API key is required');
+    expect(mockModelsList).not.toHaveBeenCalled();
+  });
+
+  it('lists models for a LOCAL new-api endpoint with an empty key', async () => {
+    mockModelsList.mockResolvedValue({ data: [{ id: 'local-1' }] });
+
+    const fetchModelList = getFetchModelListHandler();
+    const result = await fetchModelList({
+      base_url: 'http://127.0.0.1:11434',
+      api_key: '',
+      platform: 'new-api',
+    });
+
+    expect(mockModelsList).toHaveBeenCalledOnce();
+    expect(result).toEqual({ success: true, data: { mode: ['local-1'] } });
+  });
 });

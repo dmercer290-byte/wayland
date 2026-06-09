@@ -33,6 +33,7 @@ import { escapeHtml, markdownToTelegramHtml } from '../plugins/telegram/Telegram
 import { stripHtml } from '../plugins/weixin/WeixinAdapter';
 import type { ChannelAgentType, IUnifiedIncomingMessage, IUnifiedOutgoingMessage, PluginType } from '../types';
 import type { PluginManager } from './PluginManager';
+import { getChannelWelcomeService } from './ChannelWelcomeService';
 import { buildChannelConversationExtra, resolveChannelSendProtocol } from '../utils';
 import i18n from '@process/services/i18n';
 
@@ -428,8 +429,13 @@ export class ActionExecutor {
       // Check if user is authorized
       const isAuthorized = await this.pairingService.isUserAuthorized(user.id, platform);
 
-      // Handle /start command - always show pairing
+      // Handle /start command - show pairing, unless this channel forbids
+      // contact pairing (WhatsApp personal mode = the operator's own number).
+      // There we stay completely silent: no pairing prompt, no pairing row.
       if (content.type === 'command' && content.text === '/start') {
+        if (!plugin.allowsContactPairing()) {
+          return;
+        }
         const result = await handlePairingShow(context);
         if (result.message) {
           await context.sendMessage(result.message);
@@ -437,13 +443,45 @@ export class ActionExecutor {
         return;
       }
 
-      // If not authorized, show pairing flow
+      // If not authorized: the operator's own trusted thread (e.g. WhatsApp
+      // self-chat) is auto-approved - no point making them pair with
+      // themselves. Everyone else goes through the pairing flow.
       if (!isAuthorized) {
-        const result = await handlePairingShow(context);
-        if (result.message) {
-          await context.sendMessage(result.message);
+        if (message.isOwner) {
+          const ownerUser = await this.pairingService.authorizeOwner(
+            user.id,
+            platform,
+            user.displayName ?? user.id
+          );
+          // authorizeOwner returns null only when the DB write failed. Do NOT
+          // fall through to the getChannelUserByPlatform lookup below: it would
+          // find nothing and send the owner the misleading "re-pair your
+          // account" message. Report the real internal error and stop.
+          if (!ownerUser) {
+            console.error(
+              `[ActionExecutor] authorizeOwner failed (DB write) for owner ${user.id} on ${platform}`
+            );
+            await context.sendMessage({
+              type: 'text',
+              text: '❌ Internal error saving your account. Please try again.',
+              parseMode: 'HTML',
+            });
+            return;
+          }
+        } else if (!plugin.allowsContactPairing()) {
+          // WhatsApp personal mode: an unknown contact on the operator's own
+          // number must get NOTHING - no pairing prompt, no pairing row, no
+          // welcome, no reply. Returning here (before the first-contact welcome
+          // and conversation creation below) is the stranger-silence security
+          // fix. The number behaves exactly as it did before Wayland.
+          return;
+        } else {
+          const result = await handlePairingShow(context);
+          if (result.message) {
+            await context.sendMessage(result.message);
+          }
+          return;
         }
-        return;
       }
 
       // User is authorized - look up the assistant user
@@ -463,6 +501,11 @@ export class ActionExecutor {
 
       // Set the assistant user in context
       context.channelUser = channelUser;
+
+      // Track whether THIS message opened a brand-new conversation, so bot
+      // channels (no self target, never welcomed on connect) can fire the
+      // one-time "Hey, it's Wayland" intro on first contact.
+      let isFirstContact = false;
 
       // Get or create session (scoped by chatId for per-chat isolation)
       let session = this.sessionManager.getSession(channelUser.id, chatId);
@@ -509,6 +552,7 @@ export class ActionExecutor {
         const existing = latest.success ? latest.data : null;
 
         let sessionConversation: TChatConversation | null = existing ?? null;
+        isFirstContact = !existing;
         if (!sessionConversation) {
           try {
             if (backend === 'gemini') {
@@ -581,6 +625,22 @@ export class ActionExecutor {
       }
       context.sessionId = session.id;
       context.conversationId = session.conversationId;
+
+      // Welcome-on-first-contact for bot channels (Telegram/Discord/Slack):
+      // they have no chat id until the user messages them, so they cannot be
+      // welcomed on connect. On the first authorized conversation, send the
+      // "Hey, it's Wayland" intro before the agent response. Channels that can
+      // initiate (self target non-null) were already welcomed on connect, so we
+      // skip them here. The shared once-per-account marker prevents any
+      // double-send across both paths.
+      if (isFirstContact && !plugin.getSelfTarget()) {
+        const accountId = plugin.getAccountIdentity();
+        if (accountId) {
+          await getChannelWelcomeService().welcomeOnFirstContact(platform, accountId, chatId, (target, msg) =>
+            plugin.sendMessage(target, msg)
+          );
+        }
+      }
 
       // Route based on action or content
       if (action) {
@@ -966,6 +1026,24 @@ export class ActionExecutor {
             parseMode: 'HTML',
             replyMarkup: finalReplyMarkup,
           };
+
+      // Email: carry the inbound message-id + a "Re:" subject so the reply threads
+      // into the original conversation (In-Reply-To/References) instead of arriving
+      // as a new "(no subject)" message. No-op for non-email channels.
+      if (context.platform === 'email-imap') {
+        const origEmail = (context.originalMessage as { email?: { subject?: string; messageId?: string } } | undefined)
+          ?.email;
+        const replyId = origEmail?.messageId ?? context.originalMessageId;
+        if (replyId && !finalMessage.replyToMessageId) {
+          finalMessage.replyToMessageId = replyId;
+        }
+        if (!finalMessage.subject) {
+          const baseSubject = origEmail?.subject?.trim();
+          if (baseSubject) {
+            finalMessage.subject = /^re:/i.test(baseSubject) ? baseSubject : `Re: ${baseSubject}`;
+          }
+        }
+      }
 
       await context.sendMessage(finalMessage);
     } catch (error: any) {

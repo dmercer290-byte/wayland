@@ -19,6 +19,8 @@ import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher'
 import BaseAgentManager from '@process/task/BaseAgentManager';
 import { IpcAgentEventEmitter } from '@process/task/IpcAgentEventEmitter';
 import { teamEventBus } from '@process/team/teamEventBus';
+import { getCostRecorder } from '@process/services/cost/CostRecorder';
+import { parseGatewayUsage } from '@process/services/cost/gatewayUsage';
 
 export interface OpenClawAgentManagerData {
   conversation_id: string;
@@ -77,6 +79,7 @@ class OpenClawAgentManager extends BaseAgentManager<OpenClawAgentManagerData> {
       onStreamEvent: (message) => this.handleStreamEvent(message),
       onSignalEvent: (message) => this.handleSignalEvent(message),
       onSessionKeyUpdate: (sessionKey) => this.handleSessionKeyUpdate(sessionKey),
+      onUsage: (usage) => this.handleUsage(usage),
     };
 
     this.agent = new OpenClawAgent(config);
@@ -181,6 +184,27 @@ class OpenClawAgentManager extends BaseAgentManager<OpenClawAgentManagerData> {
   }
 
   /**
+   * Record per-turn token usage when the gateway concretely reports it on
+   * chat:final. The OpenClaw gateway surfaces no model id to this manager, so
+   * the split cannot be priced - we record tokens only with cost_source
+   * 'unknown' (never a priced unknown total). When the untyped usage payload
+   * carries no recognizable token field, nothing is recorded.
+   */
+  private handleUsage(usage: unknown): void {
+    const parsed = parseGatewayUsage(usage);
+    if (!parsed) return;
+    getCostRecorder()?.recordTurnFinish({
+      conversationId: this.conversation_id,
+      backend: 'openclaw-gateway',
+      costSource: 'unknown',
+      inputTokens: parsed.inputTokens,
+      outputTokens: parsed.outputTokens,
+      cacheReadTokens: parsed.cacheReadTokens,
+      ts: Date.now(),
+    });
+  }
+
+  /**
    * Persist the resolved session key to the database for resume support.
    * Follows the same pattern as AcpAgentManager.saveAcpSessionId().
    */
@@ -276,6 +300,18 @@ class OpenClawAgentManager extends BaseAgentManager<OpenClawAgentManagerData> {
 
     ipcBridge.openclawConversation.responseStream.emit(message);
     ipcBridge.conversation.responseStream.emit(message);
+
+    // Deliver the error to channels AND release the per-conversation send queue.
+    // ChannelMessageService only releases the stream on 'finish', so a bare error
+    // would leave the channel hung until QUEUE_MAX_WAIT_MS. Pair error→finish like
+    // WCoreManager/AcpAgentManager do.
+    channelEventBus.emitAgentMessage(this.conversation_id, message);
+    channelEventBus.emitAgentMessage(this.conversation_id, {
+      type: 'finish',
+      conversation_id: this.conversation_id,
+      msg_id: uuid(),
+      data: null,
+    });
   }
 
   /**

@@ -817,6 +817,84 @@ describe('TeammateManager', () => {
   });
 
   // -------------------------------------------------------------------------
+  // token_usage delta accounting (R1 N-count fix)
+  // -------------------------------------------------------------------------
+
+  describe('acp_context_usage token_usage delta', () => {
+    it('writes per-turn deltas of the cumulative gauge, not the raw cumulative value', () => {
+      const append = vi.fn().mockResolvedValue(undefined);
+      const eventLogger = { append } as unknown;
+      const agent = makeAgent({ slotId: 'slot-1', conversationId: 'conv-1' });
+      const { mgr } = makeTeammateManager([agent], { eventLogger });
+
+      // ACP re-emits a CUMULATIVE gauge: 100, then 250, then 400.
+      for (const used of [100, 250, 400]) {
+        teamEventBus.emit('responseStream', {
+          type: 'acp_context_usage',
+          conversation_id: 'conv-1',
+          msg_id: 'm',
+          data: { used, size: 200000 },
+        });
+      }
+
+      const tokenRows = append.mock.calls
+        .map((c) => c[0])
+        .filter((e: { eventType?: string }) => e.eventType === 'token_usage');
+      // Three deltas: 100, 150, 150 (summing to 400 - the true running total),
+      // NOT the N-counted 100+250+400 = 750.
+      expect(tokenRows.map((r: { payload: { total_tokens: number } }) => r.payload.total_tokens)).toEqual([
+        100, 150, 150,
+      ]);
+      const summed = tokenRows.reduce(
+        (acc: number, r: { payload: { total_tokens: number } }) => acc + r.payload.total_tokens,
+        0
+      );
+      expect(summed).toBe(400);
+
+      mgr.dispose();
+    });
+
+    it('keeps per-conversation baselines independent and clamps a regressed gauge to 0', () => {
+      const append = vi.fn().mockResolvedValue(undefined);
+      const eventLogger = { append } as unknown;
+      const agents = [
+        makeAgent({ slotId: 'slot-1', conversationId: 'conv-1' }),
+        makeAgent({ slotId: 'slot-2', role: 'teammate', conversationId: 'conv-2' }),
+      ];
+      const { mgr } = makeTeammateManager(agents, { eventLogger });
+
+      teamEventBus.emit('responseStream', {
+        type: 'acp_context_usage',
+        conversation_id: 'conv-1',
+        msg_id: 'm',
+        data: { used: 500 },
+      });
+      // conv-2 is tracked on its own baseline (delta 300, not 300-500).
+      teamEventBus.emit('responseStream', {
+        type: 'acp_context_usage',
+        conversation_id: 'conv-2',
+        msg_id: 'm',
+        data: { used: 300 },
+      });
+      // A regressed gauge on conv-1 (compaction/reset) clamps to a 0 delta and
+      // therefore writes no row.
+      teamEventBus.emit('responseStream', {
+        type: 'acp_context_usage',
+        conversation_id: 'conv-1',
+        msg_id: 'm',
+        data: { used: 200 },
+      });
+
+      const tokenRows = append.mock.calls
+        .map((c) => c[0])
+        .filter((e: { eventType?: string }) => e.eventType === 'token_usage');
+      expect(tokenRows.map((r: { payload: { total_tokens: number } }) => r.payload.total_tokens)).toEqual([500, 300]);
+
+      mgr.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // finalizeTurn - finalizedTurns dedup window regression (Bug R2-1)
   // -------------------------------------------------------------------------
 

@@ -14,7 +14,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Spin, Message } from '@arco-design/web-react';
-import { Search, Settings } from 'lucide-react';
+import { BookOpen, Search, Settings } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { wiki as wikiBridge } from '@/common/adapter/ipcBridge';
 import type { WikiConcept, WikiState, WikiTopicTag } from '@/common/types/memory';
@@ -193,7 +193,9 @@ export function WikiHomePage(): React.ReactElement {
       {/* Topbar */}
       <header className={styles.topbar}>
         <div className={styles.logoWrap}>
-          <div className={styles.logoDot} aria-hidden />
+          <span className={styles.logoIcon} aria-hidden>
+            <BookOpen size={20} />
+          </span>
           <span className={styles.logoLabel}>{t('wiki.home.title', 'Wiki')}</span>
         </div>
         <span className={styles.countLabel}>

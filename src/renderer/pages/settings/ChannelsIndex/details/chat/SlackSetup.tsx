@@ -10,10 +10,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import SlackConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/chat/SlackConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const SlackSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.slack.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -48,7 +50,7 @@ const SlackSetup: React.FC = () => {
         'Native Slack bot integration via @slack/bolt. Choose Socket Mode for the simplest setup (no public webhook URL required) or Events API if you already have a stable HTTPS endpoint.',
       )}
     >
-      <SlackConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <SlackConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

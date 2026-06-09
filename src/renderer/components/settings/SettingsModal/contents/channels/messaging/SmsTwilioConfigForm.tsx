@@ -6,6 +6,8 @@
 
 import { Copy, RefreshCw } from 'lucide-react';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 import { channel } from '@/common/adapter/ipcBridge';
 import { Alert, Button, Input, Message, Tooltip } from '@arco-design/web-react';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -39,10 +41,11 @@ const E164_REGEX = /^\+[1-9]\d{1,14}$/;
 
 interface SmsTwilioConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange?: (status: IChannelPluginStatus | null) => void;
 }
 
-const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus, onStatusChange: _onStatusChange }) => {
+const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange: _onStatusChange }) => {
   const { t } = useTranslation();
 
   const [accountSid, setAccountSid] = useState('');
@@ -237,6 +240,8 @@ const SmsTwilioConfigForm: React.FC<SmsTwilioConfigFormProps> = ({ pluginStatus,
           'US deployments require A2P 10DLC brand and campaign registration. Toll-free numbers require separate verification. Both processes can take several days.'
         )}
       />
+      <ChannelAgentModelSelector platform='sms-twilio' modelSelection={modelSelection} />
+
     </div>
   );
 };

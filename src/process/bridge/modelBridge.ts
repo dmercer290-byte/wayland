@@ -19,7 +19,7 @@ import {
   guessProtocolFromKey,
   getProtocolDisplayName,
 } from '@/common/utils/protocolDetector';
-import { isGoogleApisHost } from '@/common/utils/urlValidation';
+import { isGoogleApisHost, isLocalBaseUrl } from '@/common/utils/urlValidation';
 import type OpenAIType from 'openai';
 import { isNewApiPlatform } from '@/common/utils/platformConstants';
 import { ipcBridge } from '@/common';
@@ -70,6 +70,16 @@ export function loadAwsBedrock(): Promise<BedrockModule> {
  * .blackboard/audits/hard-coded-values.md).
  */
 const PROBE_MAX_TOKENS = 1;
+
+/**
+ * Placeholder credential for keyless LOCAL backends (Ollama / LM Studio /
+ * llama.cpp), which accept no API key. The OpenAI SDK constructor rejects an
+ * empty string, so a harmless non-secret token is injected ONLY when the
+ * resolved base URL host is local ({@link isLocalBaseUrl}). It is never
+ * persisted as a real credential and never sent to a non-local host - cloud
+ * providers still hard-require a real key.
+ */
+const LOCAL_KEYLESS_PLACEHOLDER = 'ollama';
 
 /**
  * Common path patterns for OpenAI-compatible APIs
@@ -403,7 +413,11 @@ export async function getMergedModelProviders(): Promise<IProvider[]> {
       console.warn('[ModelBridge] Failed to merge extension model providers:', error);
       return normalizedProviders;
     }
-  } catch {
+  } catch (error) {
+    // Degrade to an empty list rather than crashing the picker, but never
+    // silently: a malformed `model.config` row (or a config read failure) would
+    // otherwise blank every model dropdown with no trace to diagnose from.
+    console.error('[ModelBridge] getMergedModelProviders failed; returning an empty model list:', error);
     return [];
   }
 }
@@ -542,16 +556,20 @@ export function initModelBridge(): void {
     // For New API gateway, use OpenAI-compatible protocol to fetch model list
     // new-api exposes standard /v1/models endpoint, use OpenAI path directly
     if (isNewApiPlatform(platform)) {
-      // Validate API key before creating OpenAI client to avoid unhandled 'Missing credentials' error
-      if (!actualApiKey) {
-        return { success: false, msg: 'API key is required. Please configure your API key in settings.' };
-      }
-
       // Ensure base_url has /v1 suffix
       let openaiBaseUrl = base_url?.replace(/\/+$/, '') || '';
       if (openaiBaseUrl && !openaiBaseUrl.endsWith('/v1')) {
         openaiBaseUrl = `${openaiBaseUrl}/v1`;
       }
+
+      // Validate API key before creating OpenAI client to avoid unhandled
+      // 'Missing credentials' error. A LOCAL keyless backend needs no key - a
+      // placeholder is injected for it; a cloud endpoint still requires one.
+      const newApiIsLocal = isLocalBaseUrl(openaiBaseUrl);
+      if (!actualApiKey && !newApiIsLocal) {
+        return { success: false, msg: 'API key is required. Please configure your API key in settings.' };
+      }
+      const newApiKey = actualApiKey || LOCAL_KEYLESS_PLACEHOLDER;
 
       try {
         await assertSafeBaseUrl(openaiBaseUrl);
@@ -563,7 +581,7 @@ export function initModelBridge(): void {
         const OpenAICtor = await loadOpenAI();
         const openai = new OpenAICtor({
           baseURL: openaiBaseUrl,
-          apiKey: actualApiKey,
+          apiKey: newApiKey,
           defaultHeaders: {
             'User-Agent': 'Wayland/1.0',
           },
@@ -709,10 +727,15 @@ export function initModelBridge(): void {
       }
     }
 
-    // Validate API key before creating OpenAI client to avoid unhandled 'Missing credentials' error
-    if (!actualApiKey) {
+    // Validate API key before creating OpenAI client to avoid unhandled
+    // 'Missing credentials' error. A LOCAL keyless backend (Ollama / LM Studio /
+    // llama.cpp on loopback / LAN) needs no key - inject a harmless placeholder
+    // ONLY for a local host; a cloud endpoint with no key still errors here.
+    const isLocalHost = isLocalBaseUrl(base_url);
+    if (!actualApiKey && !isLocalHost) {
       return { success: false, msg: 'API key is required. Please configure your API key in settings.' };
     }
+    const effectiveApiKey = actualApiKey || LOCAL_KEYLESS_PLACEHOLDER;
 
     try {
       await assertSafeBaseUrl(base_url);
@@ -724,7 +747,7 @@ export function initModelBridge(): void {
       const OpenAICtor = await loadOpenAI();
       const openai = new OpenAICtor({
         baseURL: base_url,
-        apiKey: actualApiKey,
+        apiKey: effectiveApiKey,
         // Use custom User-Agent to avoid some API proxies (like packyapi) blocking OpenAI SDK's default User-Agent
         defaultHeaders: {
           'User-Agent': 'Wayland/1.0',
@@ -862,7 +885,7 @@ export function initModelBridge(): void {
 
     const baseUrl = normalizeBaseUrl(rawBaseUrl);
     const baseUrlCandidates = buildBaseUrlCandidates(baseUrl);
-    const apiKeys = parseApiKeys(apiKeyString);
+    const parsedApiKeys = parseApiKeys(apiKeyString);
 
     if (!baseUrl) {
       return {
@@ -876,6 +899,11 @@ export function initModelBridge(): void {
         },
       };
     }
+
+    // A LOCAL keyless backend needs no key; inject a placeholder so protocol
+    // detection can probe it. A cloud endpoint with no key still errors.
+    const apiKeys =
+      parsedApiKeys.length === 0 && isLocalBaseUrl(baseUrl) ? [LOCAL_KEYLESS_PLACEHOLDER] : parsedApiKeys;
 
     if (apiKeys.length === 0) {
       return {

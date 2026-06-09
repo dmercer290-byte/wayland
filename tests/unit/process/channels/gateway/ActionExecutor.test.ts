@@ -4,21 +4,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TMessage } from '@/common/chat/chatLib';
 import { ActionExecutor } from '@process/channels/gateway/ActionExecutor';
+import { handlePairingShow } from '@process/channels/actions/PlatformActions';
 import type { BasePlugin } from '@process/channels/plugins/BasePlugin';
 import type { IActionContext } from '@process/channels/actions/types';
-import type { IPluginCapabilities, IUnifiedOutgoingMessage } from '@process/channels/types';
+import type { IPluginCapabilities, IUnifiedIncomingMessage, IUnifiedOutgoingMessage } from '@process/channels/types';
 
 // ----- Hoisted mocks ---------------------------------------------------------
 
 const hoisted = vi.hoisted(() => {
   return {
     sendMessageMock: vi.fn() as ReturnType<typeof vi.fn>,
+    welcomeOnFirstContactMock: vi.fn() as ReturnType<typeof vi.fn>,
   };
 });
+
+vi.mock('@process/channels/gateway/ChannelWelcomeService', () => ({
+  getChannelWelcomeService: () => ({
+    welcomeOnFirstContact: hoisted.welcomeOnFirstContactMock,
+  }),
+}));
 
 vi.mock('@process/channels/agent/ChannelMessageService', () => ({
   getChannelMessageService: () => ({
@@ -327,5 +335,143 @@ describe('ActionExecutor buffered streaming dispatch', () => {
     expect(hoisted.sendMessageMock).not.toHaveBeenCalled();
     const out = sendMessage.mock.calls[0]?.[0] as IUnifiedOutgoingMessage;
     expect(out.text).toContain('Session not initialized');
+  });
+});
+
+// ----- Pairing gate: personal-mode stranger silence -------------------------
+
+const handlePairingShowMock = vi.mocked(handlePairingShow);
+
+type GatePlugin = {
+  plugin: BasePlugin;
+  sendMessage: ReturnType<typeof vi.fn>;
+  generatePairingCode: ReturnType<typeof vi.fn>;
+};
+
+/**
+ * Build a plugin whose pairing capability is driven by `allowsContactPairing`.
+ * sendMessage and generatePairingCode are spies so the test can assert ZERO
+ * outbound + ZERO pairing-code generation for a personal-mode stranger.
+ */
+function makeGatePlugin(allowsContactPairing: boolean): GatePlugin {
+  const sendMessage = vi.fn(async () => 'mid-1');
+  const generatePairingCode = vi.fn(async () => '123456');
+  const plugin = {
+    type: 'whatsapp',
+    capabilities: makeCaps(),
+    sendMessage,
+    editMessage: vi.fn(async () => undefined),
+    generatePairingCode,
+    allowsContactPairing: () => allowsContactPairing,
+    getSelfTarget: () => null,
+    getAccountIdentity: () => 'acc-1',
+  } as unknown as BasePlugin;
+  return { plugin: plugin, sendMessage, generatePairingCode };
+}
+
+function makeInbound(overrides: Partial<IUnifiedIncomingMessage> = {}): IUnifiedIncomingMessage {
+  return {
+    id: 'in-1',
+    platform: 'whatsapp',
+    chatId: 'chat-stranger',
+    user: { id: 'stranger-1', displayName: 'Stranger' },
+    content: { type: 'text', text: 'hello' },
+    timestamp: Date.now(),
+    ...overrides,
+  } as IUnifiedIncomingMessage;
+}
+
+function gateExecutor(gate: GatePlugin, isAuthorized: boolean) {
+  const pluginManager = { getAllPlugins: () => [gate.plugin] };
+  const sessionManager = {
+    getSession: () => undefined,
+    updateSessionActivity: () => undefined,
+  };
+  const authorizeOwner = vi.fn(async () => undefined);
+  const pairingService = {
+    isUserAuthorized: vi.fn(async () => isAuthorized),
+    authorizeOwner,
+  };
+  const exec = new ActionExecutor(pluginManager as any, sessionManager as any, pairingService as any);
+  return { exec, authorizeOwner };
+}
+
+describe('ActionExecutor pairing gate - personal-mode stranger silence', () => {
+  beforeEach(() => {
+    handlePairingShowMock.mockReset();
+    handlePairingShowMock.mockResolvedValue({ message: { type: 'text', text: 'pair me' } } as any);
+    hoisted.welcomeOnFirstContactMock.mockReset();
+    hoisted.welcomeOnFirstContactMock.mockResolvedValue(undefined);
+  });
+
+  it('personal stranger gets ZERO outbound, ZERO pairing, and NO welcome', async () => {
+    const gate = makeGatePlugin(false); // personal mode: allowsContactPairing=false
+    const { exec, authorizeOwner } = gateExecutor(gate, false);
+    const handler = exec.getMessageHandler();
+
+    await handler(makeInbound());
+
+    // The incident cannot recur: no message left the channel, no pairing code
+    // was generated, the pairing prompt was never shown, and the first-contact
+    // welcome was never reached (the silent return happens before it).
+    expect(gate.sendMessage).not.toHaveBeenCalled();
+    expect(gate.generatePairingCode).not.toHaveBeenCalled();
+    expect(handlePairingShowMock).not.toHaveBeenCalled();
+    expect(hoisted.welcomeOnFirstContactMock).not.toHaveBeenCalled();
+    expect(authorizeOwner).not.toHaveBeenCalled();
+  });
+
+  it('personal /start command is also silent (no pairing prompt)', async () => {
+    const gate = makeGatePlugin(false);
+    const { exec } = gateExecutor(gate, false);
+    const handler = exec.getMessageHandler();
+
+    await handler(makeInbound({ content: { type: 'command', text: '/start' } }));
+
+    expect(gate.sendMessage).not.toHaveBeenCalled();
+    expect(handlePairingShowMock).not.toHaveBeenCalled();
+  });
+
+  it('dedicated stranger still gets the pairing prompt (existing behavior preserved)', async () => {
+    const gate = makeGatePlugin(true); // dedicated mode: allowsContactPairing=true
+    const { exec } = gateExecutor(gate, false);
+    const handler = exec.getMessageHandler();
+
+    await handler(makeInbound());
+
+    expect(handlePairingShowMock).toHaveBeenCalledTimes(1);
+    expect(gate.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('owner inbound is authorized regardless of mode', async () => {
+    const gate = makeGatePlugin(false);
+    const { exec, authorizeOwner } = gateExecutor(gate, false);
+    const handler = exec.getMessageHandler();
+
+    await handler(makeInbound({ isOwner: true }));
+
+    expect(authorizeOwner).toHaveBeenCalledTimes(1);
+    expect(handlePairingShowMock).not.toHaveBeenCalled();
+  });
+
+  it('owner whose authorizeOwner fails (null) gets an internal-error message, NOT the misleading re-pair message, and no conversation', async () => {
+    const gate = makeGatePlugin(false);
+    // gateExecutor wires authorizeOwner to resolve undefined (the DB-write-failed
+    // signal). With the fix the handler must return before the
+    // getChannelUserByPlatform lookup that would otherwise send "re-pair".
+    const { exec, authorizeOwner } = gateExecutor(gate, false);
+    const handler = exec.getMessageHandler();
+
+    await handler(makeInbound({ isOwner: true }));
+
+    expect(authorizeOwner).toHaveBeenCalledTimes(1);
+    // Exactly one outbound: the internal-error notice. NOT the re-pair message,
+    // and no second send for a created conversation.
+    expect(gate.sendMessage).toHaveBeenCalledTimes(1);
+    const out = gate.sendMessage.mock.calls[0]?.[1] as IUnifiedOutgoingMessage;
+    expect(out.text).not.toContain('re-pair');
+    expect(out.text).toContain('Internal error saving your account');
+    // No conversation was created (welcome service never reached).
+    expect(hoisted.welcomeOnFirstContactMock).not.toHaveBeenCalled();
   });
 });

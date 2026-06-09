@@ -162,6 +162,20 @@ export class SignalPlugin extends BasePlugin {
     };
   }
 
+  /**
+   * Signal can initiate a thread by sending to its own number ("Note to Self"),
+   * so the operator has a live message to reply into on connect (mirrors the
+   * WhatsApp self-chat model). Returns null until the number is configured.
+   */
+  override getSelfTarget(): string | null {
+    return this.phoneNumber || null;
+  }
+
+  /** Account identity for the once-per-account welcome marker is the registered number. */
+  override getAccountIdentity(): string | null {
+    return this.phoneNumber || null;
+  }
+
   // ── Inbound handling ──────────────────────────────────────────────────────
 
   private handleInbound(msg: SignalInboundMessage): void {

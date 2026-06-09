@@ -1,0 +1,270 @@
+/**
+ * @license
+ * Copyright 2026 Ferrox Labs
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ---- toolbar (period selector) ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.toolbarTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim, #8a8f98);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ---- summary cards ---- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.008));
+  border: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.08));
+}
+.cardLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim, #8a8f98);
+}
+.cardValue {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.05;
+  color: var(--text-primary, #fff);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- panels (breakdowns + trend) ---- */
+.panel {
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.006));
+  border: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.08));
+}
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.panelTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+.panelHint {
+  font-size: 11px;
+  color: var(--text-dim, #8a8f98);
+}
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- breakdown bars ---- */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.barRow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.barTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.barKey {
+  color: var(--text-primary, #fff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.barVal {
+  color: var(--text-dim, #8a8f98);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- generic bar (BudgetBar) ---- */
+.bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.barFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--bar-accent, var(--brand, #ff6b35));
+  transition: width 0.35s ease;
+}
+.barOk {
+  --bar-accent: #2ec27e;
+}
+.barWarn {
+  --bar-accent: #ff9f43;
+}
+.barOver {
+  --bar-accent: #ff4d4f;
+}
+
+/* ---- trend chart ---- */
+.chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.chartLine {
+  fill: none;
+  stroke: var(--brand, #ff6b35);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chartArea {
+  fill: var(--brand, #ff6b35);
+  fill-opacity: 0.12;
+}
+.chartDot {
+  fill: var(--brand, #ff6b35);
+}
+.chartAxis {
+  fill: var(--text-dim, #8a8f98);
+  font-size: 10px;
+}
+.chartGrid {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 1;
+}
+
+/* ---- empty state ---- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 16px;
+  text-align: center;
+}
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+.emptyHint {
+  font-size: 12.5px;
+  color: var(--text-dim, #8a8f98);
+  max-width: 360px;
+}
+
+/* ---- budgets panel ---- */
+.budgetsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.budgetList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.budgetRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.budgetTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.budgetName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+}
+.budgetActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.budgetSpend {
+  font-size: 12px;
+  color: var(--text-dim, #8a8f98);
+  font-variant-numeric: tabular-nums;
+}
+.pauseTag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(176, 123, 255, 0.14);
+  border: 1px solid rgba(176, 123, 255, 0.32);
+  color: #b07bff;
+}
+.warnTag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(91, 141, 239, 0.14);
+  border: 1px solid rgba(91, 141, 239, 0.32);
+  color: #5b8def;
+}
+.pauseHint {
+  font-size: 11px;
+  color: var(--text-dim, #8a8f98);
+}

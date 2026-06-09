@@ -1,10 +1,18 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Message, Modal } from '@arco-design/web-react';
-import { useMcpServers, useMcpAgentStatus, useMcpOperations, useMcpOAuth, useMcpServerCRUD } from '@renderer/hooks/mcp';
+import {
+  useMcpServers,
+  useMcpAgentStatus,
+  useMcpOperations,
+  useMcpOAuth,
+  useMcpServerCRUD,
+  useMcpConnection,
+} from '@renderer/hooks/mcp';
 import type { McpOAuthStatus } from '@renderer/hooks/mcp/useMcpOAuth';
 import type { IMcpServer } from '@/common/config/storage';
+import AddMcpServerModal from '@renderer/pages/settings/components/AddMcpServerModal';
 import { useMcpLibrary } from './hooks/useMcpLibrary';
 import { ServerRow, type UIStatus } from './components/ServerRow';
 
@@ -24,6 +32,7 @@ export function InstalledPage() {
   const library = useMcpLibrary();
 
   const [message, contextHolder] = Message.useMessage();
+  const [showAddModal, setShowAddModal] = useState(false);
   const { mcpServers, saveMcpServers } = useMcpServers();
   const { setAgentInstallStatus, checkSingleServerInstallStatus } = useMcpAgentStatus();
   const { syncMcpToAgents, removeMcpFromAgents } = useMcpOperations(mcpServers, message);
@@ -36,6 +45,17 @@ export function InstalledPage() {
     checkSingleServerInstallStatus,
     setAgentInstallStatus
   );
+  const { testingServers, refreshServerStatuses } = useMcpConnection(mcpServers, saveMcpServers, message);
+
+  // On first load, probe enabled servers so the status strip + per-row pills
+  // reflect reality (connected + real tool counts) instead of stale config.
+  // refreshServerStatuses is non-destructive and self-throttles via lastConnected.
+  const didInitialRefresh = useRef(false);
+  useEffect(() => {
+    if (didInitialRefresh.current || mcpServers.length === 0) return;
+    didInitialRefresh.current = true;
+    void refreshServerStatuses(mcpServers);
+  }, [mcpServers, refreshServerStatuses]);
 
   const fromLibrary = useMemo(() => mcpServers.filter((s) => s.source === 'library'), [mcpServers]);
   const custom = useMemo(() => mcpServers.filter((s) => s.source !== 'library'), [mcpServers]);
@@ -55,10 +75,14 @@ export function InstalledPage() {
   }, [mcpServers, oauthStatus]);
 
   const handleToggle = useCallback(
-    (s: IMcpServer) => {
-      void crud.handleToggleMcpServer(s.id, !s.enabled);
+    async (s: IMcpServer) => {
+      const enabling = !s.enabled;
+      await crud.handleToggleMcpServer(s.id, enabling);
+      // Probe right after enabling so the row resolves to its real state
+      // (connected + tools, needs-auth, or error) instead of sitting on "Idle".
+      if (enabling) void refreshServerStatuses([{ ...s, enabled: true }], { force: true });
     },
-    [crud]
+    [crud, refreshServerStatuses]
   );
 
   const handleReauth = useCallback(
@@ -104,8 +128,10 @@ export function InstalledPage() {
     async (s: IMcpServer) => {
       try {
         // Re-enable re-pushes the server config to every agent; running workers
-        // pick it up on their next message via the MCP-changed refresh.
+        // pick it up on their next message via the MCP-changed refresh. Then
+        // probe so the row + strip show the freshly resolved status and tools.
         await crud.handleToggleMcpServer(s.id, true);
+        void refreshServerStatuses([{ ...s, enabled: true }], { force: true });
         message.success(
           t(
             'mcpLibrary.installed.reconnectToast',
@@ -119,7 +145,7 @@ export function InstalledPage() {
         message.error(t('settings.mcpSyncError', 'Failed to sync MCP to agents.'));
       }
     },
-    [crud, message, t]
+    [crud, message, t, refreshServerStatuses]
   );
 
   const handleRemove = useCallback(
@@ -142,6 +168,20 @@ export function InstalledPage() {
     [crud, t]
   );
 
+  const handleAddSubmit = useCallback(
+    (serverData: Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'>) => {
+      void crud.handleAddMcpServer(serverData);
+    },
+    [crud]
+  );
+
+  const handleAddBatch = useCallback(
+    (servers: Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'>[]) => {
+      void crud.handleBatchImportMcpServers(servers);
+    },
+    [crud]
+  );
+
   const renderRow = (s: IMcpServer) => {
     const entry = s.libraryEntryId ? library.entries.find((e) => e.id === s.libraryEntryId) : undefined;
     const oauth = oauthStatus[s.id];
@@ -161,10 +201,11 @@ export function InstalledPage() {
         }}
         iconUrl={entry?.iconUrl}
         oauthStatus={oauth}
+        checking={testingServers[s.id] === true}
         onReauth={() => void handleReauth(s)}
         onSettings={() => handleSettings(s)}
         onRemove={() => handleRemove(s)}
-        onToggle={() => handleToggle(s)}
+        onToggle={() => void handleToggle(s)}
         onLogs={handleLogs}
         onReconnect={() => void handleReconnect(s)}
       />
@@ -176,7 +217,7 @@ export function InstalledPage() {
       {contextHolder}
       <header className='mcp-page-head'>
         <h2>{t('mcpLibrary.installed.title', 'MCP Library - Installed')}</h2>
-        <button className='mcp-btn-primary' onClick={() => navigate('/settings/mcp-library/browse')}>
+        <button className='mcp-btn-primary' onClick={() => setShowAddModal(true)}>
           {t('mcpLibrary.installed.addCustom', '+ Add custom MCP')}
         </button>
       </header>
@@ -215,7 +256,7 @@ export function InstalledPage() {
       <section>
         <header className='mcp-group-head'>
           <h3>{t('mcpLibrary.installed.custom', 'Custom')}</h3>
-          <button onClick={() => navigate('/settings/mcp-library/browse')}>
+          <button onClick={() => setShowAddModal(true)}>
             {t('mcpLibrary.installed.addCustom', '+ Add custom MCP')}
           </button>
         </header>
@@ -225,6 +266,13 @@ export function InstalledPage() {
           <div className='mcp-server-list'>{custom.map(renderRow)}</div>
         )}
       </section>
+
+      <AddMcpServerModal
+        visible={showAddModal}
+        onCancel={() => setShowAddModal(false)}
+        onSubmit={handleAddSubmit}
+        onBatchImport={handleAddBatch}
+      />
     </div>
   );
 }

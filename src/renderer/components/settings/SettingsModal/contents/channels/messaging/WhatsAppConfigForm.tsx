@@ -18,13 +18,16 @@
 import { Alert, Button, Input, Message, Radio } from '@arco-design/web-react';
 import { Copy, RefreshCw } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 type WhatsAppBackend = 'baileys' | 'whatsapp-web' | 'meta-business';
+type WhatsAppMode = 'personal' | 'dedicated';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -48,13 +51,21 @@ const PreferenceRow: React.FC<{
 
 export interface WhatsAppConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange?: (status: IChannelPluginStatus | null) => void;
 }
 
-const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [backend, setBackend] = useState<WhatsAppBackend>('baileys');
+  // Personal (default) = the operator's own number, only the self-chat is
+  // trusted and unknown contacts are ignored. Dedicated = a separate bot
+  // number others may pair with; ownerNumbers identifies the operator.
+  // Seed from the saved status so reopening a dedicated config does not silently
+  // reset to personal (status carries the non-secret mode but never credentials).
+  const [mode, setMode] = useState<WhatsAppMode>(pluginStatus?.whatsappMode ?? 'personal');
+  const [ownerNumbers, setOwnerNumbers] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [businessAccountId, setBusinessAccountId] = useState('');
@@ -69,9 +80,27 @@ const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, o
   const [rotating, setRotating] = useState(false);
   const [testLoading, setTestLoading] = useState(false);
 
+  // pluginStatus loads asynchronously and arrives after the initial render, so
+  // the useState seed above sees `null`. Sync the saved mode in once it lands
+  // (only when status actually carries a mode) so a previously-saved dedicated
+  // config does not show personal and get silently flipped back on the next
+  // Test & Enable.
+  useEffect(() => {
+    if (pluginStatus?.whatsappMode) {
+      setMode(pluginStatus.whatsappMode);
+    }
+  }, [pluginStatus?.whatsappMode]);
+
   const pluginInstanceId = pluginStatus?.id ?? 'whatsapp_default';
   const hasExistingBot = !!pluginStatus?.hasToken;
   const qrCode = pluginStatus?.qrCode ?? null;
+  // Linked = the plugin is running with a credentialed session and is not
+  // currently presenting a pairing QR. (connectionState would be more precise
+  // but does not always survive the status IPC; `connected` + no-QR is the
+  // signal that reliably reaches the renderer.)
+  const isLinked =
+    pluginStatus?.connectionState === 'connected' ||
+    (!!pluginStatus?.connected && !!pluginStatus?.hasToken && !qrCode);
 
   // Audit fix v0.4.2: same pattern as webhook channel. Until the tunnel layer
   // resolves to a real hostname, do NOT compose a URL containing the
@@ -161,7 +190,13 @@ const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, o
         ),
       );
 
-      const credentials: Record<string, string> = { backend };
+      const credentials: Record<string, string | string[]> = { backend, mode };
+      if (mode === 'dedicated') {
+        credentials.ownerNumbers = ownerNumbers
+          .split(',')
+          .map((n) => n.trim())
+          .filter((n) => n.length > 0);
+      }
       if (backend === 'meta-business') {
         credentials.accessToken = accessToken.trim();
         credentials.phoneNumberId = phoneNumberId.trim();
@@ -192,7 +227,7 @@ const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, o
     } finally {
       setTestLoading(false);
     }
-  }, [backend, accessToken, phoneNumberId, businessAccountId, verifyToken, appSecret, t, onStatusChange]);
+  }, [backend, mode, ownerNumbers, accessToken, phoneNumberId, businessAccountId, verifyToken, appSecret, t, onStatusChange]);
 
   const showMetaFields = backend === 'meta-business';
   const showQrSection = backend !== 'meta-business';
@@ -233,6 +268,52 @@ const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, o
           </Radio>
         </Radio.Group>
       </PreferenceRow>
+
+      <PreferenceRow
+        label={t('settings.channels.whatsapp.mode.label', 'Account mode')}
+        description={
+          mode === 'personal'
+            ? t(
+                'settings.channels.whatsapp.mode.personalHelp',
+                'Wayland links your own WhatsApp. Only you, via your own self-chat, can talk to it. Messages from other contacts are ignored.',
+              )
+            : t(
+                'settings.channels.whatsapp.mode.dedicatedHelp',
+                'Use a separate WhatsApp number created for your agent. Enter your personal number so Wayland knows you are the owner; other people can pair to talk to it.',
+              )
+        }
+        required
+      >
+        <Radio.Group type='button' value={mode} onChange={(value: WhatsAppMode) => setMode(value)}>
+          <Radio value='personal'>{t('settings.channels.whatsapp.mode.personal', 'Personal (only you)')}</Radio>
+          <Radio value='dedicated'>{t('settings.channels.whatsapp.mode.dedicated', 'Dedicated (others can talk)')}</Radio>
+        </Radio.Group>
+      </PreferenceRow>
+
+      {mode === 'dedicated' && (
+        <PreferenceRow
+          label={t('settings.channels.whatsapp.mode.ownerNumbers.label', 'Your personal number')}
+          description={
+            <>
+              {t(
+                'settings.channels.whatsapp.mode.ownerNumbers.help',
+                'Your own WhatsApp number(s) in full international format. Wayland recognizes messages from these numbers as the owner. Separate multiple numbers with commas.',
+              )}{' '}
+              {t(
+                'settings.channels.whatsapp.mode.ownerNumbers.savedHidden',
+                'Saved numbers are hidden. Re-enter to change.',
+              )}
+            </>
+          }
+        >
+          <Input
+            value={ownerNumbers}
+            onChange={setOwnerNumbers}
+            placeholder={t('settings.channels.whatsapp.mode.ownerNumbers.placeholder', '+15551234567')}
+            style={{ width: 280 }}
+          />
+        </PreferenceRow>
+      )}
 
       {showMetaFields && (
         <>
@@ -385,8 +466,21 @@ const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, o
               'Open WhatsApp on your phone → Settings → Linked Devices → Link a Device, then scan the code below. The code rotates every minute until paired.',
             )}
           </span>
-          <div className='flex justify-center pt-8px'>
-            {qrCode ? (
+          <div className='flex flex-col items-center gap-6px pt-8px'>
+            {isLinked ? (
+              <>
+                <span className='text-13px text-success font-medium'>
+                  {t('settings.channels.whatsapp.qrPairing.linked', 'Connected')}
+                  {pluginStatus?.botUsername ? ` (${pluginStatus.botUsername})` : ''}
+                </span>
+                <span className='text-12px text-t-tertiary text-center'>
+                  {t(
+                    'settings.channels.whatsapp.qrPairing.howToTalk',
+                    'Open WhatsApp and message yourself (the "Message yourself" chat). Wayland just said hi there; reply to chat.',
+                  )}
+                </span>
+              </>
+            ) : qrCode ? (
               <QRCodeSVG value={qrCode} size={200} includeMargin />
             ) : (
               <span className='text-12px text-t-tertiary'>
@@ -405,6 +499,8 @@ const WhatsAppConfigForm: React.FC<WhatsAppConfigFormProps> = ({ pluginStatus, o
           {t('settings.channels.whatsapp.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='whatsapp' modelSelection={modelSelection} />
+
     </div>
   );
 };

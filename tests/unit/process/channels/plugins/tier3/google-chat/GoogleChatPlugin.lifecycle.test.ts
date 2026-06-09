@@ -19,6 +19,28 @@ vi.mock('google-auth-library', () => ({
   }),
 }));
 
+// Mock the Pub/Sub SDK so the pubsub-transport lifecycle tests do not open a
+// real gRPC streaming pull.
+const { mockPubSubSubscription, mockPubSubClose } = vi.hoisted(() => ({
+  mockPubSubSubscription: vi.fn(),
+  mockPubSubClose: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@google-cloud/pubsub', () => ({
+  PubSub: vi.fn(function () {
+    return {
+      subscription: mockPubSubSubscription,
+      close: mockPubSubClose,
+    };
+  }),
+}));
+
+mockPubSubSubscription.mockReturnValue({
+  on: vi.fn(),
+  removeAllListeners: vi.fn(),
+  close: vi.fn().mockResolvedValue(undefined),
+});
+
 mockGetClient.mockResolvedValue({ getAccessToken: mockGetAccessToken });
 mockGetAccessToken.mockResolvedValue({ token: 'test-access-token' });
 
@@ -167,5 +189,57 @@ describe('GoogleChatPlugin lifecycle', () => {
     });
     const captured = (plugin as unknown as { audience: string | null }).audience;
     expect(captured).toBe('my-project');
+  });
+});
+
+// ── Pub/Sub inbound transport ───────────────────────────────────────────────
+
+describe('GoogleChatPlugin pubsub transport', () => {
+  const SUB_PATH = 'projects/my-project/subscriptions/wayland-sub';
+
+  function pubsubConfig(overrides: Record<string, unknown> = {}) {
+    return {
+      ...validConfig,
+      credentials: {
+        serviceAccountJson: VALID_SA_JSON,
+        transport: 'pubsub',
+        subscriptionName: SUB_PATH,
+        ...overrides,
+      },
+    };
+  }
+
+  it('defaults to the webhook transport when none is specified', async () => {
+    const plugin = new GoogleChatPlugin();
+    await plugin.initialize(validConfig);
+    const transport = (plugin as unknown as { transport: string }).transport;
+    expect(transport).toBe('webhook');
+  });
+
+  it('errors when transport is pubsub but subscriptionName is missing', async () => {
+    const plugin = new GoogleChatPlugin();
+    await expect(
+      plugin.initialize(pubsubConfig({ subscriptionName: undefined })),
+    ).rejects.toThrow(/subscriptionName is required/i);
+    expect(plugin.status).toBe('error');
+  });
+
+  it('errors when subscriptionName is not a valid subscription path', async () => {
+    const plugin = new GoogleChatPlugin();
+    await expect(plugin.initialize(pubsubConfig({ subscriptionName: 'wayland-sub' }))).rejects.toThrow(
+      /projects\/<project>\/subscriptions/,
+    );
+    expect(plugin.status).toBe('error');
+  });
+
+  it('opens a Pub/Sub subscription on start and runs', async () => {
+    mockPubSubSubscription.mockClear();
+    const plugin = new GoogleChatPlugin();
+    await plugin.initialize(pubsubConfig());
+    await plugin.start();
+    expect(plugin.status).toBe('running');
+    expect(mockPubSubSubscription).toHaveBeenCalledWith(SUB_PATH, expect.any(Object));
+    await plugin.stop();
+    expect(plugin.status).toBe('stopped');
   });
 });

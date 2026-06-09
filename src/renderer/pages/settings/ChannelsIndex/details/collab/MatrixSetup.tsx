@@ -10,10 +10,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import MatrixConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/collab/MatrixConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const MatrixSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.matrix.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -48,7 +50,7 @@ const MatrixSetup: React.FC = () => {
         'Federation-aware messaging via matrix-js-sdk. Provide your homeserver URL, full mxid (e.g. @bot:matrix.org), and a long-lived access token.',
       )}
     >
-      <MatrixConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <MatrixConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

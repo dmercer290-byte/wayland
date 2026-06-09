@@ -469,26 +469,61 @@ export class ProcessAcpClient implements AcpClient {
   // ─── Internals: bunx cache cleanup (from old prepareRetry) ─
 
   /**
-   * If stderr indicates a corrupted bunx cache ("Cannot find package"),
-   * clear the cache directory to allow a fresh install on retry.
+   * Inspect the captured startup stderr for known bun cache-corruption
+   * signatures and clear the stale state so the existing retry re-resolves
+   * cleanly. Both signatures are best-effort and idempotent; failures are
+   * swallowed so this can never throw into the spawn/retry path.
+   *
+   * Handled signatures:
+   *   1. "Cannot find package|module" - bunx working dir is missing a
+   *      transitive dependency. Remove the specific bunx-<uid>-<pkg> dir.
+   *   2. "Failed to link <pkg>: EEXIST" - a package version bump left a
+   *      half-linked entry in the install cache. The next spawn re-crashes
+   *      on the same stale state forever. Remove the scoped cache entry for
+   *      that package so the retry re-resolves and re-saves the lockfile.
    */
   clearBunxCacheIfNeeded(): void {
+    this.clearMissingPackageBunxCache();
+    this.clearLinkCorruptedBunCacheEntry();
+  }
+
+  /**
+   * Returns the bun cache/tmp roots that cleanup is allowed to delete inside.
+   * Validating the extracted path against these prevents a malicious agent
+   * from crafting stderr that points cleanup at an arbitrary filesystem path.
+   * Bun respects BUN_TMPDIR and BUN_INSTALL_CACHE_DIR for cache location.
+   */
+  private bunCleanupAllowedRoots(): string[] {
+    return [
+      path.resolve(process.env.BUN_TMPDIR || os.tmpdir()),
+      path.resolve(process.env.BUN_INSTALL_CACHE_DIR || path.join(os.homedir(), '.bun', 'install', 'cache')),
+      path.resolve(os.homedir(), '.bun'),
+    ];
+  }
+
+  private isInsideBunCleanupRoot(target: string): boolean {
+    return this.bunCleanupAllowedRoots().some((root) => target.startsWith(root + path.sep));
+  }
+
+  /** True when `target` is itself an allowed root, or lives inside one. */
+  private isBunCleanupRootOrInside(target: string): boolean {
+    const roots = this.bunCleanupAllowedRoots();
+    return roots.some((root) => target === root) || this.isInsideBunCleanupRoot(target);
+  }
+
+  /**
+   * Signature 1: bunx working dir missing a transitive dependency. The full
+   * path to the missing module appears in stderr; remove the versioned bunx
+   * working dir so the next `bun x` does a fresh install.
+   */
+  private clearMissingPackageBunxCache(): void {
     if (!/Cannot find (?:package|module)/i.test(this.stderrBuffer)) return;
 
     const match = this.stderrBuffer.match(/([^\s'"]*[/\\]bunx-\d+[^\s/\\]*[/\\][^\s/\\]+@[^\s/\\]+)[/\\]node_modules/);
     if (!match) return;
 
     const cacheDir = path.resolve(match[1]);
-    // Validate the extracted path is inside a known temp/cache directory
-    // to prevent a malicious agent from crafting stderr to delete arbitrary paths.
-    // Bun respects BUN_TMPDIR and BUN_INSTALL_CACHE_DIR env vars for cache location.
-    const allowedPrefixes = [
-      path.resolve(process.env.BUN_TMPDIR || os.tmpdir()),
-      path.resolve(process.env.BUN_INSTALL_CACHE_DIR || path.join(os.homedir(), '.bun', 'install', 'cache')),
-      path.resolve(os.homedir(), '.bun'),
-    ];
-    const isAllowed = allowedPrefixes.some((prefix) => cacheDir.startsWith(prefix + path.sep));
-    if (!isAllowed) {
+    if (!this.isInsideBunCleanupRoot(cacheDir)) {
       console.warn(`[AcpClient ${this.options.backend}] Refusing to clear suspicious cache path: ${cacheDir}`);
       return;
     }
@@ -499,5 +534,103 @@ export class ProcessAcpClient implements AcpClient {
     } catch {
       /* best effort */
     }
+  }
+
+  /**
+   * Signature 2: "Failed to link <pkg>: EEXIST". A package version bump left
+   * a half-linked entry in the install cache; every retry re-crashes on it.
+   * Remove only that package's stale cache entries (and any bunx working dir
+   * referencing it) so the retry re-resolves cleanly - this mirrors what
+   * manually re-running `bun x --bun <pkg> --version` does to heal it.
+   */
+  private clearLinkCorruptedBunCacheEntry(): void {
+    if (!/Failed to link\b/i.test(this.stderrBuffer) || !/EEXIST/i.test(this.stderrBuffer)) return;
+
+    const match = this.stderrBuffer.match(/Failed to link\s+(@?[\w.-]+(?:\/[\w.-]+)?)\s*:/i);
+    if (!match) return;
+    const pkg = match[1];
+
+    const installCacheRoot = path.resolve(
+      process.env.BUN_INSTALL_CACHE_DIR || path.join(os.homedir(), '.bun', 'install', 'cache')
+    );
+
+    let cleared = false;
+
+    // Install-cache entry. Scoped pkg "@scope/name" -> "<cache>/@scope/name*";
+    // unscoped "name" -> "<cache>/name*". Bun stores versioned siblings like
+    // "name@1.2.3@@@1[_patch_hash=...]", so match the dir name as a prefix.
+    const slash = pkg.lastIndexOf('/');
+    const entryParentDir = slash >= 0 ? path.join(installCacheRoot, pkg.slice(0, slash)) : installCacheRoot;
+    const entryBaseName = slash >= 0 ? pkg.slice(slash + 1) : pkg;
+    cleared = this.removeBunCacheChildrenByPrefix(entryParentDir, entryBaseName) || cleared;
+
+    // Any leftover bunx working dir referencing the package (best-effort).
+    const tmpRoot = path.resolve(process.env.BUN_TMPDIR || os.tmpdir());
+    cleared = this.removeBunxWorkingDirsForPackage(tmpRoot, pkg) || cleared;
+
+    if (cleared) {
+      console.log(`[ACP] cleared stale bun link state for ${pkg} after EEXIST, retrying`);
+    }
+  }
+
+  /**
+   * Remove cache children of `parentDir` whose name equals `baseName` or
+   * starts with `baseName@` (the versioned/patched siblings). Guarded by the
+   * cleanup-root allowlist and fully best-effort.
+   */
+  private removeBunCacheChildrenByPrefix(parentDir: string, baseName: string): boolean {
+    const resolvedParent = path.resolve(parentDir);
+    if (!this.isBunCleanupRootOrInside(resolvedParent)) return false;
+
+    let removed = false;
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(resolvedParent);
+    } catch {
+      return false;
+    }
+
+    for (const name of entries) {
+      if (name !== baseName && !name.startsWith(`${baseName}@`)) continue;
+      const target = path.resolve(resolvedParent, name);
+      if (!this.isInsideBunCleanupRoot(target)) continue;
+      try {
+        fs.rmSync(target, { recursive: true, force: true });
+        removed = true;
+      } catch {
+        /* best effort */
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Remove any "bunx-<uid>-...<pkg>..." working dirs under `tmpRoot` that
+   * reference the package, so a re-resolve does not collide with a stale dir.
+   */
+  private removeBunxWorkingDirsForPackage(tmpRoot: string, pkg: string): boolean {
+    const resolvedRoot = path.resolve(tmpRoot);
+    if (!this.isBunCleanupRootOrInside(resolvedRoot) && resolvedRoot !== path.resolve(os.tmpdir())) return false;
+
+    const baseName = pkg.includes('/') ? pkg.slice(pkg.lastIndexOf('/') + 1) : pkg;
+    let removed = false;
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(resolvedRoot);
+    } catch {
+      return false;
+    }
+
+    for (const name of entries) {
+      if (!/^bunx-\d+/.test(name) || !name.includes(baseName)) continue;
+      const target = path.resolve(resolvedRoot, name);
+      try {
+        fs.rmSync(target, { recursive: true, force: true });
+        removed = true;
+      } catch {
+        /* best effort */
+      }
+    }
+    return removed;
   }
 }

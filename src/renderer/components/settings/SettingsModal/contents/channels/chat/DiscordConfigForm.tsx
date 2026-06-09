@@ -11,6 +11,8 @@ import { AlertTriangle } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 /**
  * Section row - kept inline rather than imported from shared/forms so this
@@ -33,10 +35,11 @@ const PreferenceRow: React.FC<{
 
 export interface DiscordConfigFormProps {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 }
 
-const DiscordConfigForm: React.FC<DiscordConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const DiscordConfigForm: React.FC<DiscordConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [botToken, setBotToken] = useState('');
@@ -163,6 +166,8 @@ const DiscordConfigForm: React.FC<DiscordConfigFormProps> = ({ pluginStatus, onS
           {t('settings.channels.discord.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+
+      <ChannelAgentModelSelector platform='discord' modelSelection={modelSelection} />
     </div>
   );
 };

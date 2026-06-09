@@ -18,6 +18,8 @@ import { AlertTriangle } from 'lucide-react';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -35,10 +37,11 @@ const PreferenceRow: React.FC<{
 
 export type IMessageConfigFormProps = {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange: (status: IChannelPluginStatus | null) => void;
 };
 
-const IMessageConfigForm: React.FC<IMessageConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const IMessageConfigForm: React.FC<IMessageConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [pollIntervalMs, setPollIntervalMs] = useState<number>(2000);
@@ -191,6 +194,8 @@ const IMessageConfigForm: React.FC<IMessageConfigFormProps> = ({ pluginStatus, o
           {t('settings.channels.imessage.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='imessage' modelSelection={modelSelection} />
+
     </div>
   );
 };

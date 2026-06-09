@@ -21,6 +21,7 @@ type Props = {
   server: ServerRowServer;
   iconUrl?: string;
   oauthStatus?: McpOAuthStatus;
+  checking?: boolean;
   onReauth: () => void;
   onSettings: () => void;
   onRemove: () => void;
@@ -33,6 +34,7 @@ export function ServerRow({
   server,
   iconUrl,
   oauthStatus,
+  checking = false,
   onReauth,
   onSettings,
   onRemove,
@@ -59,7 +61,10 @@ export function ServerRow({
   // Enabled but not running (error / idle) → offer an explicit reconnect that
   // re-pushes the server config to every agent. The on/off switch handles the
   // disabled case; this is the "force a re-connect" affordance.
-  const canReconnect = server.enabled === true && (server.status === 'error' || server.status === 'stopped');
+  const canReconnect =
+    !checking && server.enabled === true && (server.status === 'error' || server.status === 'stopped');
+  const pillStatus = checking ? 'checking' : server.status;
+  const pillLabel = checking ? t('mcpLibrary.installed.statusChecking', 'Checking...') : statusLabel;
   return (
     <div className={`mcp-server-row mcp-server-${server.status}`}>
       {iconUrl ? (
@@ -75,8 +80,8 @@ export function ServerRow({
       </div>
       <div className='mcp-server-stats'>{server.toolCount ?? 0} tools</div>
       <div className='mcp-server-status'>
-        <span className={`mcp-status-pill mcp-status-${server.status}`}>
-          <span className='mcp-dot' /> {statusLabel}
+        <span className={`mcp-status-pill mcp-status-${pillStatus}`}>
+          {checking ? <RefreshCw size={11} className='mcp-spin' /> : <span className='mcp-dot' />} {pillLabel}
         </span>
       </div>
       <div className='mcp-server-actions'>

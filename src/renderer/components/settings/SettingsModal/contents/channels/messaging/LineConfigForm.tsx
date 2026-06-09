@@ -20,6 +20,8 @@ import { useTranslation } from 'react-i18next';
 
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
+import ChannelAgentModelSelector from '@/renderer/components/settings/shared/forms/ChannelAgentModelSelector';
+import type { GeminiModelSelection } from '@/renderer/pages/conversation/platforms/gemini/useGeminiModelSelection';
 
 const PreferenceRow: React.FC<{
   label: string;
@@ -43,10 +45,11 @@ const PreferenceRow: React.FC<{
 
 export type LineConfigFormProps = {
   pluginStatus: IChannelPluginStatus | null;
+  modelSelection: GeminiModelSelection;
   onStatusChange?: (status: IChannelPluginStatus | null) => void;
 };
 
-const LineConfigForm: React.FC<LineConfigFormProps> = ({ pluginStatus, onStatusChange }) => {
+const LineConfigForm: React.FC<LineConfigFormProps> = ({ pluginStatus, modelSelection, onStatusChange }) => {
   const { t } = useTranslation();
 
   const [channelAccessToken, setChannelAccessToken] = useState('');
@@ -222,6 +225,8 @@ const LineConfigForm: React.FC<LineConfigFormProps> = ({ pluginStatus, onStatusC
           {t('settings.channels.line.testAndEnable', 'Test & Enable')}
         </Button>
       </div>
+      <ChannelAgentModelSelector platform='line' modelSelection={modelSelection} />
+
     </div>
   );
 };

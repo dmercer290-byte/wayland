@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fsModule from 'fs';
 import * as path from 'path';
 import { ClientFactory } from '../../src/common/api/ClientFactory';
+import { OpenAIRotatingClient } from '../../src/common/api/OpenAIRotatingClient';
 import {
   safeJsonParse,
   isImageFile,
@@ -15,7 +16,9 @@ import {
   getFileExtensionFromDataUrl,
   processImageUri,
   executeImageGeneration,
+  isOpenAINativeImageModel,
 } from '../../src/common/chat/imageGenCore';
+import type { TProviderWithModel } from '../../src/common/config/storage';
 
 // ---------------------------------------------------------------------------
 // safeJsonParse
@@ -261,5 +264,219 @@ describe('executeImageGeneration - inline base64 cleanup', () => {
     });
     expect(result.text).not.toContain(dataUrl);
     expect(fsModule.promises.writeFile).toHaveBeenCalledWith(expectedImagePath, Buffer.from('fake-image', 'utf-8'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isOpenAINativeImageModel - detection predicate
+// ---------------------------------------------------------------------------
+
+const OPENAI_BASE = 'https://api.openai.com/v1';
+
+function makeProvider(overrides: Partial<TProviderWithModel>): TProviderWithModel {
+  return {
+    id: 'p',
+    name: 'p',
+    platform: 'custom',
+    baseUrl: OPENAI_BASE,
+    apiKey: 'k',
+    useModel: 'gpt-image-1',
+    ...overrides,
+  };
+}
+
+describe('isOpenAINativeImageModel', () => {
+  it.each(['gpt-image-1', 'gpt-image-2', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest', 'dall-e-3', 'dall-e-2'])(
+    'matches OpenAI native image model %s on the official host',
+    (model) => {
+      expect(isOpenAINativeImageModel(makeProvider({ useModel: model }))).toBe(true);
+    }
+  );
+
+  it('does NOT match a Gemini image model (different auth type)', () => {
+    expect(
+      isOpenAINativeImageModel(
+        makeProvider({ platform: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', useModel: 'gemini-2.5-flash-image' })
+      )
+    ).toBe(false);
+  });
+
+  it('does NOT match an OpenRouter image model id (different host)', () => {
+    expect(
+      isOpenAINativeImageModel(
+        makeProvider({ baseUrl: 'https://openrouter.ai/api/v1', useModel: 'google/gemini-2.5-flash-image' })
+      )
+    ).toBe(false);
+  });
+
+  it('does NOT match openai/gpt-5-image on OpenRouter host', () => {
+    expect(
+      isOpenAINativeImageModel(makeProvider({ baseUrl: 'https://openrouter.ai/api/v1', useModel: 'openai/gpt-5-image' }))
+    ).toBe(false);
+  });
+
+  it('does NOT match flux-image', () => {
+    expect(isOpenAINativeImageModel(makeProvider({ useModel: 'flux-image' }))).toBe(false);
+  });
+
+  it('does NOT match a gpt-image model hosted on a non-OpenAI gateway', () => {
+    expect(
+      isOpenAINativeImageModel(makeProvider({ baseUrl: 'https://openrouter.ai/api/v1', useModel: 'gpt-image-1' }))
+    ).toBe(false);
+  });
+
+  it('does NOT match when baseUrl is empty', () => {
+    expect(isOpenAINativeImageModel(makeProvider({ baseUrl: '', useModel: 'gpt-image-1' }))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeImageGeneration - OpenAI Images API routing
+// ---------------------------------------------------------------------------
+
+describe('executeImageGeneration - OpenAI native image models', () => {
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    vi.spyOn(fsModule.promises, 'writeFile').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('routes gpt-image-1 to the Images API (createImage) and does NOT call createChatCompletion', async () => {
+    const createImage = vi.fn().mockResolvedValue({
+      created: 1,
+      data: [{ b64_json: Buffer.from('fake-image').toString('base64') }],
+    });
+    const createChatCompletion = vi.fn();
+
+    const fakeClient = Object.create(OpenAIRotatingClient.prototype) as OpenAIRotatingClient;
+    Object.assign(fakeClient, { createImage, createChatCompletion });
+
+    vi.spyOn(ClientFactory, 'createRotatingClient').mockResolvedValue(fakeClient);
+
+    const result = await executeImageGeneration(
+      { prompt: 'a cat in space' },
+      makeProvider({ useModel: 'gpt-image-1' }),
+      '/workspace'
+    );
+
+    expect(createImage).toHaveBeenCalledOnce();
+    expect(createChatCompletion).not.toHaveBeenCalled();
+    const callArgs = createImage.mock.calls[0][0] as Record<string, unknown>;
+    expect(callArgs).toMatchObject({ model: 'gpt-image-1', prompt: 'a cat in space', n: 1 });
+    expect(callArgs).not.toHaveProperty('response_format');
+
+    const expectedImagePath = path.join('/workspace', 'img-1700000000000.png');
+    expect(result.success).toBe(true);
+    expect(result.imagePath).toBe(expectedImagePath);
+    expect(result.relativeImagePath).toBe('img-1700000000000.png');
+    expect(fsModule.promises.writeFile).toHaveBeenCalledWith(expectedImagePath, Buffer.from('fake-image', 'utf-8'));
+  });
+
+  it('handles a url-shaped Images API response by fetching the bytes', async () => {
+    const imageBytes = Buffer.from('downloaded-image');
+    const createImage = vi.fn().mockResolvedValue({
+      created: 1,
+      data: [{ url: 'https://oai.example/generated.png' }],
+    });
+
+    const fakeClient = Object.create(OpenAIRotatingClient.prototype) as OpenAIRotatingClient;
+    Object.assign(fakeClient, { createImage });
+    vi.spyOn(ClientFactory, 'createRotatingClient').mockResolvedValue(fakeClient);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(imageBytes, { status: 200 })
+    );
+
+    const result = await executeImageGeneration(
+      { prompt: 'a dog' },
+      makeProvider({ useModel: 'dall-e-3' }),
+      '/workspace'
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith('https://oai.example/generated.png', expect.objectContaining({}));
+    const expectedImagePath = path.join('/workspace', 'img-1700000000000.png');
+    expect(result.success).toBe(true);
+    expect(result.imagePath).toBe(expectedImagePath);
+    expect(fsModule.promises.writeFile).toHaveBeenCalledWith(expectedImagePath, imageBytes);
+  });
+
+  it('returns an honest error (not a 404) for OpenAI image editing with input images', async () => {
+    const createImage = vi.fn();
+    const fakeClient = Object.create(OpenAIRotatingClient.prototype) as OpenAIRotatingClient;
+    Object.assign(fakeClient, { createImage });
+    const factorySpy = vi.spyOn(ClientFactory, 'createRotatingClient').mockResolvedValue(fakeClient);
+
+    const result = await executeImageGeneration(
+      { prompt: 'make it blue', image_uris: ['https://example.com/in.png'] },
+      makeProvider({ useModel: 'gpt-image-1' }),
+      '/workspace'
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('openai-image-edit-unsupported');
+    expect(result.text).toContain('not yet supported');
+    expect(createImage).not.toHaveBeenCalled();
+    expect(factorySpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps a Gemini image model on the chat-completions path (no Images API call)', async () => {
+    const responseText = 'Image generated successfully.\n\n![image](data:image/png;base64,ZmFrZS1pbWFnZQ==)';
+    const createChatCompletion = vi.fn().mockResolvedValue({
+      id: 'resp-1',
+      object: 'chat.completion',
+      created: 1,
+      model: 'gemini-2.5-flash-image',
+      choices: [{ index: 0, message: { role: 'assistant', content: responseText }, finish_reason: 'stop' }],
+    });
+    const createImage = vi.fn();
+
+    vi.spyOn(ClientFactory, 'createRotatingClient').mockResolvedValue({
+      createChatCompletion,
+      createImage,
+    } as unknown as Awaited<ReturnType<typeof ClientFactory.createRotatingClient>>);
+
+    const result = await executeImageGeneration(
+      { prompt: 'a cat' },
+      makeProvider({
+        platform: 'gemini',
+        baseUrl: 'https://generativelanguage.googleapis.com',
+        useModel: 'gemini-2.5-flash-image',
+      }),
+      '/workspace'
+    );
+
+    expect(createChatCompletion).toHaveBeenCalledOnce();
+    expect(createImage).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+  });
+
+  it('keeps an OpenRouter image model id on the chat-completions path', async () => {
+    const responseText = 'Done.\n\n![image](data:image/png;base64,ZmFrZS1pbWFnZQ==)';
+    const createChatCompletion = vi.fn().mockResolvedValue({
+      id: 'resp-2',
+      object: 'chat.completion',
+      created: 1,
+      model: 'google/gemini-2.5-flash-image',
+      choices: [{ index: 0, message: { role: 'assistant', content: responseText }, finish_reason: 'stop' }],
+    });
+    const createImage = vi.fn();
+
+    vi.spyOn(ClientFactory, 'createRotatingClient').mockResolvedValue({
+      createChatCompletion,
+      createImage,
+    } as unknown as Awaited<ReturnType<typeof ClientFactory.createRotatingClient>>);
+
+    const result = await executeImageGeneration(
+      { prompt: 'a cat' },
+      makeProvider({ baseUrl: 'https://openrouter.ai/api/v1', useModel: 'google/gemini-2.5-flash-image' }),
+      '/workspace'
+    );
+
+    expect(createChatCompletion).toHaveBeenCalledOnce();
+    expect(createImage).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
   });
 });

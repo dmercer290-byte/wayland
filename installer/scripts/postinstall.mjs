@@ -15,7 +15,7 @@ import { get } from 'node:https';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const WCORE_VERSION = 'v0.1.28';
+const WCORE_VERSION = 'v0.10.0';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PAYLOAD = resolve(HERE, '..', 'payload');
 
@@ -37,7 +37,7 @@ function warn(msg) {
 
 if (!triple) { warn(`No prebuilt Wayland Core engine for ${runtimeKey} (skipping).`); process.exit(0); }
 
-const asset = `aionrs-${WCORE_VERSION}-${triple}.tar.gz`;
+const asset = `wayland-core-${WCORE_VERSION}-${triple}.tar.gz`;
 const url = `https://github.com/FerroxLabs/wayland-core/releases/download/${WCORE_VERSION}/${asset}`;
 const tmp = join(PAYLOAD, '.wcore-tmp');
 const tarPath = join(tmp, asset);

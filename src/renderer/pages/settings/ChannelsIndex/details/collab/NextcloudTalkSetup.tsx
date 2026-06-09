@@ -14,10 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { channel } from '@/common/adapter/ipcBridge';
 import type { IChannelPluginStatus } from '@process/channels/types';
 import NextcloudTalkConfigForm from '@renderer/components/settings/SettingsModal/contents/channels/collab/NextcloudTalkConfigForm';
+import { useChannelModelSelection } from '@renderer/hooks/settings/useChannelModelSelection';
 import ChannelDetailLayout from '../../ChannelDetailLayout';
 
 const NextcloudTalkSetup: React.FC = () => {
   const { t } = useTranslation();
+  const modelSelection = useChannelModelSelection('assistant.nextcloud-talk.defaultModel');
   const [pluginStatus, setPluginStatus] = useState<IChannelPluginStatus | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -52,7 +54,7 @@ const NextcloudTalkSetup: React.FC = () => {
         'Self-hosted Nextcloud Talk via app-password Basic auth. Provide your server URL, Nextcloud username, and an app password generated under Personal → Security → Devices & sessions.',
       )}
     >
-      <NextcloudTalkConfigForm pluginStatus={pluginStatus} onStatusChange={setPluginStatus} />
+      <NextcloudTalkConfigForm pluginStatus={pluginStatus} modelSelection={modelSelection} onStatusChange={setPluginStatus} />
     </ChannelDetailLayout>
   );
 };

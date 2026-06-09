@@ -1,6 +1,6 @@
 {
   "name": "Wayland",
-  "version": "0.9.6-rc.1",
+  "version": "0.9.6-rc.2",
   "description": "The local-first desktop AI agent that drives every AI CLI on your machine - Claude Code, Codex, Gemini and more, on your keys.",
   "keywords": [],
   "license": "AGPL-3.0-or-later",
@@ -97,6 +97,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@floating-ui/react": "^0.27.16",
     "@fontsource-variable/inter": "^5.2.8",
+    "@google-cloud/pubsub": "^5.3.1",
     "@google/genai": "^1.16.0",
     "@grammyjs/transformer-throttler": "^1.2.1",
     "@huggingface/transformers": "^4.2.0",

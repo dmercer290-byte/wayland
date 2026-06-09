@@ -94,7 +94,9 @@
     "flux": {
       "title": "Get the best answer. Pay the right price. And get it done faster.",
       "body": "Flux Router is the #1 smart router - the only one that matches every prompt to its best-fit model across 40+ premium models. One key, one bill, the same quality you would get going direct.",
-      "cta": "Set up Flux Router →"
+      "cta": "Set up Flux Router →",
+      "retryCta": "Try again",
+      "getKeyCta": "Get your Flux key"
     },
     "key": {
       "placeholder": "Paste a provider key, then press Enter",
@@ -107,7 +109,8 @@
     "errors": {
       "googleFailed": "Could not connect Google. Please try again.",
       "geminiFailed": "Signed in with Google, but loading Gemini models failed. Please try again.",
-      "fluxFailed": "Flux did not finish connecting. Try again."
+      "fluxFailed": "Flux did not finish connecting. Try again.",
+      "fluxFallback": "Couldn’t open the Flux sign-in. Paste your Flux key below instead, or grab one from fluxrouter.ai."
     },
     "quickstart": {
       "headline": "First - what should I call you",

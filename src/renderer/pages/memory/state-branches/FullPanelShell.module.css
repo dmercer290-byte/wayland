@@ -41,14 +41,21 @@
 
 .breadcrumb {
   display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 
+.breadcrumbIcon {
+  display: flex;
+  align-items: center;
+  color: var(--brand, #ff6b35);
+  filter: drop-shadow(0 0 10px rgba(255, 107, 53, 0.4));
+}
+
 .breadcrumbPrimary {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
   color: var(--color-text-1);
 }
 

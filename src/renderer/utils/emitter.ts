@@ -29,6 +29,21 @@ interface EventTypes {
   'acp.selected.file.append': [Array<string | FileOrFolderItem>];
   'acp.selected.file.clear': void;
   'acp.workspace.refresh': void;
+  /**
+   * Fired by AcpSendBox when an ACP CLI turn fails to authenticate. AcpChat
+   * listens and shows the AcpAuthFailureCard above the send box, with remedies
+   * derived from the backend (route through Flux, add a provider key, or run the
+   * CLI login command).
+   */
+  'acp.auth.failed.card': [{ conversation_id: string; backend: string }];
+  /**
+   * Fired by WCoreSendBox when a Wayland Core turn fails to authenticate (the
+   * inference provider rejected the key, e.g. 401). WCoreChat listens and shows
+   * the AcpAuthFailureCard above the send box. `providerLabel` names the failing
+   * provider (Wayland Core routes any registry provider) so the remedy can offer
+   * to re-key that specific provider.
+   */
+  'wcore.auth.failed.card': [{ conversation_id: string; providerLabel?: string }];
   'codex.selected.file': [Array<string | FileOrFolderItem>];
   'codex.selected.file.append': [Array<string | FileOrFolderItem>];
   'codex.selected.file.clear': void;
@@ -83,7 +98,7 @@ interface EventTypes {
       initialPrompt: string;
       initialSchedule: string;
       initialScheduleDescription: string;
-    }
+    },
   ];
 }
 

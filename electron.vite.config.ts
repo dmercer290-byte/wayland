@@ -106,6 +106,7 @@ export default defineConfig(({ mode }) => {
             // BaseAgentManager.resolveWorkerDir() handles the case where code
             // splitting places it in a chunks/ subdirectory.
             gemini: resolve('src/process/worker/gemini.ts'),
+            emailImap: resolve('src/process/worker/emailImap.ts'),
             lifecycleRunner: resolve('src/process/extensions/lifecycle/lifecycleRunner.ts'),
             // Built-in MCP server entry points (compiled by scripts/build-mcp-servers.js via esbuild,
             // not vite - esbuild bundles all deps for self-contained execution by external node processes)
