@@ -522,6 +522,18 @@ pub struct AgentEngine {
     /// via `McpConfig::default()` so most callers get curated tool lists for
     /// free without flipping a flag.
     mcp_curation: wcore_config::config::McpCurationPolicy,
+    /// Cache-stability (token-opt): inventory-hashed UNION of curated MCP
+    /// keep-sets. Keeps the serialized tool-zone prefix byte-stable across
+    /// turns — a per-turn re-curation otherwise rewrites the cached prefix at
+    /// the cache-WRITE rate every MCP turn. Reset only when the MCP tool
+    /// inventory itself changes (server connect/disconnect / plugin reload).
+    mcp_curation_cache: Option<(u64, std::collections::HashSet<String>)>,
+    /// Token-opt (diff-resend): handle to the shared file-state cache (the same
+    /// `Arc` the Read/Edit/Write tools hold). Used only to bump the cache's
+    /// compaction generation after a compaction pass, so stale read bases stop
+    /// qualifying for diff-resend. `None` in test engines and when the file
+    /// cache is disabled; wired by `AgentBootstrap` via `set_file_cache`.
+    file_cache: Option<Arc<std::sync::RwLock<wcore_tools::file_cache::FileStateCache>>>,
     /// W6 F17 — audit-log handle for the recency input to `McpCurator`.
     /// `None` means the agent runs without M2 memory wiring (test envs);
     /// curation gracefully degrades to keyword-only ranking in that case.
@@ -762,6 +774,22 @@ pub struct AgentEngine {
     /// from disk. Only the live gate reads this; the rest of the engine uses
     /// the derived fields above.
     config: Config,
+    /// Token-opt "compaction floor": the number of leading conversation
+    /// messages that autocompact has summarized/collapsed away. Any absolute
+    /// message index `< compaction_floor` no longer maps to its original
+    /// message — autocompact replaced that whole prefix with a single folded
+    /// boundary+summary `User` message (see `run_compaction`).
+    ///
+    /// Consumers (diff-resend, read-once) use this to decide whether an earlier
+    /// message's content is STILL verbatim in the model's visible history.
+    /// Microcompact does NOT move this floor: it clears tool-result *bodies*
+    /// in place (leaving the message + its `CLEARED`/`SUPERSEDED` marker), so
+    /// the indices still map — a stubbed body is detected via those markers,
+    /// not via the floor.
+    ///
+    /// Reset to 0 on conversation reset (`/clear`, `/resume`), where the
+    /// message buffer is replaced wholesale.
+    compaction_floor: usize,
 }
 
 impl Drop for AgentEngine {
@@ -795,6 +823,29 @@ const SKILL_DETECTION_WINDOW: usize = 6;
 /// large prompt to the 1h cache tier. 30 minutes is a conservative lower
 /// bound for a multi-turn agent session.
 const AGENT_TURN_CACHE_REUSE_WINDOW_SECS: u64 = 1800;
+
+/// Output-side token optimization (Part A): fluff closers that, once the model
+/// starts emitting one at a *paragraph boundary*, signal the answer is over and
+/// only ceremonial filler follows. Sent as provider stop sequences so the model
+/// halts before spending output tokens on the closer.
+///
+/// EVERY entry is prefixed with `"\n\n"` on purpose: a stop sequence is a raw
+/// substring match, so prefixing the paragraph break guarantees these only fire
+/// at the start of a fresh paragraph. A mid-sentence occurrence of the same
+/// words (e.g. "...let me know if that helps, but first...") never matches,
+/// because it is not preceded by a blank line. Anthropic caps stop sequences at
+/// a small number, so keep this list at most 4 entries.
+///
+/// Only applied when the route optimizes client-side
+/// (`compat.input_optimization() == "client"`); router-optimized routes get an
+/// empty Vec and emit no stop field. The list is a fixed `const`, so it never
+/// perturbs the cached prompt prefix.
+const FLUFF_STOP_SEQUENCES: [&str; 4] = [
+    "\n\nLet me know if",
+    "\n\nI hope this helps",
+    "\n\nFeel free to",
+    "\n\nIs there anything else",
+];
 
 /// v0.8.0 Task M — default user-id key for per-turn user-model
 /// write-back. Mirrors the bootstrap read site (`bootstrap.rs`,
@@ -900,6 +951,8 @@ impl AgentEngine {
             advertised_capabilities: config.advertised_capabilities.clone(),
             per_turn_costs: Vec::new(),
             mcp_curation: config.mcp.curation.clone(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             // W7 Pre-flight 0: default to NullMemory; `AgentBootstrap`
             // calls `set_memory_api()` after construction when a real
@@ -959,6 +1012,8 @@ impl AgentEngine {
             // captured before the partial moves above.
             workflow_live_mode,
             config: retained_config,
+            // Token-opt: no history has been collapsed yet at construction.
+            compaction_floor: 0,
         }
     }
 
@@ -1053,6 +1108,8 @@ impl AgentEngine {
             advertised_capabilities: config.advertised_capabilities.clone(),
             per_turn_costs: Vec::new(),
             mcp_curation: config.mcp.curation.clone(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             // W7 Pre-flight 0: default to NullMemory; `AgentBootstrap`
             // calls `set_memory_api()` after construction when a real
@@ -1109,11 +1166,38 @@ impl AgentEngine {
             // captured before the partial moves above.
             workflow_live_mode,
             config: retained_config,
+            // Token-opt: no history has been collapsed yet at construction.
+            compaction_floor: 0,
         }
     }
 
     pub fn compaction_level(&self) -> wcore_compact::CompactionLevel {
         self.compaction_level
+    }
+
+    /// Token-opt: the compaction floor — the number of leading conversation
+    /// messages that autocompact has summarized/collapsed away. Any absolute
+    /// message index `< compaction_floor` no longer maps to its original
+    /// message. `0` means no autocompact has run this conversation. See the
+    /// `compaction_floor` field doc.
+    //
+    // `allow(dead_code)`: the consumers (diff-resend, read-once) land later in
+    // the token-opt campaign; this is the shared primitive they read. The field
+    // itself is already live (written by autocompact, reset on `/clear`).
+    #[allow(dead_code)]
+    pub(crate) fn compaction_floor(&self) -> usize {
+        self.compaction_floor
+    }
+
+    /// Token-opt: whether the absolute message index `idx` still maps to its
+    /// original message in the model's visible history (i.e. autocompact has
+    /// not collapsed it away). Note: this only tracks autocompact's leading
+    /// collapse — a message can still be *visible* by this test yet have an
+    /// in-place-cleared tool-result body (microcompact); detect that via the
+    /// `CLEARED`/`SUPERSEDED` markers, not this helper.
+    #[allow(dead_code)]
+    pub(crate) fn message_index_still_visible(&self, idx: usize) -> bool {
+        idx >= self.compaction_floor
     }
 
     /// Get a reference to the shared provider
@@ -1716,6 +1800,9 @@ impl AgentEngine {
         // explicit `/model` pin no longer applies, so hook/skill switches
         // are honoured again until the user pins anew.
         self.user_model_pin = None;
+        // Token-opt: the message buffer is gone, so the compaction floor
+        // (which indexes into it) no longer means anything — reset it.
+        self.compaction_floor = 0;
     }
 
     /// `/resume <id>` - swap the in-memory conversation buffer to a loaded
@@ -1723,6 +1810,10 @@ impl AgentEngine {
     /// Symmetric with `clear_conversation`; the system prompt is preserved.
     pub fn load_conversation(&mut self, messages: Vec<Message>) {
         self.messages = messages;
+        // Token-opt: a swapped-in buffer is a fresh index space; the prior
+        // session's compaction floor does not apply. Symmetric with the
+        // `clear_conversation` reset below.
+        self.compaction_floor = 0;
         // Wave-6 #5 (secondary): a resumed/loaded session must start without the
         // PREVIOUS session's explicit `/model` pin. Symmetric with
         // `clear_conversation` (a `/new` re-baselines): the loaded session's
@@ -1830,6 +1921,29 @@ impl AgentEngine {
         notifier: Arc<dyn wcore_tools::file_write_notifier::FileWriteNotifier>,
     ) {
         let _ = self.tool_write_notifier.set(notifier);
+    }
+
+    /// Token-opt (diff-resend): wire the shared file-state cache so the engine
+    /// can bump its compaction generation after each compaction pass. Called
+    /// once by `AgentBootstrap` with the same `Arc` the Read/Edit/Write tools
+    /// hold. Engines without a file cache (tests, cache-disabled) skip this and
+    /// diff-resend simply never fires.
+    pub fn set_file_cache(
+        &mut self,
+        cache: Arc<std::sync::RwLock<wcore_tools::file_cache::FileStateCache>>,
+    ) {
+        self.file_cache = Some(cache);
+    }
+
+    /// Token-opt (diff-resend): invalidate cached read bases for diffing by
+    /// advancing the file cache's compaction generation. No-op when no cache is
+    /// wired or the lock is poisoned.
+    fn bump_file_cache_generation(&self) {
+        if let Some(cache) = &self.file_cache
+            && let Ok(mut c) = cache.write()
+        {
+            c.bump_compaction_generation();
+        }
     }
 
     /// W8b.2.B Task 7: read access to the notifier. `None` when no
@@ -2764,7 +2878,7 @@ impl AgentEngine {
             let tools = self.apply_mcp_curation(tools);
 
             // Build system prompt: append plan mode instructions when active
-            let mut system = if self.plan_state.is_active {
+            let system = if self.plan_state.is_active {
                 format!(
                     "{}\n\n{}",
                     self.system_prompt,
@@ -2774,17 +2888,14 @@ impl AgentEngine {
                 self.system_prompt.clone()
             };
 
-            // v0.8.1 U1 — append the per-turn skill-router hint when the
-            // router is installed and picked a visible catalog skill. This
-            // is the only place the learned pick reaches the model; it's a
-            // single non-binding line, mirroring how plan-mode instructions
-            // are appended above. `None` (no router / no pick / unknown or
-            // hidden skill) leaves `system` untouched, so engines without a
-            // router are byte-identical to pre-U1.
-            if let Some(hint) = self.skill_router_hint() {
-                system.push_str("\n\n");
-                system.push_str(&hint);
-            }
+            // v0.8.1 U1 — the per-turn skill-router hint (when the router is
+            // installed and picked a visible catalog skill). Cache-stability
+            // (token-opt): the hint is dynamic per turn, so appending it to the
+            // `system` string here would rewrite the cached system prefix
+            // (zone 1) every turn. Compute it now and inject it into the
+            // request's volatile message tail below instead. `None` (no router
+            // / no pick / hidden skill) leaves both system and tail untouched.
+            let skill_hint = self.skill_router_hint();
 
             // Record prompt state for cache diagnostics
             self.cache_detector.record_request(&system, &tools);
@@ -2844,6 +2955,16 @@ impl AgentEngine {
             // injection between an assistant tool_use and its result.
             self.repair_all_orphaned_tool_uses();
 
+            // Output-side optimization (Part A): attach fluff stop sequences
+            // only when the route optimizes client-side. On router-optimized
+            // routes the server already trims output, so we leave the Vec
+            // empty and providers emit no stop field.
+            let stop_sequences = if self.compat.input_optimization() == "client" {
+                FLUFF_STOP_SEQUENCES.iter().map(|s| s.to_string()).collect()
+            } else {
+                Vec::new()
+            };
+
             let mut request = LlmRequest {
                 model: self.model.clone(),
                 system,
@@ -2854,7 +2975,23 @@ impl AgentEngine {
                 reasoning_effort: self.current_reasoning_effort.clone(),
                 cache_tier,
                 routing_hint: None,
+                stop_sequences,
             };
+
+            // Cache-stability (token-opt): inject the per-turn skill-router
+            // hint as a transient text block on the request's last user-role
+            // message. `request.messages` is a clone, so this never persists
+            // into history and never shifts the cached system/tool prefix.
+            // Done before `mark_cache_boundaries` so the tail breakpoint
+            // accounts for the final content. Skipped unless the tail is
+            // user-role (never orphans a tool_use or creates adjacent user
+            // messages).
+            if let Some(hint) = skill_hint
+                && let Some(last) = request.messages.last_mut()
+                && matches!(last.role, Role::User)
+            {
+                last.content.push(ContentBlock::Text { text: hint });
+            }
 
             // W1 S3: place per-message cache breakpoint at the tail when the
             // provider honours it. Idempotent across turns: previous turns'
@@ -4073,6 +4210,10 @@ impl AgentEngine {
                     "Microcompact: cleared {} tool results (~{} tokens freed)",
                     result.cleared_count, result.estimated_tokens_freed
                 ));
+                // Token-opt (diff-resend): clearing a tool-result body can remove
+                // the read content a cached diff base references. Bump the file
+                // cache's compaction generation so those bases stop qualifying.
+                self.bump_file_cache_generation();
             }
         }
 
@@ -4125,8 +4266,23 @@ impl AgentEngine {
                     if let Some(turn) = live_user_turn {
                         folded.extend(turn.content);
                     }
+                    // Token-opt compaction-floor: every message currently in
+                    // `self.messages` is the prefix autocompact just summarized
+                    // (the live user turn was popped out above and re-folded
+                    // verbatim, so it is NOT in this count). Replacing the whole
+                    // buffer with one synthetic boundary+summary message
+                    // collapses all of them away — none map to an original
+                    // index any more. Advance the floor by that count (the
+                    // `+=` accumulates across repeated autocompacts, since the
+                    // synthetic message itself becomes part of the next prefix).
+                    let collapsed = self.messages.len();
+                    self.compaction_floor += collapsed;
                     self.messages = vec![Message::now(Role::User, folded)];
                     compacted = true;
+                    // Token-opt (diff-resend): autocompact collapsed the leading
+                    // prefix, so any read base cached before now is no longer in
+                    // the visible transcript. Invalidate diff bases.
+                    self.bump_file_cache_generation();
                 }
                 Err(auto::CompactError::CircuitBroken { .. }) => {
                     // Already tripped; logged at circuit-breaker level.
@@ -4943,7 +5099,7 @@ impl AgentEngine {
     /// `wcore-mcp/src/tool_proxy.rs:14`). Curation source: the most recent
     /// user message in `self.messages`. `Off` policy is a no-op.
     fn apply_mcp_curation(
-        &self,
+        &mut self,
         tools: Vec<wcore_types::tool::ToolDef>,
     ) -> Vec<wcore_types::tool::ToolDef> {
         let top_k = match &self.mcp_curation {
@@ -4957,6 +5113,26 @@ impl AgentEngine {
             keep.extend(mcp_tools);
             return keep;
         }
+
+        // Cache-stability (token-opt): the kept MCP set must stay stable across
+        // turns, or it rewrites the cached tool-zone prefix every turn at the
+        // cache-WRITE rate (~1.25x) instead of re-reading it (~0.1x). Key a
+        // UNION of curated keep-sets on the MCP tool inventory hash: this turn's
+        // keyword/recency pick is unioned into the cached set, which grows
+        // monotonically as new user messages surface new tools and then
+        // stabilizes — byte-stable on the common turn. We never freeze turn-1's
+        // keywords (that would permanently hide a tool the model needs later);
+        // the cache resets only when the inventory itself changes (server
+        // connect/disconnect / plugin reload), a legitimate one-turn miss.
+        let inventory_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut names: Vec<&str> = mcp_tools.iter().map(|t| t.name.as_str()).collect();
+            names.sort_unstable();
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            names.hash(&mut h);
+            h.finish()
+        };
+
         let user_msg = self.most_recent_user_text();
         let usage = self.recent_mcp_usage();
         let triples: Vec<(String, String, String)> = mcp_tools
@@ -4974,8 +5150,21 @@ impl AgentEngine {
                 tools: &triples,
                 recent_usage: &usage,
             });
-        let keep_names: std::collections::HashSet<String> =
+        let this_turn: std::collections::HashSet<String> =
             ranked.into_iter().map(|r| r.tool_name).collect();
+
+        // Union into the inventory-keyed cache (reset on inventory change).
+        let keep_names = match self.mcp_curation_cache.as_mut() {
+            Some((hash, set)) if *hash == inventory_hash => {
+                set.extend(this_turn);
+                set.clone()
+            }
+            _ => {
+                self.mcp_curation_cache = Some((inventory_hash, this_turn.clone()));
+                this_turn
+            }
+        };
+
         for t in mcp_tools {
             if keep_names.contains(&t.name) {
                 keep.push(t);
@@ -5255,6 +5444,8 @@ mod set_config_tests {
             advertised_capabilities: wcore_config::tools::AdvertisedCapabilitiesConfig::default(),
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             memory_api: Arc::new(wcore_memory::NullMemory),
             dream_throttle: Arc::new(wcore_memory::consolidate::DreamThrottle::new(
@@ -5307,6 +5498,7 @@ mod set_config_tests {
             // default config for the (unused-in-these-fixtures) live gate.
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
+            compaction_floor: 0,
         }
     }
 
@@ -5317,6 +5509,76 @@ mod set_config_tests {
         let mut engine = make_engine(model);
         engine.compat = compat;
         engine
+    }
+
+    /// Cache-stability regression (token-opt): MCP tool curation must NOT churn
+    /// the kept set turn-to-turn, or it rewrites the cached tool-zone prefix
+    /// every turn at the cache-WRITE rate. The inventory-keyed UNION retains
+    /// earlier-surfaced tools (monotonic) and is byte-identical once stabilized.
+    #[test]
+    fn mcp_curation_union_is_cache_stable_across_turns() {
+        use wcore_types::message::{ContentBlock, Message, Role};
+
+        fn mcp_tool(name: &str, desc: &str) -> wcore_types::tool::ToolDef {
+            wcore_types::tool::ToolDef {
+                name: name.to_string(),
+                description: desc.to_string(),
+                input_schema: serde_json::json!({"type": "object"}),
+                deferred: false,
+            }
+        }
+        let tools = vec![
+            mcp_tool("mcp__srv__alpha", "search alpha database records"),
+            mcp_tool("mcp__srv__bravo", "send bravo email messages"),
+            mcp_tool("mcp__srv__charlie", "compile charlie reports"),
+            mcp_tool("mcp__srv__delta", "remove delta entries"),
+        ];
+        let names = |v: Vec<wcore_types::tool::ToolDef>| -> Vec<String> {
+            v.into_iter().map(|t| t.name).collect()
+        };
+        let user = |text: &str| {
+            vec![Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: text.to_string(),
+                }],
+            )]
+        };
+
+        let mut engine = make_engine("m");
+        engine.mcp_curation = wcore_config::config::McpCurationPolicy::TopK { k: 2 };
+        engine.audit_log = None; // keyword-only ranking → deterministic
+
+        // Turn 1: a request about "alpha database".
+        engine.messages = user("alpha database query");
+        let turn1 = names(engine.apply_mcp_curation(tools.clone()));
+        assert!(turn1.contains(&"mcp__srv__alpha".to_string()));
+
+        // Turn 2: a DIFFERENT request about "charlie reports". The old per-turn
+        // curation would DROP alpha here (cache bust); the union must keep it.
+        engine.messages = user("charlie reports compile");
+        let turn2 = names(engine.apply_mcp_curation(tools.clone()));
+        assert!(
+            turn2.contains(&"mcp__srv__alpha".to_string()),
+            "monotonic union must retain earlier-surfaced tools across turns"
+        );
+        assert!(turn2.contains(&"mcp__srv__charlie".to_string()));
+
+        // Turn 3: repeat turn 2 — the union is now stable, so the serialized
+        // tool list is byte-identical (a cache READ, not a prefix rewrite).
+        let turn3 = names(engine.apply_mcp_curation(tools.clone()));
+        assert_eq!(
+            turn2, turn3,
+            "stabilized union must be byte-identical across turns"
+        );
+
+        // A real inventory change (new MCP server tool) legitimately resets the
+        // cache so the new tool can be surfaced.
+        let mut tools2 = tools.clone();
+        tools2.push(mcp_tool("mcp__srv__echo", "echo fresh tool"));
+        engine.messages = user("echo fresh tool");
+        let after_change = names(engine.apply_mcp_curation(tools2));
+        assert!(after_change.contains(&"mcp__srv__echo".to_string()));
     }
 
     // --- Cycle 1 tests (updated signature) ---
@@ -5901,6 +6163,8 @@ mod phase6_tests {
             advertised_capabilities: wcore_config::tools::AdvertisedCapabilitiesConfig::default(),
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             memory_api: Arc::new(wcore_memory::NullMemory),
             dream_throttle: Arc::new(wcore_memory::consolidate::DreamThrottle::new(
@@ -5954,6 +6218,7 @@ mod phase6_tests {
             // default config for the (unused-in-these-fixtures) live gate.
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
+            compaction_floor: 0,
         }
     }
 
@@ -6177,6 +6442,8 @@ mod compact_tests {
             advertised_capabilities: wcore_config::tools::AdvertisedCapabilitiesConfig::default(),
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             memory_api: Arc::new(wcore_memory::NullMemory),
             dream_throttle: Arc::new(wcore_memory::consolidate::DreamThrottle::new(
@@ -6230,6 +6497,7 @@ mod compact_tests {
             // default config for the (unused-in-these-fixtures) live gate.
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
+            compaction_floor: 0,
         }
     }
 
@@ -6791,6 +7059,133 @@ mod compact_tests {
         );
     }
 
+    // -- Token-opt compaction-floor primitive --
+
+    #[tokio::test]
+    async fn autocompact_advances_compaction_floor_and_reset_clears_it() {
+        // Token-opt: after autocompact collapses the leading N messages,
+        // `compaction_floor()` must equal N, indices `< N` must report
+        // not-visible and index N must report visible. A conversation reset
+        // (`/clear`) must return the floor to 0.
+        let config = CompactConfig {
+            context_window: 200_000,
+            ..Default::default()
+        };
+        let mut state = CompactState::new();
+        // Above the autocompact threshold (167k), below emergency.
+        state.last_input_tokens = 180_000;
+
+        // Three leading messages (indices 0,1,2 — the ones that collapse)
+        // plus a trailing LIVE user turn. `run_compaction` pops the live
+        // turn out before handing the rest to `autocompact`, so exactly
+        // 3 messages are summarized away → floor advances by 3.
+        let messages = vec![
+            Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: "leading one".into(),
+                }],
+            ),
+            Message::new(
+                Role::Assistant,
+                vec![ContentBlock::Text {
+                    text: "leading two".into(),
+                }],
+            ),
+            Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: "leading three".into(),
+                }],
+            ),
+            // Trailing live user turn — popped+re-folded, NOT counted.
+            Message::new(
+                Role::Assistant,
+                vec![ContentBlock::Text {
+                    text: "assistant reply".into(),
+                }],
+            ),
+            Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: "the live task".into(),
+                }],
+            ),
+        ];
+        // Leading span handed to autocompact = everything except the popped
+        // trailing User turn = 4 messages → N = 4.
+        let n = messages.len() - 1;
+
+        let mut engine = make_compact_engine(config, state, messages);
+        engine.provider = Arc::new(SummaryProvider);
+
+        // Precondition: nothing collapsed yet, every index visible.
+        assert_eq!(engine.compaction_floor(), 0);
+        assert!(engine.message_index_still_visible(0));
+
+        engine.run_compaction().await.expect("autocompact succeeds");
+
+        // The floor advanced by exactly the collapsed leading count.
+        assert_eq!(engine.compaction_floor(), n);
+        // The last collapsed index is no longer visible…
+        assert!(!engine.message_index_still_visible(n - 1));
+        // …but the index at the floor (and beyond) maps to live history.
+        assert!(engine.message_index_still_visible(n));
+
+        // A conversation reset re-baselines the index space.
+        engine.clear_conversation();
+        assert_eq!(engine.compaction_floor(), 0);
+        assert!(engine.message_index_still_visible(0));
+    }
+
+    #[tokio::test]
+    async fn autocompact_bumps_wired_file_cache_generation() {
+        // Token-opt (diff-resend): when the engine has a wired file cache, a
+        // compaction pass must advance the cache's compaction generation so
+        // stale read bases stop qualifying for diff-resend.
+        let config = CompactConfig {
+            context_window: 200_000,
+            ..Default::default()
+        };
+        let mut state = CompactState::new();
+        state.last_input_tokens = 180_000;
+        let messages = vec![
+            Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: "leading".into(),
+                }],
+            ),
+            Message::new(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: "the live task".into(),
+                }],
+            ),
+        ];
+        let mut engine = make_compact_engine(config, state, messages);
+        engine.provider = Arc::new(SummaryProvider);
+
+        let cache = Arc::new(std::sync::RwLock::new(
+            wcore_tools::file_cache::FileStateCache::new(
+                &wcore_config::file_cache::FileCacheConfig {
+                    max_entries: 10,
+                    max_size_bytes: 1_000_000,
+                    enabled: true,
+                },
+            ),
+        ));
+        assert_eq!(cache.read().unwrap().compaction_generation(), 0);
+        engine.set_file_cache(cache.clone());
+
+        engine.run_compaction().await.expect("autocompact succeeds");
+
+        assert!(
+            cache.read().unwrap().compaction_generation() >= 1,
+            "a compaction pass must bump the wired file cache's generation"
+        );
+    }
+
     // -- Circuit broken prevents autocompact, emergency still fires --
 
     #[tokio::test]
@@ -6944,6 +7339,8 @@ mod plan_mode_tests {
             advertised_capabilities: wcore_config::tools::AdvertisedCapabilitiesConfig::default(),
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             memory_api: Arc::new(wcore_memory::NullMemory),
             dream_throttle: Arc::new(wcore_memory::consolidate::DreamThrottle::new(
@@ -6997,6 +7394,7 @@ mod plan_mode_tests {
             // default config for the (unused-in-these-fixtures) live gate.
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
+            compaction_floor: 0,
         }
     }
 
@@ -7353,6 +7751,8 @@ mod hook_integration_tests {
             advertised_capabilities: wcore_config::tools::AdvertisedCapabilitiesConfig::default(),
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             memory_api: Arc::new(wcore_memory::NullMemory),
             dream_throttle: Arc::new(wcore_memory::consolidate::DreamThrottle::new(
@@ -7406,6 +7806,7 @@ mod hook_integration_tests {
             // default config for the (unused-in-these-fixtures) live gate.
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
+            compaction_floor: 0,
         }
     }
 
@@ -8011,6 +8412,8 @@ mod approval_bridge_engine_tests {
             advertised_capabilities: wcore_config::tools::AdvertisedCapabilitiesConfig::default(),
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             memory_api: Arc::new(wcore_memory::NullMemory),
             dream_throttle: Arc::new(wcore_memory::consolidate::DreamThrottle::new(
@@ -8064,6 +8467,7 @@ mod approval_bridge_engine_tests {
             // default config for the (unused-in-these-fixtures) live gate.
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
+            compaction_floor: 0,
         }
     }
 
@@ -8232,6 +8636,8 @@ mod user_model_writeback_tests {
             advertised_capabilities: wcore_config::tools::AdvertisedCapabilitiesConfig::default(),
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
+            mcp_curation_cache: None,
+            file_cache: None,
             audit_log: None,
             memory_api: Arc::new(wcore_memory::NullMemory),
             dream_throttle: Arc::new(wcore_memory::consolidate::DreamThrottle::new(
@@ -8278,6 +8684,7 @@ mod user_model_writeback_tests {
             // default config for the (unused-in-these-fixtures) live gate.
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
+            compaction_floor: 0,
         }
     }
 
@@ -9605,5 +10012,31 @@ mod audit_2026_05_22_tests {
             state.get("cwd").is_some_and(|v| v.is_string()),
             "cwd must be a string; got {state:?}"
         );
+    }
+
+    /// Output-side opt (Part A) safety invariant: every fluff stop sequence is
+    /// prefixed with a paragraph break (`"\n\n"`). This is what guarantees the
+    /// stop only fires at a fresh paragraph boundary — a mid-sentence
+    /// occurrence of the same words (e.g. "...in summary, the result is...")
+    /// is NOT preceded by a blank line and therefore never matches, so the
+    /// model is never cut off mid-answer.
+    #[test]
+    fn fluff_stop_sequences_all_start_with_paragraph_break() {
+        assert!(
+            !super::FLUFF_STOP_SEQUENCES.is_empty(),
+            "fluff stop list must be non-empty"
+        );
+        // Anthropic caps stop sequences at a small number; keep the list <= 4.
+        assert!(
+            super::FLUFF_STOP_SEQUENCES.len() <= 4,
+            "keep the fluff stop list at most 4 entries"
+        );
+        for s in super::FLUFF_STOP_SEQUENCES {
+            assert!(
+                s.starts_with("\n\n"),
+                "fluff stop {s:?} must start with a paragraph break so it only \
+                 fires at a paragraph boundary, never mid-sentence"
+            );
+        }
     }
 }

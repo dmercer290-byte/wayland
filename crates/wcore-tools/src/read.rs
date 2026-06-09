@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use wcore_protocol::events::ToolCategory;
-use wcore_types::file_state::FileState;
+use wcore_types::file_state::{FileState, Provenance};
 use wcore_types::tool::{JsonSchema, ToolResult};
 
 use crate::Tool;
@@ -18,6 +18,16 @@ use crate::path_validation::validate_user_path;
 const FILE_UNCHANGED_STUB: &str = "File unchanged since last read. The content from the earlier Read \
      tool_result in this conversation is still current — refer to that \
      instead of re-reading.";
+
+/// Token-opt (diff-resend): header prefixed to a diff result so the model knows
+/// it is reading changed lines anchored to the current file, not the full file.
+const DIFF_RESEND_HEADER: &str = "File changed since your last read. Showing only the changed lines \
+     (anchored to current line numbers); unchanged regions you already have are elided as `…`. \
+     Apply these against the content from your previous Read of this file:";
+
+/// Token-opt (diff-resend): a diff is only emitted when it is at most this
+/// fraction of the full numbered content it would replace.
+const DIFF_RESEND_MAX_RATIO: f64 = 0.6;
 
 pub struct ReadTool {
     file_cache: Option<Arc<RwLock<FileStateCache>>>,
@@ -102,12 +112,20 @@ impl Tool for ReadTool {
 
         // Dedup check: if cache has the same file with matching offset/limit and mtime,
         // return a short stub instead of full content.
+        //
+        // The `ReadResult` provenance guard is load-bearing: after an Edit/Write,
+        // `update_cache_after_write` refreshes this entry to the post-write content
+        // AND mtime (provenance `WriteEcho`). Without the guard a verify-read would
+        // see mtime-equality and emit "file unchanged, refer to the earlier Read" —
+        // but the earlier Read in the transcript is the *pre-edit* content. Only a
+        // `ReadResult` entry is something the model has actually seen as a read.
         if let (Some(cache_arc), Some(current_mtime)) = (&self.file_cache, mtime_ms)
             && let Ok(mut cache) = cache_arc.write()
             && let Some(cached) = cache.get(&validated)
             && cached.offset == offset
             && cached.limit == limit
             && cached.mtime_ms == current_mtime
+            && cached.provenance == Provenance::ReadResult
         {
             return ToolResult {
                 content: FILE_UNCHANGED_STUB.to_string(),
@@ -155,6 +173,7 @@ impl Tool for ReadTool {
         if let Some(cache_arc) = &self.file_cache
             && let (Ok(mut cache), Some(mtime)) = (cache_arc.write(), mtime_ms)
         {
+            let gen_at_read = cache.compaction_generation();
             cache.insert(
                 validated.clone(),
                 FileState {
@@ -162,6 +181,8 @@ impl Tool for ReadTool {
                     mtime_ms: mtime,
                     offset,
                     limit,
+                    provenance: Provenance::ReadResult,
+                    gen_at_read,
                 },
             );
         }
@@ -207,17 +228,51 @@ impl Tool for ReadTool {
         let path = validated.as_path();
         let mtime_ms = file_mtime_ms(path);
 
+        // Single locked pass over the cache: serve the unchanged stub, and (if
+        // not stubbing) capture a base for a possible diff. See `execute()` for
+        // the `ReadResult` guard rationale.
+        //
+        // `diff_base` is only populated when a diff would be SOUND to emit:
+        //   * the route opted into client-side optimization (`optimize_reads`),
+        //   * this is a full read (offset/limit None) matching the cached window,
+        //   * the caller is the main agent (`source_agent` is None) — the cache is
+        //     process-wide across sub-agents, so a sibling's read must never seed
+        //     a base this transcript never contained,
+        //   * the base is a `ReadResult` (something the model actually saw), and
+        //   * the base is still visible: the compaction generation has not moved
+        //     since it was cached, so the diff's reference content has not been
+        //     collapsed/cleared out of the transcript.
+        let is_full_read = offset.is_none() && limit.is_none();
+        let single_agent = ctx.source_agent.is_none();
+        let mut diff_base: Option<String> = None;
+        let mut current_gen: u64 = 0;
+
         if let (Some(cache_arc), Some(current_mtime)) = (&self.file_cache, mtime_ms)
             && let Ok(mut cache) = cache_arc.write()
-            && let Some(cached) = cache.get(path)
-            && cached.offset == offset
-            && cached.limit == limit
-            && cached.mtime_ms == current_mtime
         {
-            return ToolResult {
-                content: FILE_UNCHANGED_STUB.to_string(),
-                is_error: false,
-            };
+            let optimize_reads = cache.optimize_reads();
+            current_gen = cache.compaction_generation();
+            if let Some(cached) = cache.get(path) {
+                let matches_window = cached.offset == offset && cached.limit == limit;
+                if matches_window
+                    && cached.mtime_ms == current_mtime
+                    && cached.provenance == Provenance::ReadResult
+                {
+                    return ToolResult {
+                        content: FILE_UNCHANGED_STUB.to_string(),
+                        is_error: false,
+                    };
+                }
+                if optimize_reads
+                    && is_full_read
+                    && single_agent
+                    && matches_window
+                    && cached.provenance == Provenance::ReadResult
+                    && cached.gen_at_read == current_gen
+                {
+                    diff_base = Some(cached.content.clone());
+                }
+            }
         }
 
         let content = match ctx.vfs.read(path).await {
@@ -254,22 +309,48 @@ impl Tool for ReadTool {
 
         let result_content = numbered.join("\n");
 
+        // Token-opt (diff-resend): if we captured a sound base and the content
+        // actually changed, try to answer with a line diff. The diff is byte-exact
+        // verified to reconstruct the current content before it is emitted
+        // (`build_read_diff`); any failure falls back to the full content.
+        let mut response_content = result_content.clone();
+        if let Some(base_numbered) = &diff_base {
+            let base_raw = crate::read_diff::strip_line_numbers(base_numbered);
+            let cur_raw: Vec<String> = slice.iter().map(|s| s.to_string()).collect();
+            if base_raw != cur_raw
+                && let Some(diff_body) = crate::read_diff::build_read_diff(
+                    &base_raw,
+                    &cur_raw,
+                    result_content.len(),
+                    DIFF_RESEND_MAX_RATIO,
+                )
+            {
+                response_content = format!("{DIFF_RESEND_HEADER}\n{diff_body}");
+            }
+        }
+
+        // Cache the FULL current content as the new ReadResult base, stamped with
+        // the current generation. Even when we emitted a diff, the model now
+        // effectively holds the full current content (visible base + diff), so a
+        // future re-read diffs against it correctly.
         if let Some(cache_arc) = &self.file_cache
             && let (Ok(mut cache), Some(mtime)) = (cache_arc.write(), mtime_ms)
         {
             cache.insert(
                 validated.clone(),
                 FileState {
-                    content: result_content.clone(),
+                    content: result_content,
                     mtime_ms: mtime,
                     offset,
                     limit,
+                    provenance: Provenance::ReadResult,
+                    gen_at_read: current_gen,
                 },
             );
         }
 
         ToolResult {
-            content: result_content,
+            content: response_content,
             is_error: false,
         }
     }
@@ -538,6 +619,241 @@ mod tests {
 
         let r2 = tool.execute(input).await;
         assert!(!r2.is_error);
+        assert_eq!(r2.content, FILE_UNCHANGED_STUB);
+    }
+
+    #[tokio::test]
+    async fn read_after_write_returns_full_content_not_stub() {
+        // Regression: the Read dedup keyed on mtime-equality alone would false-stub
+        // a post-write verify-read. `update_cache_after_write` refreshes the entry
+        // to the new content AND mtime, so a verify-read sees mtime-equality and
+        // (pre-fix) returned "file unchanged, refer to the earlier Read" — but the
+        // earlier Read in the transcript is the PRE-edit content. The `WriteEcho`
+        // provenance guard must force full current content instead.
+        use crate::file_cache::update_cache_after_write;
+
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("verify.txt");
+        std::fs::write(&file_path, "version1\n").unwrap();
+
+        let cache = make_cache();
+        let tool = ReadTool::new(Some(cache.clone()));
+        let input = json!({ "file_path": file_path.to_str().unwrap() });
+
+        // Model reads version1.
+        let r1 = tool.execute(input.clone()).await;
+        assert!(r1.content.contains("version1"));
+
+        // A tool writes version2 (Edit/Write path): cache entry becomes WriteEcho
+        // with the new on-disk mtime.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&file_path, "version2\n").unwrap();
+        update_cache_after_write(&cache, &file_path, "version2\n");
+
+        // Verify-read: mtime matches the WriteEcho entry, but the model never saw
+        // version2 as a read — must return full content, NOT the misleading stub.
+        let r2 = tool.execute(input.clone()).await;
+        assert!(!r2.is_error);
+        assert_ne!(
+            r2.content, FILE_UNCHANGED_STUB,
+            "post-write verify-read must not emit the unchanged stub"
+        );
+        assert!(r2.content.contains("version2"));
+
+        // The verify-read re-cached version2 as a genuine ReadResult, so an
+        // immediate unchanged re-read now correctly stubs.
+        let r3 = tool.execute(input).await;
+        assert_eq!(r3.content, FILE_UNCHANGED_STUB);
+    }
+
+    // -- diff-resend tests (execute_with_ctx, optimize_reads enabled) --
+
+    fn opt_cache() -> Arc<RwLock<FileStateCache>> {
+        let c = make_cache();
+        c.write().unwrap().set_optimize_reads(true);
+        c
+    }
+
+    fn ctx_main() -> ToolContext {
+        ToolContext::test_default()
+    }
+
+    fn ctx_sub() -> ToolContext {
+        // A sub-agent context: source_agent is Some, so diff-resend must not fire
+        // (the process-wide cache must not seed a base this transcript lacks).
+        use crate::vfs::RealFs;
+        ToolContext::new(
+            String::new(),
+            tokio_util::sync::CancellationToken::new(),
+            Arc::new(RealFs),
+            Some("sub-agent".to_string()),
+            Arc::new(crate::NullToolOutputSink),
+        )
+    }
+
+    /// Write `n` numbered lines, return the file path.
+    fn write_lines(
+        dir: &std::path::Path,
+        name: &str,
+        n: usize,
+        marker: &str,
+    ) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let body: String = (0..n)
+            .map(|i| {
+                if i == n / 2 {
+                    format!("line {i} {marker}\n")
+                } else {
+                    format!("line {i}\n")
+                }
+            })
+            .collect();
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    #[tokio::test]
+    async fn external_change_full_read_returns_diff() {
+        let dir = tempdir().unwrap();
+        let file = write_lines(dir.path(), "big.txt", 60, "ORIGINAL");
+
+        let cache = opt_cache();
+        let tool = ReadTool::new(Some(cache));
+        let ctx = ctx_main();
+        let input = json!({ "file_path": file.to_str().unwrap() });
+
+        // First read: full content (model sees ORIGINAL).
+        let r1 = tool.execute_with_ctx(input.clone(), &ctx).await;
+        assert!(r1.content.contains("ORIGINAL"));
+        assert!(!r1.content.contains(DIFF_RESEND_HEADER));
+
+        // External change (NOT via Edit/Write tool): one line differs, mtime bumps.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let _ = write_lines(dir.path(), "big.txt", 60, "PATCHED");
+
+        // Re-read: must return a diff, not full content.
+        let r2 = tool.execute_with_ctx(input, &ctx).await;
+        assert!(!r2.is_error);
+        assert!(
+            r2.content.contains(DIFF_RESEND_HEADER),
+            "re-read of an externally-changed file should diff, got: {}",
+            r2.content
+        );
+        assert!(r2.content.contains("PATCHED"));
+        assert!(
+            r2.content.len() < r1.content.len(),
+            "diff must be smaller than the full content"
+        );
+    }
+
+    #[tokio::test]
+    async fn route_disabled_returns_full_content_not_diff() {
+        let dir = tempdir().unwrap();
+        let file = write_lines(dir.path(), "big.txt", 60, "ORIGINAL");
+
+        // Plain cache: optimize_reads stays false (router-optimized route).
+        let cache = make_cache();
+        let tool = ReadTool::new(Some(cache));
+        let ctx = ctx_main();
+        let input = json!({ "file_path": file.to_str().unwrap() });
+
+        tool.execute_with_ctx(input.clone(), &ctx).await;
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let _ = write_lines(dir.path(), "big.txt", 60, "PATCHED");
+
+        let r2 = tool.execute_with_ctx(input, &ctx).await;
+        assert!(!r2.content.contains(DIFF_RESEND_HEADER));
+        assert!(r2.content.contains("PATCHED"));
+        // Full content has every line numbered.
+        assert!(r2.content.contains("line 59"));
+    }
+
+    #[tokio::test]
+    async fn subagent_read_never_diffs() {
+        let dir = tempdir().unwrap();
+        let file = write_lines(dir.path(), "big.txt", 60, "ORIGINAL");
+
+        let cache = opt_cache();
+        let tool = ReadTool::new(Some(cache));
+        let ctx = ctx_sub();
+        let input = json!({ "file_path": file.to_str().unwrap() });
+
+        tool.execute_with_ctx(input.clone(), &ctx).await;
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let _ = write_lines(dir.path(), "big.txt", 60, "PATCHED");
+
+        let r2 = tool.execute_with_ctx(input, &ctx).await;
+        assert!(
+            !r2.content.contains(DIFF_RESEND_HEADER),
+            "sub-agent reads must return full content, never a diff"
+        );
+        assert!(r2.content.contains("PATCHED"));
+    }
+
+    #[tokio::test]
+    async fn compaction_generation_bump_invalidates_diff_base() {
+        let dir = tempdir().unwrap();
+        let file = write_lines(dir.path(), "big.txt", 60, "ORIGINAL");
+
+        let cache = opt_cache();
+        let tool = ReadTool::new(Some(cache.clone()));
+        let ctx = ctx_main();
+        let input = json!({ "file_path": file.to_str().unwrap() });
+
+        tool.execute_with_ctx(input.clone(), &ctx).await;
+
+        // A compaction pass runs: the base read may no longer be visible.
+        cache.write().unwrap().bump_compaction_generation();
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let _ = write_lines(dir.path(), "big.txt", 60, "PATCHED");
+
+        let r2 = tool.execute_with_ctx(input, &ctx).await;
+        assert!(
+            !r2.content.contains(DIFF_RESEND_HEADER),
+            "a generation bump must force full content (stale base), got a diff"
+        );
+        assert!(r2.content.contains("PATCHED"));
+    }
+
+    #[tokio::test]
+    async fn partial_read_never_diffs() {
+        let dir = tempdir().unwrap();
+        let file = write_lines(dir.path(), "big.txt", 60, "ORIGINAL");
+
+        let cache = opt_cache();
+        let tool = ReadTool::new(Some(cache));
+        let ctx = ctx_main();
+        let input = json!({
+            "file_path": file.to_str().unwrap(),
+            "offset": 0,
+            "limit": 40
+        });
+
+        tool.execute_with_ctx(input.clone(), &ctx).await;
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let _ = write_lines(dir.path(), "big.txt", 60, "PATCHED");
+
+        let r2 = tool.execute_with_ctx(input, &ctx).await;
+        assert!(
+            !r2.content.contains(DIFF_RESEND_HEADER),
+            "partial reads must never be answered with a diff"
+        );
+    }
+
+    #[tokio::test]
+    async fn unchanged_reread_still_stubs_with_optimize_on() {
+        let dir = tempdir().unwrap();
+        let file = write_lines(dir.path(), "big.txt", 20, "X");
+
+        let cache = opt_cache();
+        let tool = ReadTool::new(Some(cache));
+        let ctx = ctx_main();
+        let input = json!({ "file_path": file.to_str().unwrap() });
+
+        tool.execute_with_ctx(input.clone(), &ctx).await;
+        // No change at all: the stub still fires (mtime + ReadResult match).
+        let r2 = tool.execute_with_ctx(input, &ctx).await;
         assert_eq!(r2.content, FILE_UNCHANGED_STUB);
     }
 }
