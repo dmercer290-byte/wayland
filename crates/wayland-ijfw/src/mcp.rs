@@ -1,10 +1,15 @@
 //! G.7 — register the IJFW MCP server.
 //!
 //! Spawns `@ijfw/memory-server` via stdio. The MCP server itself
-//! exposes the canonical memory tools (`memory_store`, `memory_search`,
-//! `memory_recall`, `memory_prelude`, `ijfw_run`, `ijfw_update_apply`)
-//! — wcore-mcp's tool proxy ingests the server's tool list at first
-//! use and surfaces it through the normal MCP tool path.
+//! exposes the canonical memory tools, whose names carry the `ijfw_`
+//! prefix at runtime (e.g. `ijfw_memory_store`, `ijfw_memory_search`,
+//! `ijfw_memory_recall`, `ijfw_memory_prelude`, `ijfw_run`,
+//! `ijfw_update_apply`) — wcore-mcp's tool proxy ingests the server's
+//! tool list at first use and surfaces it through the normal MCP tool
+//! path. The hook→context dispatch contract matches a registered hook
+//! NAME against the advertised tool NAME, so the hook names in
+//! `hooks::HOOKS` (e.g. `ijfw_memory_prelude`) MUST equal these prefixed
+//! tool names.
 //!
 //! Plugin-side we only register the `McpServerSpec`. Actual MCP
 //! connection is owned by `wcore-mcp` in the host adapter.

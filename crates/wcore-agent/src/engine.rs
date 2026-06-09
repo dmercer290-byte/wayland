@@ -4506,6 +4506,15 @@ impl AgentEngine {
         let Some(hook_engine) = &self.hooks else {
             return;
         };
+        // F11: cold-session check BEFORE dispatch. A resumed session populated
+        // `self.messages` at construction (before this runs); applying a
+        // session-start prelude on top of restored history would be redundant
+        // and could perturb the cached prefix. Returning here also skips the MCP
+        // round-trip `run_session_start` would otherwise make on every
+        // `--resume` / ACP re-init (up to the SessionStart dispatch timeout).
+        if !self.messages.is_empty() {
+            return;
+        }
         let outcome = hook_engine.run_session_start().await;
         // Hook lifecycle telemetry → tracing only (never the transcript).
         for msg in outcome.hook_trace {
@@ -4514,14 +4523,8 @@ impl AgentEngine {
         // C1 / Task A2 — APPLY the plugin-hook contributions. `run_session_start`
         // already wrapped each one as an untrusted `<plugin-context>` User block
         // (see `HookEngine::dispatch_into`); we only fold them into the live
-        // conversation. Cold-session only: a resumed session populated
-        // `self.messages` at construction (BEFORE this runs), so we skip there —
-        // a session-start prelude on top of restored history would be redundant
-        // and could perturb the cached prefix. The prelude never touches the
-        // system prompt (it is appended to the volatile message tail).
-        if !self.messages.is_empty() {
-            return;
-        }
+        // conversation. The prelude never touches the system prompt (it is
+        // appended to the volatile message tail).
         let mut applied = 0usize;
         for mut msg in outcome.injected_messages {
             Self::enforce_prelude_budget(&mut msg);

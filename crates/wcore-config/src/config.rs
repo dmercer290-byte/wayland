@@ -1706,12 +1706,22 @@ pub fn app_config_dir() -> Option<PathBuf> {
 /// a follow-up consolidation, deliberately out of scope here to keep the change
 /// surgical and avoid colliding with concurrent work on those crates.
 pub fn profile_home() -> PathBuf {
-    if let Ok(wh) = std::env::var("WAYLAND_HOME") {
+    // F12: ignore an override containing an ASCII control char (e.g. NUL or a
+    // newline). Such a value can't be passed safely to a child env and almost
+    // always indicates a corrupt/hostile environment; fall through to the
+    // default rather than propagating it.
+    if let Ok(wh) = std::env::var("WAYLAND_HOME")
+        && !wh.chars().any(|c| c.is_control())
+    {
         return PathBuf::from(wh);
     }
-    dirs::home_dir()
-        .map(|h| h.join(".wayland"))
-        .unwrap_or_else(|| PathBuf::from(".wayland"))
+    // F12: make the last-resort fallback absolute where possible to avoid
+    // CWD-confusion if the home dir can't be resolved.
+    dirs::home_dir().map(|h| h.join(".wayland")).unwrap_or_else(|| {
+        std::env::current_dir()
+            .map(|d| d.join(".wayland"))
+            .unwrap_or_else(|_| PathBuf::from(".wayland"))
+    })
 }
 
 // --- Config file loading and merging ---
@@ -4087,6 +4097,35 @@ skills_lifecycle = true
             None => unsafe { std::env::remove_var(key) },
         }
         assert_eq!(home, std::path::PathBuf::from("/tmp/test-profile-home"));
+    }
+
+    // F12: an override containing a control char (e.g. NUL) is ignored — we
+    // fall through to the default instead of propagating a poisoned value.
+    #[test]
+    #[serial_test::serial(wayland_home_env)]
+    fn profile_home_ignores_control_char_override() {
+        let key = "WAYLAND_HOME";
+        let prev = std::env::var_os(key);
+        // A tab/newline is a control char `set_var` still accepts (unlike NUL),
+        // so it exercises the guard without panicking the test harness.
+        unsafe {
+            std::env::set_var(key, "/tmp/evil\tinjected");
+        }
+        let home = profile_home();
+        match prev {
+            Some(v) => unsafe { std::env::set_var(key, v) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        assert!(
+            !home.to_string_lossy().contains('\t'),
+            "control-char override must not be propagated, got {}",
+            home.display()
+        );
+        assert!(
+            home.ends_with(".wayland"),
+            "must fall through to the default, got {}",
+            home.display()
+        );
     }
 
     #[test]

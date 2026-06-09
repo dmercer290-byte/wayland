@@ -72,3 +72,47 @@ Use `deferred = true` for MCP servers with many tools to keep the initial system
 3. Discover available tools (`tools/list`)
 4. Register tools in the tool registry — the agent uses them like built-in tools
 5. Gracefully close all connections on exit
+
+## Plugin Lifecycle Hooks → Context
+
+A plugin can register **lifecycle hooks** that contribute text into the model's
+context at well-defined points. Two phases dispatch a contribution today:
+
+- **SessionStart** — fires once on a *cold* session (no prior conversation). The
+  contribution is folded in as the first message (e.g. a memory prelude). On a
+  resumed session it is skipped (the restored history already carries context).
+- **PrePrompt** — fires once per user turn, immediately before the request is
+  streamed (e.g. per-turn recall).
+
+The dispatch resolves a hook to an MCP tool of the **same name** on the plugin's
+MCP server, calls it, and wraps the result as an *untrusted* block:
+
+```
+<plugin-context source="{plugin}:{hook}" trust="untrusted"> … </plugin-context>
+```
+
+This block is always a **user-role** message on the volatile tail — it never
+enters the system prompt and never shifts the cached system+tools prefix. Tool
+output is treated as data, not instructions, and host trust-tag delimiters in
+the body are defanged so a backend can't forge host framing. Other phases
+(`PostToolUse`, `SessionEnd`, `PreCompact`) are currently log-only.
+
+A plugin binds to a server only when the match is **unambiguous** (exactly one
+connected server advertises a tool matching the hook name). If two servers
+advertise the same name the binding is refused and the hook stays log-only.
+
+**Kill-switch:** `hooks.dispatch_enabled` (default `true`) disables all hook→
+context dispatch when set to `false`, leaving plugins and MCP otherwise intact.
+
+## Plugin MCP Server Home (`~/.wayland`)
+
+Plugin installers write under `~/.wayland` (the *profile home*), and the host
+exposes that same root to launched plugin MCP servers so a server can find its
+installed assets. The resolution order is:
+
+1. `$WAYLAND_PROFILE_HOME` / `$WAYLAND_HOME` when set (sandbox / hermetic
+   override; ignored if it contains control characters)
+2. `~/.wayland` (the cross-platform default)
+
+This is framework-neutral: any plugin that ships an MCP server uses the same
+handshake.

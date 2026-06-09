@@ -20,10 +20,11 @@ pub struct HooksConfig {
     /// to keep plugin hooks log-only (the legacy behavior) without
     /// disabling plugins or MCP.
     ///
-    /// Scope today: only the `SessionStart` phase dispatches a contribution;
-    /// the other phases (`PrePrompt`, `PreCompact`, …) stay log-only until they
-    /// are wired in later increments. Flipping this off disables the
-    /// SessionStart path now and any phase added later.
+    /// Scope today: the `SessionStart` and `PrePrompt` phases dispatch a
+    /// contribution into context; the remaining phases (`PostToolUse`,
+    /// `SessionEnd`, `PreCompact`) stay log-only until they are wired in later
+    /// increments. Flipping this off disables every dispatching phase now and
+    /// any phase added later.
     #[serde(default = "default_dispatch_enabled")]
     pub dispatch_enabled: bool,
 }
