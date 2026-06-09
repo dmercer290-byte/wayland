@@ -132,9 +132,7 @@ impl AnthropicProvider {
         // so the body shape is final before cache markers are injected. Skipped
         // entirely when empty so back-compatible callers emit no stop field.
         if !request.stop_sequences.is_empty() {
-            let stops = body
-                .get_mut("stop_sequences")
-                .and_then(Value::as_array_mut);
+            let stops = body.get_mut("stop_sequences").and_then(Value::as_array_mut);
             match stops {
                 Some(existing) => {
                     for s in &request.stop_sequences {

@@ -135,7 +135,7 @@ fn format_plugin_rules(rules: &[RuleSpec], cwd: &str) -> String {
 /// Sections are assembled in this order:
 /// 1. Base intro (role, model identity, working directory, date)
 /// 2. Tool usage guidance (dedicated tools, parallel calls, etc.)
-/// 2b. Terseness directive (output-side opt — only when `terse_enabled`)
+///    2b. Terseness directive (output-side opt — only when `terse_enabled`)
 /// 3. Custom prompt (user config)
 /// 4. AGENTS.md (project instructions)
 /// 5. Memory system prompt (behavioral instructions + MEMORY.md content)
