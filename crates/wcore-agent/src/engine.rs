@@ -807,6 +807,22 @@ pub struct AgentEngine {
     /// Reset to 0 on conversation reset (`/clear`, `/resume`), where the
     /// message buffer is replaced wholesale.
     compaction_floor: usize,
+    /// C1 / Task A2 — number of leading `self.messages` entries that are the
+    /// synthetic SessionStart hook prelude (applied by `run_session_start_hooks`
+    /// on a cold session). Acts as a "cold baseline" so that
+    /// `recall_relevant_facts` still treats a session whose ONLY message is the
+    /// plugin prelude as cold and still fires cross-session recall. `0` in every
+    /// other case (no prelude, resume — where construction already populated
+    /// `messages` before session-start hooks run, so the prelude path is skipped).
+    session_start_injected_len: usize,
+    /// C1 / Task A3 — the text of the most recently injected plugin-hook context
+    /// block (the SessionStart prelude on turn 1, or the last applied PrePrompt
+    /// contribution thereafter). Used to dedup the per-turn PrePrompt injection:
+    /// if a turn's PrePrompt contribution is byte-identical to what is already in
+    /// context, re-appending it would only churn the cache for no new
+    /// information, so it is skipped. `None` until something is injected; reset on
+    /// `/clear` and `/resume` alongside `session_start_injected_len`.
+    last_context_injection: Option<String>,
 }
 
 impl Drop for AgentEngine {
@@ -832,6 +848,27 @@ impl Drop for AgentEngine {
 /// tolerating 3 interleaved non-matching turns. Documented in the W9
 /// design contract §5.3 (F10 acceptance) — keep in sync.
 const SKILL_DETECTION_WINDOW: usize = 6;
+
+/// C1 / Task A2 — per-message token budget for a SessionStart plugin-hook
+/// prelude. Generous: the prelude is injected once per session, not per turn.
+/// A plugin's contribution larger than this (estimated at `chars / 4`, matching
+/// the repo's `estimate_tokens_from_messages` text heuristic) is truncated at
+/// the fold site so a misbehaving plugin can't blow up the first request — we
+/// never trust the plugin's self-reported size.
+const SESSION_PRELUDE_TOKEN_BUDGET: usize = 1500;
+
+/// C1 / Task A2 — chars-per-token text heuristic, mirroring
+/// `compact::estimate`'s `CHARS_PER_TOKEN_TEXT` (kept local rather than widening
+/// that module's visibility for one call site).
+const PRELUDE_CHARS_PER_TOKEN: usize = 4;
+
+/// C1 / Task A3 — per-turn token budget for a `PrePrompt` plugin-hook
+/// contribution. Much tighter than the SessionStart prelude budget because this
+/// is applied to the request tail on EVERY turn (not once per session), so a
+/// large injection here both inflates every request and risks per-turn cache
+/// churn. A plugin's contribution larger than this (estimated at `chars / 4`) is
+/// truncated at the fold site — we never trust the plugin's self-reported size.
+const PRE_PROMPT_TOKEN_BUDGET: usize = 500;
 
 /// W8 v0.6.3 — expected prompt-prefix reuse window for the agent turn loop.
 /// Every turn re-sends the same system prompt + tool definitions, so the
@@ -1031,6 +1068,9 @@ impl AgentEngine {
             config: retained_config,
             // Token-opt: no history has been collapsed yet at construction.
             compaction_floor: 0,
+            // C1 / A2 — no SessionStart prelude applied at construction.
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -1185,6 +1225,10 @@ impl AgentEngine {
             config: retained_config,
             // Token-opt: no history has been collapsed yet at construction.
             compaction_floor: 0,
+            // C1 / A2 — resume populates `messages` here at construction, so
+            // the session-start prelude path is skipped; baseline stays 0.
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -1355,6 +1399,19 @@ impl AgentEngine {
             for hook in hooks {
                 engine.register_plugin_hook(hook);
             }
+        }
+    }
+
+    /// C1 / Task A1 — install the host `HookDispatcher` onto the engine's
+    /// `HookEngine`. Until set, plugin lifecycle hooks fire log-only. Called by
+    /// `AgentBootstrap` after `register_plugin_hooks`. No-op when `self.hooks`
+    /// is `None` (synthetic test-mode engines).
+    pub fn set_hook_dispatcher(
+        &mut self,
+        dispatcher: std::sync::Arc<dyn crate::hooks::HookDispatcher>,
+    ) {
+        if let Some(engine) = self.hooks.as_mut() {
+            engine.set_dispatcher(dispatcher);
         }
     }
 
@@ -1820,6 +1877,14 @@ impl AgentEngine {
         // Token-opt: the message buffer is gone, so the compaction floor
         // (which indexes into it) no longer means anything — reset it.
         self.compaction_floor = 0;
+        // C1: the session-start prelude baseline indexes into `messages`; a
+        // cleared buffer re-baselines it to 0 so cross-session recall keys off
+        // the new (empty) buffer, not a stale prelude count.
+        self.session_start_injected_len = 0;
+        // C1 / Task A3: drop the per-turn dedup baseline so a PrePrompt
+        // contribution on the cleared (cold) buffer is applied fresh rather than
+        // suppressed by a stale prior-session injection.
+        self.last_context_injection = None;
         // Token-opt: wipe the file cache (read states + read-once backrefs) too.
         // None of the prior reads/outputs are in the new transcript, so a dedup
         // stub or backref must not reference them.
@@ -1835,6 +1900,15 @@ impl AgentEngine {
         // session's compaction floor does not apply. Symmetric with the
         // `clear_conversation` reset below.
         self.compaction_floor = 0;
+        // C1: drop the cold-boot prelude baseline. A resumed buffer is real
+        // prior context, so recall must key off the resumed length (and thus
+        // skip), not a stale `1` left over from a prelude applied at boot — else
+        // a single-message resumed session would wrongly re-trigger recall.
+        self.session_start_injected_len = 0;
+        // C1 / Task A3: a resumed buffer is a fresh dedup context; a prior
+        // session's last injection must not suppress a PrePrompt contribution
+        // here. Symmetric with `clear_conversation`.
+        self.last_context_injection = None;
         // Wave-6 #5 (secondary): a resumed/loaded session must start without the
         // PREVIOUS session's explicit `/model` pin. Symmetric with
         // `clear_conversation` (a `/new` re-baselines): the loaded session's
@@ -3076,6 +3150,31 @@ impl AgentEngine {
                 last.content.push(ContentBlock::Text { text: hint });
             }
 
+            // C1 / Task A3: fire PrePrompt plugin hooks once per turn and apply
+            // their contributions to the request's last user-role message. Done
+            // here — after the skill hint and BEFORE `mark_cache_boundaries`, but
+            // OUTSIDE the `'stream` retry loop below (so it fires once per turn,
+            // not once per stream retry). `request.messages` is a clone, so this
+            // never persists into history and never shifts the cached system/tool
+            // prefix; placing it before the breakpoint marking lets the tail
+            // breakpoint account for the final content. The contribution is
+            // budget-capped and deduped against the last injection. No-op when no
+            // hook engine / PrePrompt hooks / dispatcher are present.
+            let pre_prompt_outcome = match self.hooks.as_ref() {
+                Some(hook_engine) => Some(hook_engine.run_pre_prompt().await),
+                None => None,
+            };
+            if let Some(outcome) = pre_prompt_outcome {
+                for line in &outcome.hook_trace {
+                    tracing::debug!(target: "wcore_agent::hooks", "{line}");
+                }
+                Self::apply_pre_prompt_contribution(
+                    &mut request.messages,
+                    &outcome,
+                    &mut self.last_context_injection,
+                );
+            }
+
             // W1 S3: place per-message cache breakpoint at the tail when the
             // provider honours it. Idempotent across turns: previous turns'
             // markers are cleared and the new tail is marked.
@@ -3106,17 +3205,6 @@ impl AgentEngine {
                 let decision =
                     wcore_providers::route(&shape, &wcore_providers::RoutingHeuristics::default());
                 request.routing_hint = Some(decision.to_hint());
-            }
-
-            // Fire PrePrompt plugin hooks once per turn, after the request is
-            // fully assembled and before the stream retry loop begins (so it
-            // fires once per turn, not once per stream retry). No-op when no
-            // PrePrompt hooks are registered.
-            if let Some(hook_engine) = self.hooks.as_ref() {
-                let outcome = hook_engine.run_pre_prompt().await;
-                for line in outcome.hook_trace {
-                    tracing::debug!(target: "wcore_agent::hooks", "{line}");
-                }
             }
 
             // AUDIT A3 / E-C2 — bounded stream-level retry loop.
@@ -4436,13 +4524,158 @@ impl AgentEngine {
     /// so it fires exactly once per session rather than once per user turn
     /// (`run()` is invoked per user message). No-op when no hook engine / no
     /// SessionStart hooks are registered.
-    pub async fn run_session_start_hooks(&self) {
-        if let Some(hook_engine) = &self.hooks {
-            let outcome = hook_engine.run_session_start().await;
-            for msg in outcome.hook_trace {
-                tracing::debug!(target: "wcore_agent::hooks", "{msg}");
+    pub async fn run_session_start_hooks(&mut self) {
+        let Some(hook_engine) = &self.hooks else {
+            return;
+        };
+        let outcome = hook_engine.run_session_start().await;
+        // Hook lifecycle telemetry → tracing only (never the transcript).
+        for msg in outcome.hook_trace {
+            tracing::debug!(target: "wcore_agent::hooks", "{msg}");
+        }
+        // C1 / Task A2 — APPLY the plugin-hook contributions. `run_session_start`
+        // already wrapped each one as an untrusted `<plugin-context>` User block
+        // (see `HookEngine::dispatch_into`); we only fold them into the live
+        // conversation. Cold-session only: a resumed session populated
+        // `self.messages` at construction (BEFORE this runs), so we skip there —
+        // a session-start prelude on top of restored history would be redundant
+        // and could perturb the cached prefix. The prelude never touches the
+        // system prompt (it is appended to the volatile message tail).
+        if !self.messages.is_empty() {
+            return;
+        }
+        let mut applied = 0usize;
+        for mut msg in outcome.injected_messages {
+            Self::enforce_prelude_budget(&mut msg);
+            tracing::debug!(
+                target: "wcore_agent::hooks",
+                chars = Self::message_text_len(&msg),
+                "session-start: applied plugin-hook prelude block to cold turn"
+            );
+            // C1 / Task A3: record the last injected block text so an identical
+            // PrePrompt contribution on turn 1 dedups to a no-op (the prelude
+            // already carries it). The text blocks of a `dispatch_into` message
+            // are the wrapped `<plugin-context>` envelopes; record the last one.
+            if let Some(ContentBlock::Text { text }) = msg.content.last() {
+                self.last_context_injection = Some(text.clone());
+            }
+            self.messages.push(msg);
+            applied += 1;
+        }
+        // Baseline so `recall_relevant_facts` still treats a session whose ONLY
+        // messages are this prelude as cold (cross-session recall still fires).
+        self.session_start_injected_len = applied;
+    }
+
+    /// C1 / Task A2 — total length (in chars) of a message's text blocks. Used
+    /// for the prelude budget check and its tracing log.
+    fn message_text_len(msg: &Message) -> usize {
+        msg.content
+            .iter()
+            .map(|b| match b {
+                ContentBlock::Text { text } => text.len(),
+                _ => 0,
+            })
+            .sum()
+    }
+
+    /// C1 / Task A2 — enforce [`SESSION_PRELUDE_TOKEN_BUDGET`] on a prelude
+    /// message in place. We never trust a plugin's size: if the text's byte
+    /// length exceeds `SESSION_PRELUDE_TOKEN_BUDGET * PRELUDE_CHARS_PER_TOKEN`,
+    /// truncate it to that many bytes (rounded down to a char boundary, so
+    /// multi-byte UTF-8 is never split) and append a short marker. For
+    /// multi-byte text this caps bytes, i.e. it is more conservative than the
+    /// char-based token estimate — never over budget, occasionally under.
+    fn enforce_prelude_budget(msg: &mut Message) {
+        for block in &mut msg.content {
+            if let ContentBlock::Text { text } = block {
+                Self::truncate_to_token_budget(text, SESSION_PRELUDE_TOKEN_BUDGET);
             }
         }
+    }
+
+    /// C1 — truncate `text` in place to at most `tokens` worth of bytes
+    /// (`tokens * PRELUDE_CHARS_PER_TOKEN`), rounded down to a char boundary so
+    /// multi-byte UTF-8 is never split, appending a short marker when it cuts.
+    /// Shared by the A2 SessionStart prelude budget and the A3 PrePrompt budget
+    /// so both enforce the same "never trust the plugin's size" discipline.
+    /// Byte-capping is more conservative than the char/4 token estimate for
+    /// multi-byte text — never over budget, occasionally under.
+    fn truncate_to_token_budget(text: &mut String, tokens: usize) {
+        const MARKER: &str = " …[truncated]";
+        let max_chars = tokens * PRELUDE_CHARS_PER_TOKEN;
+        if text.len() > max_chars {
+            let cut = text
+                .char_indices()
+                .map(|(i, _)| i)
+                .take_while(|&i| i <= max_chars)
+                .last()
+                .unwrap_or(0);
+            text.truncate(cut);
+            text.push_str(MARKER);
+        }
+    }
+
+    /// C1 / Task A3 — apply `PrePrompt` plugin-hook contributions to the volatile
+    /// request tail, cache-safely. Each contribution block is already wrapped by
+    /// `dispatch_into` as an untrusted `<plugin-context>` envelope. The whole
+    /// turn's contribution is treated as ONE batch:
+    ///
+    /// - collect every text block, each truncated to [`PRE_PROMPT_TOKEN_BUDGET`]
+    ///   (never trust the plugin's size);
+    /// - SKIP the whole batch if it byte-equals `*last_injected` (identical
+    ///   content is already in context — re-appending churns the cache for no new
+    ///   info; this also dedups the turn-1 overlap with the SessionStart prelude);
+    /// - otherwise append every block as a `ContentBlock::Text` onto the LAST
+    ///   message ONLY IF it is `Role::User` (never append to a non-user tail —
+    ///   that would orphan a `tool_use` or create adjacent user messages);
+    /// - on a successful append, record the batch in `*last_injected`.
+    ///
+    /// Dedup is at the per-turn batch granularity (not per-block) so it stays
+    /// correct when more than one `PrePrompt` hook contributes: the whole
+    /// contribution is the dedup key and the whole contribution is appended,
+    /// keeping the two in lockstep.
+    ///
+    /// Operates on `request_messages` (the per-turn CLONE), never on session
+    /// history, and runs BEFORE `mark_cache_boundaries` so the tail breakpoint
+    /// accounts for it and the cached system+tools prefix is never shifted.
+    fn apply_pre_prompt_contribution(
+        request_messages: &mut [Message],
+        outcome: &crate::hooks::HookOutcome,
+        last_injected: &mut Option<String>,
+    ) {
+        // Collect this turn's whole contribution (budget-capped) as one batch.
+        let mut blocks: Vec<String> = Vec::new();
+        for msg in &outcome.injected_messages {
+            for block in &msg.content {
+                if let ContentBlock::Text { text } = block {
+                    let mut text = text.clone();
+                    Self::truncate_to_token_budget(&mut text, PRE_PROMPT_TOKEN_BUDGET);
+                    blocks.push(text);
+                }
+            }
+        }
+        if blocks.is_empty() {
+            return;
+        }
+        // Dedup the whole batch: identical content already in context ⇒ no-op.
+        let batch_key = blocks.join("\n");
+        if last_injected.as_deref() == Some(batch_key.as_str()) {
+            return;
+        }
+        // Cache-safe tail rule: only append onto a user-role tail. If the tail
+        // isn't user-role, inject nothing and leave the dedup baseline untouched
+        // so a later user-role turn can still surface this content.
+        let Some(last) = request_messages.last_mut() else {
+            return;
+        };
+        if !matches!(last.role, Role::User) {
+            return;
+        }
+        for text in blocks {
+            last.content.push(ContentBlock::Text { text });
+        }
+        *last_injected = Some(batch_key);
     }
 
     /// Move session-tier memory onto the real per-session DB file.
@@ -4466,6 +4699,22 @@ impl AgentEngine {
         }
     }
 
+    /// C1 / Task A2 — whether `recall_relevant_facts` should run on this turn.
+    ///
+    /// Cold = no REAL prior conversation. `self.messages` is the source of truth
+    /// (covers hosts/tests with no SessionManager). A resumed session populates
+    /// `messages` at construction (before session-start hooks), so a populated
+    /// buffer there means "skip — prior context is present". But session-start
+    /// hooks may have injected a synthetic plugin prelude into an otherwise-cold
+    /// session; `session_start_injected_len` records how many such leading
+    /// messages exist. Treat "only the session-start prelude present" as STILL
+    /// cold so cross-session recall fires alongside the prelude. Math:
+    /// fresh+prelude → 1 vs 1 (fires); fresh, no prelude → 0 vs 0 (fires);
+    /// resume → N>0 vs 0 (skips); turn 2+ → len ≫ baseline (skips).
+    fn should_attempt_recall(&self) -> bool {
+        self.messages.len() <= self.session_start_injected_len
+    }
+
     /// Cross-session recall: on the FIRST user turn of a session, pull the
     /// durable facts most relevant to what the user just asked and inject
     /// them as a synthetic context message so a cold session can answer from
@@ -4486,11 +4735,7 @@ impl AgentEngine {
     /// surface; session-tier facts are already in-context within a session and
     /// are skipped.
     async fn recall_relevant_facts(&mut self, user_input: &str) {
-        // Only on a genuinely cold first turn — `self.messages` is the source
-        // of truth (covers hosts/tests with no SessionManager). After a
-        // `--resume`/`--continue` the buffer is already populated, so we skip:
-        // the prior context is present and re-injecting would be redundant.
-        if !self.messages.is_empty() {
+        if !self.should_attempt_recall() {
             return;
         }
         let query = user_input.trim();
@@ -5587,6 +5832,8 @@ mod set_config_tests {
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
             compaction_floor: 0,
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -6307,6 +6554,8 @@ mod phase6_tests {
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
             compaction_floor: 0,
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -6586,6 +6835,8 @@ mod compact_tests {
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
             compaction_floor: 0,
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -7549,6 +7800,8 @@ mod plan_mode_tests {
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
             compaction_floor: 0,
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -7961,6 +8214,8 @@ mod hook_integration_tests {
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
             compaction_floor: 0,
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -8622,6 +8877,8 @@ mod approval_bridge_engine_tests {
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
             compaction_floor: 0,
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -8839,6 +9096,8 @@ mod user_model_writeback_tests {
             workflow_live_mode: false,
             config: wcore_config::config::Config::default(),
             compaction_floor: 0,
+            session_start_injected_len: 0,
+            last_context_injection: None,
         }
     }
 
@@ -10192,5 +10451,726 @@ mod audit_2026_05_22_tests {
                  fires at a paragraph boundary, never mid-sentence"
             );
         }
+    }
+}
+
+/// C1 / Task A2 — `run_session_start_hooks` applies plugin-hook contributions
+/// to a cold conversation (gated, budgeted), without touching the system prompt
+/// or regressing cross-session recall.
+#[cfg(test)]
+mod session_start_apply_tests {
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use wcore_config::config::Config;
+    use wcore_providers::{LlmProvider, ProviderError};
+    use wcore_tools::registry::ToolRegistry;
+    use wcore_types::llm::{LlmEvent, LlmRequest};
+    use wcore_types::message::{ContentBlock, Message, Role};
+
+    use crate::hooks::HookDispatcher;
+    use crate::output::OutputSink;
+    use crate::plugins::runner::PluginHook;
+    use wcore_plugin_api::registry::hooks::HookPhase;
+
+    struct NullOutput;
+    impl OutputSink for NullOutput {
+        fn emit_text_delta(&self, _: &str, _: &str) {}
+        fn emit_thinking(&self, _: &str, _: &str) {}
+        fn emit_tool_call(&self, _: &str, _: &str) {}
+        fn emit_tool_result(&self, _: &str, _: bool, _: &str) {}
+        fn emit_stream_start(&self, _: &str) {}
+        fn emit_stream_end(
+            &self,
+            _: &str,
+            _: usize,
+            _: u64,
+            _: u64,
+            _: u64,
+            _: u64,
+            _: wcore_types::message::FinishReason,
+        ) {
+        }
+        fn emit_error(&self, _: &str, _: bool) {}
+        fn emit_info(&self, _: &str) {}
+    }
+
+    struct NullProvider;
+    #[async_trait]
+    impl LlmProvider for NullProvider {
+        async fn stream(
+            &self,
+            _: &LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<LlmEvent>, ProviderError> {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            Ok(rx)
+        }
+    }
+
+    /// Stub host dispatcher: returns a fixed contribution for any hook.
+    struct StubDispatcher {
+        text: String,
+    }
+    #[async_trait]
+    impl HookDispatcher for StubDispatcher {
+        async fn dispatch(&self, _: &str, _: &str, _: HookPhase) -> Option<String> {
+            Some(self.text.clone())
+        }
+    }
+
+    fn cold_engine_with_session_hook(contribution: &str) -> super::AgentEngine {
+        // A real system prompt so the "system prompt unchanged" assertion is
+        // meaningful (not comparing empty-to-empty).
+        let cfg = Config {
+            system_prompt: Some("SYSTEM-PROMPT-CONTENT".to_string()),
+            ..Default::default()
+        };
+        let mut engine = super::AgentEngine::new_with_provider(
+            Arc::new(NullProvider),
+            cfg,
+            ToolRegistry::new(),
+            Arc::new(NullOutput),
+        );
+        engine.register_plugin_hooks(vec![PluginHook {
+            plugin: "wayland-ijfw".to_string(),
+            phase: HookPhase::SessionStart,
+            name: "ijfw_memory_prelude".to_string(),
+        }]);
+        engine.set_hook_dispatcher(Arc::new(StubDispatcher {
+            text: contribution.to_string(),
+        }));
+        engine
+    }
+
+    fn sole_message_text(engine: &super::AgentEngine) -> &str {
+        assert_eq!(
+            engine.messages.len(),
+            1,
+            "expected exactly one applied message"
+        );
+        let msg = &engine.messages[0];
+        assert_eq!(
+            msg.role,
+            Role::User,
+            "prelude must be a User block, never system"
+        );
+        match msg.content.first() {
+            Some(ContentBlock::Text { text }) => text,
+            other => panic!("expected a text block, got {other:?}"),
+        }
+    }
+
+    // TEST 1 — cold inject: a SessionStart contribution is applied as exactly
+    // one untrusted User-role <plugin-context> block.
+    #[tokio::test]
+    async fn cold_session_applies_untrusted_prelude_block() {
+        let mut engine = cold_engine_with_session_hook("PRELUDE");
+        assert!(engine.messages.is_empty(), "precondition: cold");
+        engine.run_session_start_hooks().await;
+        let text = sole_message_text(&engine);
+        assert!(
+            text.contains("trust=\"untrusted\""),
+            "missing untrusted envelope: {text}"
+        );
+        assert!(
+            text.contains("PRELUDE"),
+            "missing contribution body: {text}"
+        );
+        assert_eq!(
+            engine.session_start_injected_len, 1,
+            "baseline must record the one applied prelude message"
+        );
+    }
+
+    // TEST 2 — resume skip: a populated buffer (simulating resume, which sets
+    // messages at construction before session-start hooks run) is NOT extended.
+    #[tokio::test]
+    async fn resumed_session_skips_prelude() {
+        let mut engine = cold_engine_with_session_hook("PRELUDE");
+        engine.messages.push(Message::now(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "prior turn".to_string(),
+            }],
+        ));
+        engine.run_session_start_hooks().await;
+        assert_eq!(
+            engine.messages.len(),
+            1,
+            "resume path must not apply a session-start prelude"
+        );
+        assert_eq!(
+            engine.session_start_injected_len, 0,
+            "no prelude applied ⇒ baseline stays 0"
+        );
+    }
+
+    // TEST 3 — budget truncation: an oversized contribution is capped near the
+    // budget and marked truncated.
+    #[tokio::test]
+    async fn oversized_prelude_is_truncated_to_budget() {
+        let max_chars = super::SESSION_PRELUDE_TOKEN_BUDGET * super::PRELUDE_CHARS_PER_TOKEN;
+        let huge = "x".repeat(max_chars * 4);
+        let mut engine = cold_engine_with_session_hook(&huge);
+        engine.run_session_start_hooks().await;
+        let text = sole_message_text(&engine);
+        assert!(
+            text.contains("[truncated]"),
+            "oversized prelude must be marked truncated"
+        );
+        // The envelope adds a small fixed wrapper; the body is capped at
+        // `max_chars`, so the whole message stays within a tight margin of the
+        // budget rather than echoing the multi-MB plugin payload.
+        assert!(
+            text.len() < max_chars + 512,
+            "truncated message length {} should be near the budget {}",
+            text.len(),
+            max_chars
+        );
+    }
+
+    // TEST 4 — the system prompt is byte-identical across the call.
+    #[tokio::test]
+    async fn system_prompt_is_untouched() {
+        let mut engine = cold_engine_with_session_hook("PRELUDE");
+        let before = engine.system_prompt.clone();
+        engine.run_session_start_hooks().await;
+        assert_eq!(
+            engine.system_prompt, before,
+            "session-start prelude must never alter the system prompt"
+        );
+    }
+
+    // TEST 5 (coexistence) — after a prelude is applied (baseline == 1), the
+    // recall guard still treats the session as cold so cross-session recall
+    // fires; a resumed session (baseline 0, populated) is correctly skipped.
+    #[tokio::test]
+    async fn recall_still_fires_alongside_a_prelude() {
+        let mut engine = cold_engine_with_session_hook("PRELUDE");
+        engine.run_session_start_hooks().await;
+        assert_eq!(engine.messages.len(), 1);
+        assert_eq!(engine.session_start_injected_len, 1);
+        assert!(
+            engine.should_attempt_recall(),
+            "a session whose only message is the prelude is still cold — recall must fire"
+        );
+
+        // Resume shape: populated buffer, no prelude baseline ⇒ NOT cold.
+        let mut resumed = cold_engine_with_session_hook("PRELUDE");
+        resumed.messages.push(Message::now(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "prior".to_string(),
+            }],
+        ));
+        assert!(
+            !resumed.should_attempt_recall(),
+            "a resumed session has real prior context — recall must NOT fire"
+        );
+    }
+
+    // Regression (code-review A2) — `/resume` and `/clear` must re-baseline the
+    // prelude count. Without the reset a stale baseline of 1 makes a
+    // single-message resumed session read as "cold" and wrongly re-trigger
+    // cross-session recall on real prior context.
+    #[tokio::test]
+    async fn resume_and_clear_reset_the_prelude_baseline() {
+        // Cold boot applies a prelude → baseline 1.
+        let mut engine = cold_engine_with_session_hook("PRELUDE");
+        engine.run_session_start_hooks().await;
+        assert_eq!(engine.session_start_injected_len, 1);
+
+        // `/resume` swaps in a one-message session. With a stale baseline this
+        // would be `1 <= 1` ⇒ recall wrongly fires on resumed context.
+        engine.load_conversation(vec![Message::now(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "resumed".to_string(),
+            }],
+        )]);
+        assert_eq!(
+            engine.session_start_injected_len, 0,
+            "resume must clear the prelude baseline"
+        );
+        assert!(
+            !engine.should_attempt_recall(),
+            "a resumed session has real prior context — recall must NOT fire"
+        );
+
+        // `/clear` empties the buffer; a cleared session genuinely IS cold.
+        engine.clear_conversation();
+        assert_eq!(
+            engine.session_start_injected_len, 0,
+            "clear must reset the prelude baseline"
+        );
+        assert!(
+            engine.should_attempt_recall(),
+            "a cleared session is cold — recall fires"
+        );
+    }
+
+    // Code-review A2 (minor) — budget truncation must be char-boundary safe on
+    // multi-byte UTF-8: never panic, never split a codepoint, still bounded.
+    #[test]
+    fn oversized_multibyte_prelude_truncates_on_a_char_boundary() {
+        let max_chars = super::SESSION_PRELUDE_TOKEN_BUDGET * super::PRELUDE_CHARS_PER_TOKEN;
+        // 'é' is 2 bytes — a payload well over the byte budget that would panic
+        // a naive byte-offset `String::truncate`.
+        let mut msg = Message::now(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "é".repeat(max_chars),
+            }],
+        );
+        super::AgentEngine::enforce_prelude_budget(&mut msg); // must not panic
+        let text = match msg.content.first() {
+            Some(ContentBlock::Text { text }) => text,
+            other => panic!("expected a text block, got {other:?}"),
+        };
+        assert!(text.contains("[truncated]"), "must be marked truncated");
+        assert!(
+            text.trim_end_matches(" …[truncated]")
+                .chars()
+                .all(|c| c == 'é'),
+            "truncation split a multi-byte codepoint"
+        );
+        assert!(
+            text.len() <= max_chars + 32,
+            "truncated length {} should stay near the budget {}",
+            text.len(),
+            max_chars
+        );
+    }
+
+    // Degradation — with NO dispatcher wired, the apply path is a no-op
+    // (legacy log-only behavior) and the conversation stays empty.
+    #[tokio::test]
+    async fn no_dispatcher_applies_nothing() {
+        let cfg = Config {
+            system_prompt: Some("SP".to_string()),
+            ..Default::default()
+        };
+        let mut engine = super::AgentEngine::new_with_provider(
+            Arc::new(NullProvider),
+            cfg,
+            ToolRegistry::new(),
+            Arc::new(NullOutput),
+        );
+        engine.register_plugin_hooks(vec![PluginHook {
+            plugin: "wayland-ijfw".to_string(),
+            phase: HookPhase::SessionStart,
+            name: "ijfw_memory_prelude".to_string(),
+        }]);
+        // No set_hook_dispatcher.
+        engine.run_session_start_hooks().await;
+        assert!(
+            engine.messages.is_empty(),
+            "no dispatcher ⇒ log-only, nothing applied"
+        );
+        assert_eq!(engine.session_start_injected_len, 0);
+    }
+
+    // ---- C1 / Task A3 — PrePrompt contribution applied to the request tail ----
+
+    use crate::hooks::HookOutcome;
+
+    /// Build a PrePrompt-style outcome carrying one untrusted block of `body`,
+    /// mirroring what `HookEngine::dispatch_into` produces.
+    fn pre_prompt_outcome(body: &str) -> HookOutcome {
+        HookOutcome {
+            injected_messages: vec![Message::now(
+                Role::User,
+                vec![ContentBlock::Text {
+                    text: format!(
+                        "<plugin-context source=\"p:h\" trust=\"untrusted\">\n{body}\n</plugin-context>"
+                    ),
+                }],
+            )],
+            ..Default::default()
+        }
+    }
+
+    fn user_msg(text: &str) -> Message {
+        Message::now(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: text.to_string(),
+            }],
+        )
+    }
+
+    // (a) APPLIES INTO TAIL — a new contribution is appended to a user-role tail
+    // as the untrusted block; the dedup baseline records it.
+    #[test]
+    fn pre_prompt_applies_into_user_tail() {
+        let mut messages = vec![user_msg("hello")];
+        let outcome = pre_prompt_outcome("RECALL-A");
+        let mut last: Option<String> = None;
+        super::AgentEngine::apply_pre_prompt_contribution(&mut messages, &outcome, &mut last);
+
+        assert_eq!(
+            messages.len(),
+            1,
+            "must append to the tail, not push a new message"
+        );
+        let blocks = &messages[0].content;
+        assert_eq!(blocks.len(), 2, "original text + appended contribution");
+        let appended = match blocks.last() {
+            Some(ContentBlock::Text { text }) => text,
+            other => panic!("expected appended text block, got {other:?}"),
+        };
+        assert!(
+            appended.contains("trust=\"untrusted\""),
+            "must carry the untrusted envelope"
+        );
+        assert!(
+            appended.contains("RECALL-A"),
+            "must carry the contribution body"
+        );
+        assert_eq!(
+            last.as_deref(),
+            Some(appended.as_str()),
+            "dedup baseline updated"
+        );
+    }
+
+    // (b) DEDUP NO-OP — a contribution byte-equal to `last_injected` (e.g. the
+    // SessionStart prelude already in context) is not re-appended.
+    #[test]
+    fn pre_prompt_dedups_against_last_injection() {
+        let outcome = pre_prompt_outcome("RECALL-A");
+        // Pre-seed `last` with the exact text the helper would append.
+        let injected_text = match &outcome.injected_messages[0].content[0] {
+            ContentBlock::Text { text } => text.clone(),
+            _ => unreachable!(),
+        };
+        let mut messages = vec![user_msg("hello")];
+        let mut last = Some(injected_text.clone());
+        super::AgentEngine::apply_pre_prompt_contribution(&mut messages, &outcome, &mut last);
+
+        assert_eq!(
+            messages[0].content.len(),
+            1,
+            "identical content must not be re-appended"
+        );
+        assert_eq!(
+            last.as_deref(),
+            Some(injected_text.as_str()),
+            "baseline unchanged"
+        );
+    }
+
+    // (c) NON-USER TAIL SKIP — if the tail is not user-role (e.g. an assistant
+    // tool_use), nothing is appended (no orphaned tool_use / no adjacent users).
+    #[test]
+    fn pre_prompt_skips_non_user_tail() {
+        let mut messages = vec![
+            user_msg("hello"),
+            Message::now(
+                Role::Assistant,
+                vec![ContentBlock::ToolUse {
+                    id: "t1".to_string(),
+                    name: "Read".to_string(),
+                    input: serde_json::json!({}),
+                    extra: None,
+                }],
+            ),
+        ];
+        let outcome = pre_prompt_outcome("RECALL-A");
+        let mut last: Option<String> = None;
+        super::AgentEngine::apply_pre_prompt_contribution(&mut messages, &outcome, &mut last);
+
+        assert_eq!(messages.len(), 2, "must not push a new message");
+        assert_eq!(
+            messages[1].content.len(),
+            1,
+            "must not append onto an assistant tool_use tail"
+        );
+        assert!(last.is_none(), "no append ⇒ dedup baseline untouched");
+    }
+
+    // (d) BUDGET TRUNCATION — an oversized contribution is capped near
+    // PRE_PROMPT_TOKEN_BUDGET and marked truncated before appending.
+    #[test]
+    fn pre_prompt_contribution_is_budget_capped() {
+        let max_chars = super::PRE_PROMPT_TOKEN_BUDGET * super::PRELUDE_CHARS_PER_TOKEN;
+        let huge = "z".repeat(max_chars * 6);
+        let mut messages = vec![user_msg("hello")];
+        let outcome = pre_prompt_outcome(&huge);
+        let mut last: Option<String> = None;
+        super::AgentEngine::apply_pre_prompt_contribution(&mut messages, &outcome, &mut last);
+
+        let appended = match messages[0].content.last() {
+            Some(ContentBlock::Text { text }) => text,
+            other => panic!("expected appended text block, got {other:?}"),
+        };
+        assert!(
+            appended.contains("[truncated]"),
+            "oversized contribution must be marked truncated"
+        );
+        // Body is capped at max_chars; the envelope adds only a small wrapper.
+        assert!(
+            appended.len() < max_chars + 512,
+            "appended length {} should stay near the budget {}",
+            appended.len(),
+            max_chars
+        );
+    }
+
+    // (e) MULTI-BLOCK BATCH — when more than one PrePrompt hook contributes, the
+    // whole batch is appended AND the dedup key is the whole batch, so a repeat
+    // of the same multi-block contribution next turn is a no-op (no per-turn
+    // cache churn). Guards the dedup-vs-append granularity match.
+    #[test]
+    fn pre_prompt_dedups_whole_multi_block_batch() {
+        let two_blocks = || HookOutcome {
+            injected_messages: vec![
+                Message::now(
+                    Role::User,
+                    vec![ContentBlock::Text {
+                        text: "BLOCK-1".to_string(),
+                    }],
+                ),
+                Message::now(
+                    Role::User,
+                    vec![ContentBlock::Text {
+                        text: "BLOCK-2".to_string(),
+                    }],
+                ),
+            ],
+            ..Default::default()
+        };
+
+        // First turn: both blocks appended onto the user tail.
+        let mut messages = vec![user_msg("hello")];
+        let mut last: Option<String> = None;
+        super::AgentEngine::apply_pre_prompt_contribution(&mut messages, &two_blocks(), &mut last);
+        assert_eq!(
+            messages[0].content.len(),
+            3,
+            "original + both contribution blocks"
+        );
+        assert_eq!(
+            last.as_deref(),
+            Some("BLOCK-1\nBLOCK-2"),
+            "dedup baseline records the WHOLE batch, not just the last block"
+        );
+
+        // Second turn: identical batch ⇒ nothing appended (no churn).
+        let mut messages2 = vec![user_msg("hello")];
+        super::AgentEngine::apply_pre_prompt_contribution(&mut messages2, &two_blocks(), &mut last);
+        assert_eq!(
+            messages2[0].content.len(),
+            1,
+            "an identical multi-block batch must dedup to a no-op"
+        );
+    }
+}
+
+/// C1 / Task A4 — END-TO-END proof that the REAL `wayland-ijfw` plugin's
+/// `SessionStart` hook (`ijfw_memory_prelude`) reaches a cold session's
+/// conversation as an untrusted User block, through the real C1 path
+/// (`register_plugin_hooks` → `set_hook_dispatcher(McpHookDispatcher)` →
+/// `run_session_start_hooks`).
+///
+/// This test deliberately READS `wayland_ijfw::hooks::HOOKS` and
+/// `wayland_ijfw::mcp::SERVER_NAME` from the real plugin crate (a dev-only
+/// dependency edge — wayland-ijfw still depends ONLY on
+/// wcore-plugin-api/types/protocol per audit F2, so the edge is acyclic) so a
+/// rename on the plugin side breaks this proof rather than silently passing.
+#[cfg(test)]
+mod ijfw_session_start_e2e_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use wcore_config::config::Config;
+    use wcore_providers::{LlmProvider, ProviderError};
+    use wcore_tools::registry::ToolRegistry;
+    use wcore_types::llm::{LlmEvent, LlmRequest};
+    use wcore_types::message::{ContentBlock, Role};
+
+    use crate::hooks::{McpHookDispatcher, McpToolCaller};
+    use crate::output::OutputSink;
+    use crate::plugins::runner::PluginHook;
+    use wcore_plugin_api::registry::hooks::HookPhase;
+
+    /// Sentinel the fake MCP caller emits ONLY for the real prelude tool. The
+    /// suffix keeps it unique so an accidental literal elsewhere can't satisfy
+    /// the assertion.
+    const PRELUDE_SENTINEL: &str = "IJFW-PRELUDE-SENTINEL-a4e2e";
+
+    struct NullOutput;
+    impl OutputSink for NullOutput {
+        fn emit_text_delta(&self, _: &str, _: &str) {}
+        fn emit_thinking(&self, _: &str, _: &str) {}
+        fn emit_tool_call(&self, _: &str, _: &str) {}
+        fn emit_tool_result(&self, _: &str, _: bool, _: &str) {}
+        fn emit_stream_start(&self, _: &str) {}
+        fn emit_stream_end(
+            &self,
+            _: &str,
+            _: usize,
+            _: u64,
+            _: u64,
+            _: u64,
+            _: u64,
+            _: wcore_types::message::FinishReason,
+        ) {
+        }
+        fn emit_error(&self, _: &str, _: bool) {}
+        fn emit_info(&self, _: &str) {}
+    }
+
+    struct NullProvider;
+    #[async_trait]
+    impl LlmProvider for NullProvider {
+        async fn stream(
+            &self,
+            _: &LlmRequest,
+        ) -> Result<tokio::sync::mpsc::Receiver<LlmEvent>, ProviderError> {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            Ok(rx)
+        }
+    }
+
+    /// Fake MCP backend standing in for the live `@ijfw/memory-server`: it
+    /// returns the sentinel ONLY when the real prelude tool is called on the
+    /// real server name, and contributes nothing otherwise.
+    struct FakeIjfwServer {
+        server: String,
+        prelude_tool: String,
+    }
+    #[async_trait]
+    impl McpToolCaller for FakeIjfwServer {
+        async fn call(&self, server: &str, tool: &str) -> Result<String, String> {
+            if server == self.server && tool == self.prelude_tool {
+                Ok(PRELUDE_SENTINEL.to_string())
+            } else {
+                Err(format!("no fixture for {server}/{tool}"))
+            }
+        }
+    }
+
+    /// Pull the SessionStart hook name out of the plugin's real HOOKS table so
+    /// the test breaks if the plugin renames it.
+    fn ijfw_session_start_hook_name() -> &'static str {
+        wayland_ijfw::hooks::HOOKS
+            .iter()
+            .find(|(phase, _)| *phase == HookPhase::SessionStart)
+            .map(|(_, name)| *name)
+            .expect("wayland-ijfw must register a SessionStart hook")
+    }
+
+    fn cold_engine_with_dispatcher(
+        dispatcher: Arc<dyn crate::hooks::HookDispatcher>,
+        hooks: Vec<PluginHook>,
+    ) -> super::AgentEngine {
+        let cfg = Config {
+            system_prompt: Some("SYSTEM-PROMPT-CONTENT".to_string()),
+            ..Default::default()
+        };
+        let mut engine = super::AgentEngine::new_with_provider(
+            Arc::new(NullProvider),
+            cfg,
+            ToolRegistry::new(),
+            Arc::new(NullOutput),
+        );
+        engine.register_plugin_hooks(hooks);
+        engine.set_hook_dispatcher(dispatcher);
+        engine
+    }
+
+    // E2E — the real wayland-ijfw SessionStart hook, dispatched through the
+    // real McpHookDispatcher against the real plugin server name, surfaces in a
+    // cold conversation as exactly one untrusted User block carrying the
+    // backend's payload, WITHOUT touching the system prompt.
+    #[tokio::test]
+    async fn ijfw_prelude_reaches_cold_session_as_untrusted_user_block() {
+        let hook_name = ijfw_session_start_hook_name();
+        let server_name = wayland_ijfw::mcp::SERVER_NAME;
+
+        let caller = Arc::new(FakeIjfwServer {
+            server: server_name.to_string(),
+            prelude_tool: hook_name.to_string(),
+        });
+        let mut server_for_plugin = HashMap::new();
+        server_for_plugin.insert("wayland-ijfw".to_string(), server_name.to_string());
+        let dispatcher = Arc::new(McpHookDispatcher::new(caller, server_for_plugin));
+
+        let mut engine = cold_engine_with_dispatcher(
+            dispatcher,
+            vec![PluginHook {
+                plugin: "wayland-ijfw".to_string(),
+                phase: HookPhase::SessionStart,
+                name: hook_name.to_string(),
+            }],
+        );
+
+        assert!(engine.messages.is_empty(), "precondition: cold session");
+        let system_prompt_before = engine.system_prompt.clone();
+
+        engine.run_session_start_hooks().await;
+
+        assert_eq!(
+            engine.messages.len(),
+            1,
+            "exactly one prelude message must be applied"
+        );
+        let msg = &engine.messages[0];
+        assert_eq!(msg.role, Role::User, "prelude must be a User block");
+        let text = match msg.content.first() {
+            Some(ContentBlock::Text { text }) => text,
+            other => panic!("expected a text block, got {other:?}"),
+        };
+        assert!(
+            text.contains("trust=\"untrusted\""),
+            "prelude must carry the untrusted envelope: {text}"
+        );
+        assert!(
+            text.contains(PRELUDE_SENTINEL),
+            "prelude must carry the backend payload: {text}"
+        );
+        assert!(
+            text.contains(&format!("source=\"wayland-ijfw:{hook_name}\"")),
+            "prelude must record the real ijfw provenance: {text}"
+        );
+        assert_eq!(
+            engine.system_prompt, system_prompt_before,
+            "session-start prelude must never alter the system prompt"
+        );
+    }
+
+    // GATE — a plugin with NO entry in `server_for_plugin` (here: the real
+    // ijfw hook registered under an unrelated plugin name) contributes nothing,
+    // proving the dispatcher's plugin→server map is what gates the injection.
+    #[tokio::test]
+    async fn unmapped_plugin_contributes_nothing() {
+        let hook_name = ijfw_session_start_hook_name();
+        let server_name = wayland_ijfw::mcp::SERVER_NAME;
+
+        let caller = Arc::new(FakeIjfwServer {
+            server: server_name.to_string(),
+            prelude_tool: hook_name.to_string(),
+        });
+        // Map only "wayland-ijfw"; register the hook under a DIFFERENT plugin.
+        let mut server_for_plugin = HashMap::new();
+        server_for_plugin.insert("wayland-ijfw".to_string(), server_name.to_string());
+        let dispatcher = Arc::new(McpHookDispatcher::new(caller, server_for_plugin));
+
+        let mut engine = cold_engine_with_dispatcher(
+            dispatcher,
+            vec![PluginHook {
+                plugin: "some-other-plugin".to_string(),
+                phase: HookPhase::SessionStart,
+                name: hook_name.to_string(),
+            }],
+        );
+
+        engine.run_session_start_hooks().await;
+        assert!(
+            engine.messages.is_empty(),
+            "an unmapped plugin must contribute no prelude"
+        );
     }
 }
