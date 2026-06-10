@@ -73,6 +73,12 @@ const TEST_MODEL: Partial<Record<ProviderId, string>> = {
   cerebras: 'llama3.1-8b',
   perplexity: 'sonar',
   moonshot: 'moonshot-v1-8k',
+  // NVIDIA NIM is OpenAI-compatible (bearer auth, /v1/chat/completions). Without
+  // a test model, connect falls through to the /v1/models auth check, which
+  // NVIDIA answers 200 even for an invalid token - a false-positive connect
+  // (issue #45). `meta/llama-3.1-8b-instruct` is a small, long-standing NIM chat
+  // model, so a real one-token probe distinguishes a good key from a bad one.
+  nvidia: 'meta/llama-3.1-8b-instruct',
   'flux-router': 'flux-fast',
 };
 
