@@ -123,6 +123,7 @@ export const SiderWorkflowsSection: React.FC<SiderWorkflowsSectionProps> = ({ co
           defaultValue: 'This permanently removes the workflow session. This cannot be undone.',
         }),
         okText: t('conversation.history.deleteTitle', { defaultValue: 'Delete' }),
+        cancelText: t('common.cancel', { defaultValue: 'Cancel' }),
         okButtonProps: { status: 'danger' },
         style: { borderRadius: '12px' },
         getPopupContainer: () => document.body,
