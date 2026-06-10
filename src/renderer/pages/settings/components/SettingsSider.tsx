@@ -17,6 +17,7 @@ import {
   Server,
   SlashSquare,
   Sparkles,
+  Stethoscope,
   Zap,
 } from 'lucide-react';
 import FlexFullContainer from '@/renderer/components/layout/FlexFullContainer';
@@ -56,6 +57,7 @@ export const BUILTIN_TAB_IDS = [
   'notifications',
   'storage',
   'ijfw',
+  'doctor',
   // ABOUT
   'about',
 ] as const;
@@ -280,6 +282,12 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         label: t('memory.settings.panel_title', { defaultValue: 'IJFW Memory' }),
         icon: <Brain />,
         path: 'ijfw',
+      },
+      doctor: {
+        id: 'doctor',
+        label: t('settings.sider.doctor', { defaultValue: 'Doctor' }),
+        icon: <Stethoscope />,
+        path: 'doctor',
       },
       about: {
         id: 'about',

@@ -35,6 +35,7 @@ const ModelsSettings = React.lazy(() => import('@renderer/pages/settings/ModelsS
 const SkillsSettings = React.lazy(() => import('@renderer/pages/settings/SkillsSettings'));
 const SlashCommandsSettings = React.lazy(() => import('@renderer/pages/settings/SlashCommandsSettings'));
 const StorageSettings = React.lazy(() => import('@renderer/pages/settings/StorageSettings'));
+const DoctorSettings = React.lazy(() => import('@renderer/pages/settings/DoctorSettings'));
 const WCoreSettings = React.lazy(() => import('@renderer/pages/settings/WCoreSettings'));
 const WCoreConfig = React.lazy(() => import('@renderer/pages/settings/WCoreConfig'));
 const GeminiSettings = React.lazy(() => import('@renderer/pages/settings/GeminiSettings'));
@@ -147,6 +148,8 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
             <Route path='/settings/general' element={withRouteFallback(GeneralSettings)} />
             <Route path='/settings/notifications' element={withRouteFallback(NotificationsSettings)} />
             <Route path='/settings/storage' element={withRouteFallback(StorageSettings)} />
+            {/* Doctor - diagnostic health checks across all subsystems (#35). */}
+            <Route path='/settings/doctor' element={withRouteFallback(DoctorSettings)} />
             {/* IJFW MEMORY (Decision 3b: the ONLY Skip toggle in the app) */}
             <Route path='/settings/ijfw' element={withRouteFallback(IjfwSettingsPanel)} />
             {/* ABOUT */}

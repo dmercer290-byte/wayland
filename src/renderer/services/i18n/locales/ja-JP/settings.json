@@ -1610,7 +1610,8 @@
     "images": "画像生成",
     "voice": "音声",
     "groupEngine": "ENGINE",
-    "commands": "Slash Commands"
+    "commands": "Slash Commands",
+    "doctor": "Doctor"
   },
   "channelsIndex": {
     "title": "チャンネル",
@@ -2441,6 +2442,37 @@
       "invalidChars": "Use letters, digits, hyphen, underscore; start with a letter",
       "reserved": "That name is reserved by a built-in command",
       "duplicate": "A command with that name already exists"
+    }
+  },
+  "doctor": {
+    "title": "Doctor",
+    "subtitle": "Run diagnostic checks across providers, models, the engine, MCP, backends, and config.",
+    "resultsTitle": "Diagnostic results",
+    "rerun": "Re-run",
+    "copy": "Copy report",
+    "copied": "Report copied",
+    "copyFailed": "Could not copy the report",
+    "runFailed": "Could not run the Doctor",
+    "remediationPrefix": "Fix:",
+    "emptyTitle": "No diagnostics yet",
+    "emptyBody": "Run the Doctor to check the app’s health.",
+    "summary": "{{pass}} passed · {{warn}} warnings · {{fail}} failed",
+    "status": {
+      "pass": "Pass",
+      "warn": "Warning",
+      "fail": "Fail"
+    },
+    "checks": {
+      "bootstrap": "Doctor startup",
+      "providerConnectivity": "Provider connectivity",
+      "modelRegistry": "Model registry",
+      "engineReachable": "Engine reachable",
+      "engineRouting": "Engine default routing",
+      "mcpServers": "MCP servers",
+      "backends": "Detected backends",
+      "workspaceDrift": "Workspace paths",
+      "secretStorage": "Secret storage",
+      "engineConfig": "Engine config integrity"
     }
   }
 }
