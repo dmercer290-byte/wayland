@@ -112,7 +112,7 @@ describe('sanitizeGeminiSchema', () => {
       properties: {
         config: { type: 'object', description: 'free-form config' },
       },
-    }) as any;
+    }) as { properties: { config: Record<string, unknown> } };
     expect(out.properties.config).toEqual({ type: 'object', description: 'free-form config' });
     expect(out.properties.config).not.toHaveProperty('properties');
   });
@@ -138,7 +138,10 @@ describe('sanitizeGeminiSchema', () => {
           },
         },
       },
-    }) as any;
+    }) as {
+      properties: {
+        pages: { items: { properties: Record<string, Record<string, unknown>> } & Record<string, unknown> } };
+    };
     const itemProps = out.properties.pages.items.properties;
     expect(Object.keys(itemProps).sort()).toEqual(['content', 'icon', 'properties']);
     expect(itemProps).not.toHaveProperty('type');
@@ -154,7 +157,7 @@ describe('sanitizeGeminiSchema', () => {
       properties: {
         type: { type: 'string', description: 'a field called type' },
       },
-    }) as any;
+    }) as { properties: { type: Record<string, unknown> } };
     // The child "type" must remain its own subschema object, not be collapsed.
     expect(out.properties.type).toEqual({ type: 'string', description: 'a field called type' });
   });
