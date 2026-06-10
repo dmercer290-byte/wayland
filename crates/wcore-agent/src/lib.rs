@@ -15,6 +15,11 @@ pub mod budget;
 pub mod cache_diagnostics;
 // W8a A.2: cooperative cancellation primitives (re-export of tokio-util).
 pub mod cancel;
+// Inbound channel consumer: subscribes to the ChannelManager broadcast,
+// runs the pure dispatch kernel (wcore_channels::evaluate), and on admit
+// drives an agent turn through the TurnDispatcher seam, then sends the
+// reply back. Completes the inbound path that was structurally missing.
+pub mod channel_inbound;
 // FleetDispatcher-class fix (audit 2026-05-24): bridges SendMessageTool's
 // `MessageTransport` boundary to the host's `ChannelManager` so the LLM
 // can drive Telegram/Discord/Slack/etc. through user-configured channels.
