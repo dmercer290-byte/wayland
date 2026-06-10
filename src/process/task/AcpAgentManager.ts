@@ -5,6 +5,7 @@ import { teamEventBus } from '@process/team/teamEventBus';
 import { ipcBridge } from '@/common';
 import type { CronMessageMeta, TMessage } from '@/common/chat/chatLib';
 import { isCodexAutoApproveMode } from '@/common/types/codex/codexModes';
+import { shouldAutoApproveAcpEdit } from '@/common/types/agentModes';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { transformMessage } from '@/common/chat/chatLib';
 import type { IConfigStorageRefer } from '@/common/config/storage';
@@ -1092,6 +1093,18 @@ ${collectedResponses.join('\n')}`;
         const autoOption = options[0];
         setTimeout(() => {
           void this.confirm(v.msg_id, toolCall.toolCallId || v.msg_id, autoOption);
+        }, 50);
+        return;
+      }
+
+      // Auto-approve file edits when in "Accept Edits" mode. The claude ACP bridge
+      // still forwards a permission request for edit tools after session/set_mode,
+      // so Wayland honors the mode here (mirroring Gemini autoEdit / WCore auto_edit).
+      // Commands and other tool kinds still surface a confirmation.
+      if (shouldAutoApproveAcpEdit(this.currentMode, toolCall.kind) && options.length > 0) {
+        const allowOption = options.find((option) => !option.kind.startsWith('reject')) ?? options[0];
+        setTimeout(() => {
+          void this.confirm(v.msg_id, toolCall.toolCallId || v.msg_id, allowOption);
         }, 50);
         return;
       }
