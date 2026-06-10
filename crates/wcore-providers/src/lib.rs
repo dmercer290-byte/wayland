@@ -24,7 +24,6 @@ pub mod key_rotation;
 pub mod mistral;
 pub mod moonshot;
 pub mod nvidia;
-pub mod ollama;
 pub mod openai;
 pub mod openai_compat;
 pub mod openai_compatible;
