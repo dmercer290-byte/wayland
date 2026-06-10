@@ -17,6 +17,7 @@
 
 pub mod config;
 pub mod error;
+pub mod inbound;
 mod token;
 
 use std::collections::VecDeque;
@@ -99,6 +100,41 @@ impl MsTeamsChannel {
     pub fn state(&self) -> ConnectionState {
         self.state
     }
+
+    /// Webhook-router entrypoint for an inbound Bot Framework Activity.
+    ///
+    /// Parses `raw_body` (the JSON Activity the Azure Bot Service POSTed to
+    /// the bot's messaging endpoint) and, for a `type == "message"` activity,
+    /// enqueues a [`ChannelEvent::MessageReceived`] for the next
+    /// [`poll_events`](Channel::poll_events). Lifecycle activities
+    /// (`conversationUpdate`, `typing`, …) are silently ignored.
+    ///
+    /// The activity's `conversation_id` is encoded as
+    /// `{serviceUrl}|{conversationId}` (falling back to the channel's
+    /// configured `service_url`) so the reply path round-trips the
+    /// tenant-specific serviceUrl. See [`inbound::activity_to_incoming`].
+    ///
+    /// # Security — NOT authenticated
+    ///
+    /// This method performs **no** authentication of the inbound request. The
+    /// Bot Framework signs inbound activities with a JWT in the
+    /// `Authorization: Bearer <jwt>` header that must be validated (issuer +
+    /// audience + signature against Azure's OpenID JWKS metadata) before the
+    /// payload can be trusted. That validation is a separate, heavier
+    /// follow-up.
+    ///
+    // TODO(security): validate Bot Framework JWT (iss/aud + JWKS) before
+    // trusting inbound; the inbound webhook host must not call this until that
+    // lands or must gate on network trust.
+    pub async fn ingest_activity(&self, raw_body: &str) -> Result<(), MsTeamsError> {
+        if let Some(msg) = inbound::activity_to_incoming(raw_body, &self.config.service_url)? {
+            self.inbox
+                .lock()
+                .await
+                .push_back(ChannelEvent::MessageReceived { msg });
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -173,7 +209,8 @@ impl Channel for MsTeamsChannel {
         Ok(())
     }
 
-    /// Always empty — inbound webhook receive is deferred to v0.8.3.
+    /// Drain events enqueued by lifecycle transitions and inbound activities
+    /// (via [`ingest_activity`](MsTeamsChannel::ingest_activity)).
     async fn poll_events(&mut self) -> Result<Vec<ChannelEvent>, ChannelError> {
         Ok(self.inbox.lock().await.drain(..).collect())
     }
@@ -398,7 +435,43 @@ service_url = "https://smba.trafficmanager.net/emea/"
         assert_eq!(conv, "19:abc@thread.v2");
     }
 
-    // 6. start + send via mockito (token endpoint + connector).
+    // 6. ingest_activity enqueues a MessageReceived that poll_events drains.
+    #[tokio::test]
+    async fn ingest_activity_enqueues_message() {
+        let mut ch = MsTeamsChannel::new("test", cfg(), MemCreds::empty());
+        let body = r#"{
+            "type": "message",
+            "id": "act-1",
+            "text": "ping",
+            "from": { "id": "29:user", "name": "User" },
+            "recipient": { "id": "28:bot" },
+            "conversation": { "id": "19:abc@thread.v2", "conversationType": "personal" }
+        }"#;
+        ch.ingest_activity(body).await.unwrap();
+
+        let events = ch.poll_events().await.unwrap();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChannelEvent::MessageReceived { msg } => {
+                assert_eq!(msg.id, "act-1");
+                assert_eq!(msg.sender_id, "29:user");
+                assert_eq!(msg.text, "ping");
+                assert_eq!(msg.platform.as_deref(), Some("msteams"));
+            }
+            other => panic!("expected MessageReceived, got {other:?}"),
+        }
+    }
+
+    // 7. ingest_activity ignores lifecycle (conversationUpdate) activities.
+    #[tokio::test]
+    async fn ingest_activity_ignores_conversation_update() {
+        let mut ch = MsTeamsChannel::new("test", cfg(), MemCreds::empty());
+        let body = r#"{ "type": "conversationUpdate", "id": "x", "conversation": { "id": "19:abc" } }"#;
+        ch.ingest_activity(body).await.unwrap();
+        assert!(ch.poll_events().await.unwrap().is_empty());
+    }
+
+    // 8. start + send via mockito (token endpoint + connector).
     #[tokio::test]
     async fn send_message_succeeds_on_200() {
         let mut server = mockito::Server::new_async().await;

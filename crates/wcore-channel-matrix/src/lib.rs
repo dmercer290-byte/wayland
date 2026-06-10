@@ -1,7 +1,8 @@
-//! `wcore-channel-matrix` — Matrix CS API channel adapter (send-only MVP).
+//! `wcore-channel-matrix` — Matrix CS API channel adapter.
 //!
 //! **Scope**: Outbound send via `PUT /_matrix/client/v3/rooms/{roomId}/send/m.room.message/{txnId}`.
-//! Inbound poll (`/sync`) is deferred to v0.8.3 — `poll_events` always returns empty.
+//! Inbound via `GET /_matrix/client/v3/sync` long-poll on a background task
+//! spawned in `start()`; `poll_events` drains the shared inbox the task fills.
 //!
 //! Avoids `matrix-sdk` to keep build time down (`matrix-sdk` + crypto WASM
 //! adds >5 min to clean builds). Raw REST is sufficient for the send use-case.
@@ -15,12 +16,14 @@
 pub mod config;
 pub mod error;
 mod rest;
+mod sync;
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
+use tokio::task::JoinHandle;
 
 use wcore_channels::Channel;
 use wcore_channels::error::ChannelError;
@@ -38,7 +41,12 @@ pub struct MatrixChannel {
     state: ConnectionState,
     access_token: Option<String>,
     http: wcore_egress::EgressClient,
+    /// Background `/sync` task pushes into this; `poll_events` drains it.
     inbox: Arc<Mutex<VecDeque<ChannelEvent>>>,
+    /// Handle to the background `/sync` long-poll task; `None` until started.
+    poll_handle: Option<JoinHandle<()>>,
+    /// Shutdown signal for the `/sync` task; `None` until started.
+    shutdown: Option<watch::Sender<bool>>,
     creds: Arc<dyn CredentialsStore>,
     /// Override for tests.
     api_base: String,
@@ -73,6 +81,8 @@ impl MatrixChannel {
             access_token: None,
             http,
             inbox: Arc::new(Mutex::new(VecDeque::new())),
+            poll_handle: None,
+            shutdown: None,
             creds,
             api_base,
         }
@@ -94,7 +104,8 @@ impl Channel for MatrixChannel {
     }
 
     async fn start(&mut self) -> Result<(), ChannelError> {
-        if self.access_token.is_some() {
+        if self.poll_handle.is_some() {
+            // Already running — idempotent.
             return Ok(());
         }
         self.state = ConnectionState::Connecting;
@@ -110,20 +121,53 @@ impl Channel for MatrixChannel {
                 ))
             })?;
 
-        self.access_token = Some(token);
-        self.state = ConnectionState::Connected;
+        self.access_token = Some(token.clone());
+
+        // Emit a Connected state-change so subscribers know the channel
+        // went live (the manager will tag and broadcast it).
         self.inbox
             .lock()
             .await
             .push_back(ChannelEvent::ConnectionStateChanged {
                 state: ConnectionState::Connected,
             });
+
+        // Spawn the /sync long-poll task.
+        let (tx, rx) = watch::channel(false);
+        let args = sync::SyncArgs {
+            http: self.http.clone(),
+            api_base: self.api_base.clone(),
+            access_token: token,
+            user_id: self.config.user_id.clone(),
+            inbox: Arc::clone(&self.inbox),
+            shutdown: rx,
+        };
+        let handle = tokio::spawn(sync::sync_loop(args));
+        self.poll_handle = Some(handle);
+        self.shutdown = Some(tx);
+        self.state = ConnectionState::Connected;
+
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<(), ChannelError> {
-        if self.access_token.is_none() {
+        if self.poll_handle.is_none() {
             return Ok(());
+        }
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(true);
+        }
+        if let Some(handle) = self.poll_handle.take() {
+            // Give the loop a brief moment to observe the shutdown signal
+            // and drop out; if it lingers past the grace window, abort.
+            let joined = tokio::time::timeout(std::time::Duration::from_secs(2), handle).await;
+            if joined.is_err() {
+                tracing::warn!(
+                    target: "wcore_channel_matrix",
+                    channel = %self.name,
+                    "/sync task did not exit within shutdown grace; aborted"
+                );
+            }
         }
         self.access_token = None;
         self.state = ConnectionState::Disconnected;
@@ -136,7 +180,7 @@ impl Channel for MatrixChannel {
         Ok(())
     }
 
-    /// Always empty — inbound /sync polling is deferred to v0.8.3.
+    /// Drains the shared inbox the background `/sync` task fills.
     async fn poll_events(&mut self) -> Result<Vec<ChannelEvent>, ChannelError> {
         Ok(self.inbox.lock().await.drain(..).collect())
     }
