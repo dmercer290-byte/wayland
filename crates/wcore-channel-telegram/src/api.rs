@@ -183,6 +183,33 @@ pub struct SendDocumentBody<'a> {
     pub reply_to_message_id: Option<i64>,
 }
 
+/// `sendChatAction` request body. We always send `action: "typing"` — the
+/// only chat action this adapter emits. Telegram auto-expires the typing
+/// indicator after ~5s, so the subscriber refreshes it periodically.
+#[derive(Debug, Clone, Serialize)]
+pub struct SendChatActionBody<'a> {
+    pub chat_id: &'a str,
+    pub action: &'a str,
+}
+
+/// One reaction in a `setMessageReaction` request. Telegram models a
+/// reaction as a tagged object; we only ever send `type: "emoji"`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ReactionType<'a> {
+    #[serde(rename = "type")]
+    pub kind: &'a str,
+    pub emoji: &'a str,
+}
+
+/// `setMessageReaction` request body. `reaction` is an array — an empty
+/// array would clear reactions, but we always send exactly one emoji.
+#[derive(Debug, Clone, Serialize)]
+pub struct SetReactionBody<'a> {
+    pub chat_id: &'a str,
+    pub message_id: i64,
+    pub reaction: Vec<ReactionType<'a>>,
+}
+
 /// Send one message with the retry policy described in the crate docs:
 /// up to `SEND_MAX_ATTEMPTS` total tries, exponential backoff on 5xx /
 /// network failure, Telegram-style 429 (honors `parameters.retry_after`),
@@ -464,6 +491,99 @@ pub(crate) async fn send_document(
     post_with_retry(http, &url, body).await
 }
 
+/// Build the `sendChatAction` body for a typing indicator. Factored out so
+/// the request shape is testable without a network round-trip.
+pub(crate) fn build_send_chat_action(chat_id: &str) -> SendChatActionBody<'_> {
+    SendChatActionBody {
+        chat_id,
+        action: "typing",
+    }
+}
+
+/// Build the `setMessageReaction` body for a single emoji reaction.
+/// Factored out so the nested `reaction` array shape is testable without a
+/// network round-trip.
+pub(crate) fn build_set_reaction<'a>(
+    chat_id: &'a str,
+    message_id: i64,
+    emoji: &'a str,
+) -> SetReactionBody<'a> {
+    SetReactionBody {
+        chat_id,
+        message_id,
+        reaction: vec![ReactionType {
+            kind: "emoji",
+            emoji,
+        }],
+    }
+}
+
+/// POST a serializable body to a Telegram endpoint that returns a bare
+/// `result: true` envelope (not a `Message`), with NO retry. Used by the
+/// best-effort ack signals (`sendChatAction`, `setMessageReaction`) where
+/// a single attempt is sufficient and the caller treats failures as
+/// non-fatal. Non-2xx maps to a clean error so the caller can log + ignore.
+async fn post_once<B: Serialize>(
+    http: &wcore_egress::EgressClient,
+    url: &str,
+    body: &B,
+) -> Result<(), TelegramError> {
+    let resp = http
+        .post(url)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| TelegramError::Http(format!("network: {e}")))?;
+
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(());
+    }
+
+    // Non-2xx — surface a clean error. Auth on 401/403, otherwise Rejected
+    // with whatever description Telegram returned (e.g. an invalid reaction
+    // emoji yields a 400 here).
+    let bytes = resp.bytes().await.unwrap_or_default();
+    let api = serde_json::from_slice::<ApiResponse<serde_json::Value>>(&bytes).ok();
+    let desc = api
+        .as_ref()
+        .and_then(|a| a.description.clone())
+        .unwrap_or_else(|| format!("status {status}"));
+    let code = api
+        .as_ref()
+        .and_then(|a| a.error_code)
+        .unwrap_or(status.as_u16() as i64);
+    if matches!(status.as_u16(), 401 | 403) {
+        return Err(TelegramError::Auth(desc));
+    }
+    Err(TelegramError::Rejected {
+        code,
+        description: desc,
+    })
+}
+
+/// Send a `typing` chat action. Best-effort, single attempt.
+pub(crate) async fn send_chat_action(
+    http: &wcore_egress::EgressClient,
+    api_base: &str,
+    bot_token: &str,
+    body: &SendChatActionBody<'_>,
+) -> Result<(), TelegramError> {
+    let url = format!("{api_base}/bot{bot_token}/sendChatAction");
+    post_once(http, &url, body).await
+}
+
+/// Set a single emoji reaction on a message. Best-effort, single attempt.
+pub(crate) async fn set_message_reaction(
+    http: &wcore_egress::EgressClient,
+    api_base: &str,
+    bot_token: &str,
+    body: &SetReactionBody<'_>,
+) -> Result<(), TelegramError> {
+    let url = format!("{api_base}/bot{bot_token}/setMessageReaction");
+    post_once(http, &url, body).await
+}
+
 fn exp_backoff_ms(attempt: u32) -> u64 {
     // attempt=1 -> 200ms, attempt=2 -> 400ms, attempt=3 -> 800ms, ...
     let shift = attempt.saturating_sub(1).min(10);
@@ -530,5 +650,26 @@ mod tests {
         // caption + reply_to_message_id skip-serialize when None.
         assert!(json.get("caption").is_none());
         assert!(json.get("reply_to_message_id").is_none());
+    }
+
+    #[test]
+    fn send_chat_action_body_serializes_typing() {
+        let body = build_send_chat_action("42");
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["chat_id"], "42");
+        assert_eq!(json["action"], "typing");
+    }
+
+    #[test]
+    fn set_reaction_body_serializes_nested_emoji_array() {
+        let body = build_set_reaction("42", 7, "👀");
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json["chat_id"], "42");
+        // message_id is sent as a JSON number, not a string.
+        assert_eq!(json["message_id"], 7);
+        let reaction = json["reaction"].as_array().expect("reaction is an array");
+        assert_eq!(reaction.len(), 1);
+        assert_eq!(reaction[0]["type"], "emoji");
+        assert_eq!(reaction[0]["emoji"], "👀");
     }
 }

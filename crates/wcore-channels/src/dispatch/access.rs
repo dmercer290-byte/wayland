@@ -59,6 +59,38 @@ pub enum ChannelToolPosture {
     Full,
 }
 
+/// How the bot acknowledges an inbound message it's working on.
+///
+/// A human who messages a bot wants to know it heard them. This selects
+/// the ack signal the inbound subscriber emits around a turn: emoji
+/// reactions on the triggering message (👀 received → ✅ done / ❌ failed)
+/// and/or a periodic "typing…" indicator while the turn runs. Both are
+/// best-effort — a connector that lacks the platform API no-ops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AckMode {
+    /// No acknowledgement (default).
+    #[default]
+    Off,
+    /// React 👀 on receipt, ✅/❌ on completion.
+    Reactions,
+    /// Send a typing indicator, refreshed while the turn runs.
+    Typing,
+    /// Both reactions and typing.
+    Both,
+}
+
+impl AckMode {
+    /// Whether this mode emits emoji reactions.
+    pub fn reactions(self) -> bool {
+        matches!(self, AckMode::Reactions | AckMode::Both)
+    }
+    /// Whether this mode emits a typing indicator.
+    pub fn typing(self) -> bool {
+        matches!(self, AckMode::Typing | AckMode::Both)
+    }
+}
+
 /// Policy governing whether group/channel messages are accepted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -123,6 +155,10 @@ pub struct InboundPolicy {
     /// working directory is used as the jail root.
     #[serde(default)]
     pub tool_workspace_root: Option<String>,
+    /// How the bot acknowledges inbound messages it's working on
+    /// (reactions / typing). Defaults to [`AckMode::Off`].
+    #[serde(default)]
+    pub ack: AckMode,
 }
 
 fn default_dm_policy() -> DmPolicy {
@@ -152,6 +188,7 @@ impl Default for InboundPolicy {
             thread_sessions_per_user: false,
             tools: ChannelToolPosture::Conversational,
             tool_workspace_root: None,
+            ack: AckMode::Off,
         }
     }
 }
@@ -427,6 +464,18 @@ mod tests {
         assert_eq!(w.tool_workspace_root.as_deref(), Some("/srv/agent"));
         let f: InboundPolicy = toml::from_str("dm = \"open\"\ntools = \"full\"").unwrap();
         assert_eq!(f.tools, ChannelToolPosture::Full);
+    }
+
+    #[test]
+    fn ack_mode_parses_and_defaults() {
+        let p: InboundPolicy = toml::from_str("dm = \"open\"").unwrap();
+        assert_eq!(p.ack, AckMode::Off);
+        assert!(!p.ack.reactions() && !p.ack.typing());
+        let b: InboundPolicy = toml::from_str("dm = \"open\"\nack = \"both\"").unwrap();
+        assert_eq!(b.ack, AckMode::Both);
+        assert!(b.ack.reactions() && b.ack.typing());
+        let r: InboundPolicy = toml::from_str("dm = \"open\"\nack = \"reactions\"").unwrap();
+        assert!(r.ack.reactions() && !r.ack.typing());
     }
 
     #[test]

@@ -180,10 +180,60 @@ impl InboundSubscriber {
                                     }
                                 };
 
-                                match dispatcher
+                                // Ack state machine (best-effort, never
+                                // fatal): 👀 on receipt, a typing keepalive
+                                // while the turn runs, then ✅/❌ on
+                                // completion — gated by the channel's ack mode.
+                                let ack = policy.ack;
+                                if ack.reactions() {
+                                    let g = manager.lock().await;
+                                    if let Err(e) = g
+                                        .react_on(
+                                            &tagged.channel_name,
+                                            &msg.conversation_id,
+                                            &msg.id,
+                                            "👀",
+                                        )
+                                        .await
+                                    {
+                                        tracing::debug!(
+                                            channel = %tagged.channel_name,
+                                            error = %e,
+                                            "ack 'seen' reaction failed (non-fatal)"
+                                        );
+                                    }
+                                }
+                                let typing_handle = if ack.typing() {
+                                    Some(spawn_typing_keepalive(
+                                        std::sync::Arc::clone(&manager),
+                                        tagged.channel_name.clone(),
+                                        msg.conversation_id.clone(),
+                                    ))
+                                } else {
+                                    None
+                                };
+
+                                let dispatch_result = dispatcher
                                     .dispatch(&session_key, &tagged.channel_name, &msg)
-                                    .await
-                                {
+                                    .await;
+
+                                if let Some(h) = typing_handle {
+                                    h.abort();
+                                }
+                                if ack.reactions() {
+                                    let emoji = if dispatch_result.is_ok() { "✅" } else { "❌" };
+                                    let g = manager.lock().await;
+                                    let _ = g
+                                        .react_on(
+                                            &tagged.channel_name,
+                                            &msg.conversation_id,
+                                            &msg.id,
+                                            emoji,
+                                        )
+                                        .await;
+                                }
+
+                                match dispatch_result {
                                     Ok(Some(reply)) => {
                                         let outgoing = OutgoingMessage {
                                             conversation_id: msg.conversation_id.clone(),
@@ -254,6 +304,27 @@ impl InboundSubscriber {
             }
         })
     }
+}
+
+/// Spawn a best-effort typing-indicator keepalive for `conversation_id` on
+/// `channel`. Sends a typing signal immediately, then refreshes every 5s
+/// until the returned handle is aborted (the subscriber aborts it the moment
+/// the turn completes). Each send locks the manager only briefly; failures
+/// (platform has no typing API, transient error) are ignored.
+fn spawn_typing_keepalive(
+    manager: Arc<Mutex<ChannelManager>>,
+    channel: String,
+    conversation_id: String,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            {
+                let guard = manager.lock().await;
+                let _ = guard.send_typing_to(&channel, &conversation_id).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    })
 }
 
 #[cfg(test)]

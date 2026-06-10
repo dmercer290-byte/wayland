@@ -272,6 +272,40 @@ impl Channel for TelegramChannel {
         })
     }
 
+    /// POST `sendChatAction` with `action: "typing"`. Best-effort: the
+    /// typing indicator auto-expires after ~5s, which is why the inbound
+    /// subscriber refreshes it. A single attempt is sufficient — transport
+    /// failures map to [`ChannelError::Transport`] and are logged + ignored
+    /// by the caller, never fatal to the turn.
+    async fn send_typing(&self, conversation_id: &str) -> Result<(), ChannelError> {
+        let token = self.bot_token.as_deref().ok_or(ChannelError::NotStarted)?;
+        let body = api::build_send_chat_action(conversation_id);
+        api::send_chat_action(&self.http, &self.api_base, token, &body)
+            .await
+            .map_err(ChannelError::from)
+    }
+
+    /// POST `setMessageReaction` with a single emoji. `message_id` arrives
+    /// as a string and must parse to an `i64`; a parse failure is a caller
+    /// bug and surfaces as [`ChannelError::Rejected`]. We do not validate
+    /// the emoji against Telegram's fixed reaction set — an unknown emoji is
+    /// rejected by Telegram with a 400, which maps to `Rejected`.
+    async fn react(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> Result<(), ChannelError> {
+        let token = self.bot_token.as_deref().ok_or(ChannelError::NotStarted)?;
+        let message_id: i64 = message_id
+            .parse()
+            .map_err(|_| ChannelError::Rejected("invalid message_id".to_string()))?;
+        let body = api::build_set_reaction(conversation_id, message_id, emoji);
+        api::set_message_reaction(&self.http, &self.api_base, token, &body)
+            .await
+            .map_err(ChannelError::from)
+    }
+
     fn config_schema(&self) -> &str {
         include_str!("schemas/telegram.json")
     }
@@ -859,6 +893,147 @@ parse_mode = "MarkdownV2"
         assert_eq!(receipt.id, "9");
         m_text.assert_async().await;
         m_doc.assert_async().await;
+        ch.stop().await.unwrap();
+    }
+
+    // -----------------------------------------------------------------
+    // 12. send_typing POSTs sendChatAction with action=typing and succeeds
+    //     on 200.
+    // -----------------------------------------------------------------
+    #[tokio::test]
+    async fn send_typing_posts_chat_action_on_200() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", format!("/bot{TEST_TOKEN}/sendChatAction").as_str())
+            .match_header("content-type", "application/json")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"chat_id":"42","action":"typing"}"#.to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":true,"result":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let creds = InMemoryCreds::with_token("telegram.test.bot_token", TEST_TOKEN);
+        let mut ch = TelegramChannel::with_api_base("test", cfg(), creds, server.url());
+        ch.start().await.unwrap();
+        ch.send_typing("42").await.unwrap();
+        mock.assert_async().await;
+        ch.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_typing_before_start_errors_not_started() {
+        let creds = InMemoryCreds::with_token("telegram.test.bot_token", TEST_TOKEN);
+        let ch = TelegramChannel::with_api_base("test", cfg(), creds, "http://unused".to_string());
+        let err = ch
+            .send_typing("42")
+            .await
+            .expect_err("expected NotStarted");
+        assert!(matches!(err, ChannelError::NotStarted), "got {err:?}");
+    }
+
+    // -----------------------------------------------------------------
+    // 13. react POSTs setMessageReaction with the nested reaction array
+    //     and succeeds on 200.
+    // -----------------------------------------------------------------
+    #[tokio::test]
+    async fn react_posts_set_message_reaction_on_200() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock(
+                "POST",
+                format!("/bot{TEST_TOKEN}/setMessageReaction").as_str(),
+            )
+            .match_header("content-type", "application/json")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"chat_id":"42","message_id":7,"reaction":[{"type":"emoji","emoji":"👀"}]}"#
+                    .to_string(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":true,"result":true}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let creds = InMemoryCreds::with_token("telegram.test.bot_token", TEST_TOKEN);
+        let mut ch = TelegramChannel::with_api_base("test", cfg(), creds, server.url());
+        ch.start().await.unwrap();
+        ch.react("42", "7", "👀").await.unwrap();
+        mock.assert_async().await;
+        ch.stop().await.unwrap();
+    }
+
+    // -----------------------------------------------------------------
+    // 14. react with a non-numeric message_id is Rejected without ever
+    //     hitting the network.
+    // -----------------------------------------------------------------
+    #[tokio::test]
+    async fn react_with_non_numeric_message_id_is_rejected() {
+        let creds = InMemoryCreds::with_token("telegram.test.bot_token", TEST_TOKEN);
+        // Start so bot_token is populated and we exercise the parse path,
+        // not the NotStarted path. api_base is unused (no request is made).
+        let mut server = mockito::Server::new_async().await;
+        let _m = server
+            .mock("GET", format!("/bot{TEST_TOKEN}/getUpdates").as_str())
+            .with_status(200)
+            .with_body(r#"{"ok":true,"result":[]}"#)
+            .expect_at_least(0)
+            .create_async()
+            .await;
+        let mut ch = TelegramChannel::with_api_base("test", cfg(), creds, server.url());
+        ch.start().await.unwrap();
+
+        let err = ch
+            .react("42", "not-a-number", "👀")
+            .await
+            .expect_err("expected Rejected for bad message_id");
+        match err {
+            ChannelError::Rejected(msg) => assert!(msg.contains("invalid message_id"), "msg = {msg}"),
+            other => panic!("expected Rejected, got {other:?}"),
+        }
+        ch.stop().await.unwrap();
+    }
+
+    // -----------------------------------------------------------------
+    // 15. react maps a Telegram 400 (e.g. unknown emoji) to a clean
+    //     Rejected error.
+    // -----------------------------------------------------------------
+    #[tokio::test]
+    async fn react_maps_400_to_rejected() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock(
+                "POST",
+                format!("/bot{TEST_TOKEN}/setMessageReaction").as_str(),
+            )
+            .with_status(400)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"ok":false,"error_code":400,"description":"Bad Request: REACTION_INVALID"}"#,
+            )
+            .expect(1)
+            .create_async()
+            .await;
+
+        let creds = InMemoryCreds::with_token("telegram.test.bot_token", TEST_TOKEN);
+        let mut ch = TelegramChannel::with_api_base("test", cfg(), creds, server.url());
+        ch.start().await.unwrap();
+        let err = ch
+            .react("42", "7", "🦄")
+            .await
+            .expect_err("expected Rejected for invalid reaction");
+        match err {
+            ChannelError::Rejected(msg) => {
+                assert!(msg.contains("400"), "msg = {msg}");
+                assert!(msg.contains("REACTION_INVALID"), "msg = {msg}");
+            }
+            other => panic!("expected Rejected, got {other:?}"),
+        }
+        mock.assert_async().await;
         ch.stop().await.unwrap();
     }
 

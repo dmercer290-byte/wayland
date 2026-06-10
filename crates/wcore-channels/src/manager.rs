@@ -256,6 +256,40 @@ impl ChannelManager {
         receipt.ok_or_else(|| ChannelError::Other("chunked send produced no receipt".into()))
     }
 
+    /// Send a transient typing indicator to `conversation_id` on channel
+    /// `name`. Best-effort: unknown channel → `Config` error; platforms
+    /// without a typing API no-op via the trait default.
+    pub async fn send_typing_to(
+        &self,
+        name: &str,
+        conversation_id: &str,
+    ) -> Result<(), ChannelError> {
+        let slot = self
+            .channels
+            .get(name)
+            .ok_or_else(|| ChannelError::Config(format!("unknown channel: {name}")))?;
+        let guard = slot.lock().await;
+        guard.send_typing(conversation_id).await
+    }
+
+    /// React to `message_id` in `conversation_id` on channel `name` with a
+    /// unicode emoji (ack state machine). Unknown channel → `Config` error;
+    /// platforms without reactions → `Rejected` via the trait default.
+    pub async fn react_on(
+        &self,
+        name: &str,
+        conversation_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> Result<(), ChannelError> {
+        let slot = self
+            .channels
+            .get(name)
+            .ok_or_else(|| ChannelError::Config(format!("unknown channel: {name}")))?;
+        let guard = slot.lock().await;
+        guard.react(conversation_id, message_id, emoji).await
+    }
+
     /// List names of registered channels, sorted alphabetically.
     pub fn list_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.channels.keys().cloned().collect();

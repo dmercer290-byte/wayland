@@ -27,8 +27,9 @@ pub mod webhook;
 pub use chunk::chunk_message;
 pub use config::{ChannelConfig, ChannelConfigLoader};
 pub use dispatch::{
-    build_session_key, classify, decide_access, evaluate, AccessDecision, ChannelToolPosture,
-    DedupeCache, DedupeKey, DispatchOutcome, DmPolicy, GroupPolicy, InboundPolicy, TurnAdmission,
+    build_session_key, classify, decide_access, evaluate, AccessDecision, AckMode,
+    ChannelToolPosture, DedupeCache, DedupeKey, DispatchOutcome, DmPolicy, GroupPolicy,
+    InboundPolicy, TurnAdmission,
 };
 pub use error::ChannelError;
 pub use event::{
@@ -95,6 +96,33 @@ pub trait Channel: Send + Sync {
     /// limit.
     fn max_message_len(&self) -> Option<usize> {
         None
+    }
+
+    /// Send a transient "typing…" indicator to `conversation_id`.
+    ///
+    /// Default: no-op `Ok(())` — platforms without a typing API simply do
+    /// nothing. The inbound subscriber calls this periodically while a turn
+    /// is running (when the channel's ack mode enables typing) so a human
+    /// sees the bot is working. Must be cheap and best-effort; a failure is
+    /// logged and ignored, never fatal to the turn.
+    async fn send_typing(&self, _conversation_id: &str) -> Result<(), ChannelError> {
+        Ok(())
+    }
+
+    /// React to a message with a single unicode emoji — the ack/status
+    /// signal used by the subscriber's ack state machine (👀 received →
+    /// ✅ done / ❌ failed).
+    ///
+    /// Default: `Rejected` (the platform has no reaction API, or it isn't
+    /// implemented for this connector). The subscriber treats a reaction
+    /// failure as non-fatal.
+    async fn react(
+        &self,
+        _conversation_id: &str,
+        _message_id: &str,
+        _emoji: &str,
+    ) -> Result<(), ChannelError> {
+        Err(ChannelError::Rejected("reactions unsupported".to_string()))
     }
 
     /// Handle an inbound webhook HTTP request routed to this channel by

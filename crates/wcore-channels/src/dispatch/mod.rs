@@ -24,7 +24,8 @@ pub mod dedupe;
 pub mod session_key;
 
 pub use access::{
-    decide_access, AccessDecision, ChannelToolPosture, DmPolicy, GroupPolicy, InboundPolicy,
+    decide_access, AccessDecision, AckMode, ChannelToolPosture, DmPolicy, GroupPolicy,
+    InboundPolicy,
 };
 pub use admission::{classify, TurnAdmission};
 pub use dedupe::{DedupeCache, DedupeKey};
