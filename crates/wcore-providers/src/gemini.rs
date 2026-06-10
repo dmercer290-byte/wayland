@@ -620,27 +620,23 @@ pub(crate) async fn process_sse_stream(
         // M4: cap the buffer so a delimiter-less stream cannot exhaust memory.
         if buffer.len() > MAX_SSE_BUFFER_BYTES {
             return Err(ProviderError::Parse(format!(
-                "SSE frame exceeded {MAX_SSE_BUFFER_BYTES} bytes without a \\n\\n delimiter"
+                "SSE frame exceeded {MAX_SSE_BUFFER_BYTES} bytes without a blank-line delimiter"
             )));
         }
 
-        // SSE frame boundary is "\n\n".
-        while let Some(end) = buffer.find("\n\n") {
-            let frame = buffer[..end].to_string();
-            buffer = buffer[end + 2..].to_string();
-
-            for line in frame.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
-                    dump_response_chunk(debug, data);
-                    let events = parse_sse_chunk(data, &mut state);
-                    for event in events {
-                        if matches!(event, LlmEvent::Error(_)) {
-                            error_seen = true;
-                        }
-                        if tx.send(event).await.is_err() {
-                            return Ok(()); // receiver dropped
-                        }
-                    }
+        // Drain every complete frame now buffered, forwarding the events each
+        // produced. SSE frame boundaries and the `data:` lines within them are
+        // resolved by `drain_complete_frames` (see its doc for the CRLF-vs-LF
+        // delimiter handling — current Gemini models use CRLF, older ones LF).
+        for data in drain_complete_frames(&mut buffer) {
+            dump_response_chunk(debug, &data);
+            let events = parse_sse_chunk(&data, &mut state);
+            for event in events {
+                if matches!(event, LlmEvent::Error(_)) {
+                    error_seen = true;
+                }
+                if tx.send(event).await.is_err() {
+                    return Ok(()); // receiver dropped
                 }
             }
         }
@@ -681,6 +677,52 @@ pub(crate) async fn process_sse_stream(
 /// Maximum size a single unterminated SSE frame may reach (M4). 1 MiB is far
 /// above any legitimate Gemini SSE frame.
 const MAX_SSE_BUFFER_BYTES: usize = 1024 * 1024;
+
+/// Locate the earliest SSE frame boundary (a blank line) in `buffer`.
+///
+/// Returns `(start_byte_offset, delimiter_len)` where `start_byte_offset` is
+/// the byte index of the first delimiter byte and `delimiter_len` is how many
+/// bytes the delimiter spans (so the next frame begins at
+/// `start_byte_offset + delimiter_len`).
+///
+/// SSE frames are separated by a blank line. Servers differ on line endings:
+/// current Gemini models (gemini-2.5-flash, gemini-flash-latest) use CRLF, so
+/// the boundary is `\r\n\r\n` (4 bytes); older models used LF, giving `\n\n`
+/// (2 bytes). We scan for whichever boundary appears first and report its
+/// span. Both delimiters are ASCII, so byte offsets are valid `str` indices.
+fn find_frame_boundary(buffer: &str) -> Option<(usize, usize)> {
+    let crlf = buffer.find("\r\n\r\n").map(|i| (i, 4usize));
+    let lf = buffer.find("\n\n").map(|i| (i, 2usize));
+    match (crlf, lf) {
+        (Some(c), Some(l)) => Some(if c.0 <= l.0 { c } else { l }),
+        (Some(c), None) => Some(c),
+        (None, Some(l)) => Some(l),
+        (None, None) => None,
+    }
+}
+
+/// Split every complete SSE frame off the front of `buffer` and return the
+/// `data:` payloads they carry, in order. Incomplete trailing bytes (a partial
+/// frame not yet terminated by a blank line) are left in `buffer` for the next
+/// chunk to complete.
+///
+/// A frame may carry multiple lines; only `data: …` lines yield payloads
+/// (`event:`/`id:`/`:`-comment lines are skipped, per SSE). `str::lines`
+/// strips the trailing `\r` of a CRLF line ending, so a `data: {...}\r` line
+/// inside a CRLF-framed stream still produces the bare JSON payload.
+fn drain_complete_frames(buffer: &mut String) -> Vec<String> {
+    let mut payloads = Vec::new();
+    while let Some((end, delim_len)) = find_frame_boundary(buffer) {
+        let frame = buffer[..end].to_string();
+        *buffer = buffer[end + delim_len..].to_string();
+        for line in frame.lines() {
+            if let Some(data) = line.strip_prefix("data: ") {
+                payloads.push(data.to_string());
+            }
+        }
+    }
+    payloads
+}
 
 /// Parse one SSE `data:` payload into zero or more `LlmEvent`s.
 pub(crate) fn parse_sse_chunk(data: &str, state: &mut GeminiStreamState) -> Vec<LlmEvent> {
@@ -1414,6 +1456,226 @@ mod tests {
         assert_eq!(
             params["properties"]["pages"]["type"], "integer",
             "union type [integer, null] must be collapsed to 'integer'"
+        );
+    }
+
+    // --- SSE frame delimiter / stream-completion (CRLF regression) ----------
+
+    /// Mirror `process_sse_stream`'s buffered split + terminal logic over a
+    /// captured byte stream, WITHOUT a `reqwest::Response`. Feeds `raw` in
+    /// arbitrary slices to also exercise mid-delimiter chunk boundaries.
+    /// Returns the forwarded events plus the terminal outcome the real
+    /// function would derive from `final_finish_reason` / `error_seen`.
+    fn drive_stream(raw: &[u8], chunk_size: usize) -> (Vec<LlmEvent>, Result<Option<LlmEvent>, ()>) {
+        let mut state = GeminiStreamState::default();
+        let mut buffer = String::new();
+        let mut events: Vec<LlmEvent> = Vec::new();
+        let mut error_seen = false;
+
+        let text = std::str::from_utf8(raw).expect("fixture is valid utf8");
+        let mut rest = text;
+        while !rest.is_empty() {
+            let take = chunk_size.min(rest.len());
+            // Avoid splitting a multi-byte char; fixtures here are ASCII so
+            // `take` is always a char boundary, but guard anyway.
+            let take = (take..=rest.len())
+                .find(|&n| rest.is_char_boundary(n))
+                .unwrap_or(rest.len());
+            buffer.push_str(&rest[..take]);
+            rest = &rest[take..];
+            for data in drain_complete_frames(&mut buffer) {
+                for event in parse_sse_chunk(&data, &mut state) {
+                    if matches!(event, LlmEvent::Error(_)) {
+                        error_seen = true;
+                    }
+                    events.push(event);
+                }
+            }
+        }
+
+        // Terminal logic, identical to `process_sse_stream`'s tail.
+        if let Some(raw) = state.final_finish_reason.take() {
+            let (stop_reason, finish_reason) =
+                map_gemini_finish_reason(&raw, state.saw_tool_call);
+            let done = LlmEvent::Done {
+                stop_reason,
+                finish_reason,
+                usage: TokenUsage {
+                    input_tokens: state.input_tokens,
+                    output_tokens: state.output_tokens,
+                    cache_creation_tokens: 0,
+                    cache_read_tokens: state.cache_read_tokens,
+                },
+            };
+            return (events, Ok(Some(done)));
+        }
+        if !error_seen {
+            return (events, Err(())); // truncation error
+        }
+        (events, Ok(None))
+    }
+
+    #[test]
+    fn find_frame_boundary_matches_crlf_and_lf_and_earliest() {
+        // CRLF blank line is a 4-byte boundary; LF is 2-byte.
+        assert_eq!(find_frame_boundary("data: a\r\n\r\nrest"), Some((7, 4)));
+        assert_eq!(find_frame_boundary("data: a\n\nrest"), Some((7, 2)));
+        // No blank line yet → no boundary (partial frame stays buffered).
+        assert_eq!(find_frame_boundary("data: a\r\nstill-going"), None);
+        // Earliest boundary wins when both forms appear.
+        let (idx, len) = find_frame_boundary("x\n\ny\r\n\r\nz").unwrap();
+        assert_eq!((idx, len), (1, 2));
+    }
+
+    #[test]
+    fn drain_complete_frames_leaves_partial_trailing_frame_buffered() {
+        let mut buffer =
+            "data: {\"a\":1}\r\n\r\ndata: {\"b\":2}\r\n\r\ndata: {\"c\":".to_string();
+        let payloads = drain_complete_frames(&mut buffer);
+        assert_eq!(payloads, vec!["{\"a\":1}", "{\"b\":2}"]);
+        // The incomplete third frame is retained for the next chunk.
+        assert_eq!(buffer, "data: {\"c\":");
+    }
+
+    /// Captured verbatim from the live `gemini-2.5-flash` API
+    /// (`:streamGenerateContent?alt=sse`) with a tool declared and a simple
+    /// user message. Two CRLF-delimited frames: a text frame, then a terminal
+    /// frame carrying `finishReason: "STOP"` + `usageMetadata`. Real model
+    /// emits the blank-line separator as `\r\n\r\n`, which is exactly what the
+    /// old `find("\n\n")` split missed.
+    const GEMINI_25_FLASH_CRLF_SSE: &str = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Four.\"}],\"role\": \"model\"},\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 51,\"candidatesTokenCount\": 2,\"totalTokenCount\": 53},\"modelVersion\": \"gemini-2.5-flash\",\"responseId\": \"ag4pavQTzLrj4Q-XkKnZBA\"}\r\n\r\ndata: {\"candidates\": [{\"content\": {\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 51,\"candidatesTokenCount\": 2,\"totalTokenCount\": 53},\"modelVersion\": \"gemini-2.5-flash\",\"responseId\": \"ag4pavQTzLrj4Q-XkKnZBA\"}\r\n\r\n";
+
+    #[test]
+    fn crlf_framed_flash_stream_completes_with_stop_and_does_not_truncate() {
+        // Regression: current Gemini models frame events with `\r\n\r\n`. The
+        // old split on `\n\n` never matched, leaving everything buffered and
+        // raising "closed before a finishReason" on a fully-complete response.
+        let (events, terminal) = drive_stream(GEMINI_25_FLASH_CRLF_SSE.as_bytes(), 4096);
+
+        // The text delta was parsed (it would have been lost when the frame
+        // never split).
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, LlmEvent::TextDelta(t) if t == "Four.")),
+            "expected the model text to be emitted, got {events:?}"
+        );
+
+        // Terminal is a clean Done(STOP) — NOT the truncation error.
+        match terminal {
+            Ok(Some(LlmEvent::Done {
+                stop_reason,
+                finish_reason,
+                usage,
+            })) => {
+                assert_eq!(stop_reason, StopReason::EndTurn);
+                assert_eq!(finish_reason, FinishReason::Stop);
+                assert_eq!(usage.input_tokens, 51);
+                assert_eq!(usage.output_tokens, 2);
+            }
+            other => panic!("expected Done(STOP), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn crlf_stream_completes_even_when_delimiter_is_split_across_chunks() {
+        // The CRLF boundary can arrive split across TCP reads (e.g. `\r\n`
+        // then `\r\n`). Tiny chunks force that; completion must still fire.
+        let (events, terminal) = drive_stream(GEMINI_25_FLASH_CRLF_SSE.as_bytes(), 1);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, LlmEvent::TextDelta(t) if t == "Four.")),
+        );
+        assert!(
+            matches!(
+                terminal,
+                Ok(Some(LlmEvent::Done {
+                    finish_reason: FinishReason::Stop,
+                    ..
+                }))
+            ),
+            "byte-at-a-time CRLF stream must still complete cleanly"
+        );
+    }
+
+    /// Captured shape for a thinking-class tool call: a `thought: true` text
+    /// frame, then a terminal frame with a `functionCall` + `thoughtSignature`
+    /// and `finishReason: "STOP"`. CRLF-delimited, as the live API emits.
+    const GEMINI_25_FLASH_CRLF_TOOLCALL_SSE: &str = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"Planning the call.\",\"thought\": true}],\"role\": \"model\"},\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 48,\"thoughtsTokenCount\": 40,\"totalTokenCount\": 88},\"modelVersion\": \"gemini-2.5-flash\"}\r\n\r\ndata: {\"candidates\": [{\"content\": {\"parts\": [{\"functionCall\": {\"name\": \"get_weather\",\"args\": {\"city\": \"Paris\"}},\"thoughtSignature\": \"sig-real\"}],\"role\": \"model\"},\"finishReason\": \"STOP\",\"index\": 0}],\"usageMetadata\": {\"promptTokenCount\": 48,\"candidatesTokenCount\": 14,\"totalTokenCount\": 102},\"modelVersion\": \"gemini-2.5-flash\"}\r\n\r\n";
+
+    #[test]
+    fn crlf_thinking_tool_call_stream_emits_thinking_tooluse_and_tool_stop() {
+        let (events, terminal) =
+            drive_stream(GEMINI_25_FLASH_CRLF_TOOLCALL_SSE.as_bytes(), 4096);
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, LlmEvent::ThinkingDelta(t) if t == "Planning the call.")),
+            "thought part must surface as ThinkingDelta, got {events:?}"
+        );
+        match events.iter().find(|e| matches!(e, LlmEvent::ToolUse { .. })) {
+            Some(LlmEvent::ToolUse {
+                name, input, extra, ..
+            }) => {
+                assert_eq!(name, "get_weather");
+                assert_eq!(input["city"], "Paris");
+                assert_eq!(
+                    extra.as_ref().expect("signature round-trips")["thoughtSignature"],
+                    "sig-real"
+                );
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+        // STOP with a tool call maps to ToolUse, not EndTurn.
+        match terminal {
+            Ok(Some(LlmEvent::Done {
+                stop_reason,
+                finish_reason,
+                ..
+            })) => {
+                assert_eq!(stop_reason, StopReason::ToolUse);
+                assert_eq!(finish_reason, FinishReason::Stop);
+            }
+            other => panic!("expected Done(ToolUse/STOP), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lf_framed_stream_still_completes_for_legacy_models() {
+        // Back-compat: older models used bare `\n\n`. Must still complete.
+        let lf = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]}}]}\n\ndata: {\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":1}}\n\n";
+        let (events, terminal) = drive_stream(lf.as_bytes(), 4096);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, LlmEvent::TextDelta(t) if t == "hi")),
+        );
+        assert!(matches!(
+            terminal,
+            Ok(Some(LlmEvent::Done {
+                finish_reason: FinishReason::Stop,
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn genuinely_truncated_crlf_stream_still_errors() {
+        // A real dropped stream (text frame, then nothing — no finishReason)
+        // must NOT be masked. The fix only stops FALSE truncation reports.
+        let truncated =
+            "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \"par\"}],\"role\": \"model\"},\"index\": 0}]}\r\n\r\n";
+        let (events, terminal) = drive_stream(truncated.as_bytes(), 4096);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, LlmEvent::TextDelta(t) if t == "par")),
+        );
+        assert!(
+            matches!(terminal, Err(())),
+            "a stream that closes before any finishReason must still error"
         );
     }
 }
