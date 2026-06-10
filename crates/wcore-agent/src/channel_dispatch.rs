@@ -49,11 +49,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
+use wcore_channels::ChannelToolPosture;
 use wcore_config::config::Config;
 use wcore_providers::LlmProvider;
 
 use crate::bootstrap::AgentBootstrap;
 use crate::channel_inbound::TurnDispatcher;
+use crate::channel_tools::ChannelToolScope;
 use crate::engine::AgentEngine;
 use crate::output::OutputSink;
 use crate::session::SessionManager;
@@ -64,6 +66,11 @@ pub struct ChannelTurnDispatcher {
     config: Config,
     cwd: String,
     provider: Arc<dyn LlmProvider>,
+    /// Per-channel tool posture, keyed by `channel_name`. A channel absent
+    /// from this map falls back to the safe `Conversational` posture rooted
+    /// at `cwd` — so an unconfigured channel can never accidentally get host
+    /// filesystem/shell access.
+    postures: HashMap<String, ChannelToolScope>,
     /// Pool keyed by the HASHED session id (not the raw kernel session key,
     /// which contains colons the `SessionManager` rejects). Each value is an
     /// `Arc<Mutex<AgentEngine>>` so concurrent turns for the SAME session
@@ -73,15 +80,34 @@ pub struct ChannelTurnDispatcher {
 
 impl ChannelTurnDispatcher {
     /// Build a dispatcher over a resolved [`Config`], the working directory
-    /// new sessions run in, and the shared provider. Tool auto-approval is
-    /// always forced OFF for the per-session engines (see [`Self::engine_for`]).
-    pub fn new(config: Config, cwd: String, provider: Arc<dyn LlmProvider>) -> Self {
+    /// new sessions run in, the shared provider, and the per-channel tool
+    /// postures. Tool auto-approval is always forced OFF for the per-session
+    /// engines (see [`Self::engine_for`]); the posture additionally
+    /// reduces/jails the toolset itself.
+    pub fn new(
+        config: Config,
+        cwd: String,
+        provider: Arc<dyn LlmProvider>,
+        postures: HashMap<String, ChannelToolScope>,
+    ) -> Self {
         Self {
             config,
             cwd,
             provider,
+            postures,
             engines: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Resolve the tool scope for `channel_name`, defaulting to the safe
+    /// `Conversational` posture rooted at `cwd` for an unconfigured channel.
+    fn scope_for(&self, channel_name: &str) -> ChannelToolScope {
+        self.postures.get(channel_name).cloned().unwrap_or_else(|| {
+            ChannelToolScope {
+                posture: ChannelToolPosture::Conversational,
+                workspace_root: std::path::PathBuf::from(&self.cwd),
+            }
+        })
     }
 
     /// Map a kernel session key (e.g. `agent:main:slack:dm:c1`) to a session
@@ -110,7 +136,11 @@ impl ChannelTurnDispatcher {
 
     /// Fetch (or build + cache) the engine for `hashed_id`. One engine per
     /// session preserves conversation history across turns.
-    async fn engine_for(&self, hashed_id: &str) -> anyhow::Result<Arc<Mutex<AgentEngine>>> {
+    async fn engine_for(
+        &self,
+        hashed_id: &str,
+        scope: &ChannelToolScope,
+    ) -> anyhow::Result<Arc<Mutex<AgentEngine>>> {
         {
             let pool = self.engines.lock().await;
             if let Some(existing) = pool.get(hashed_id) {
@@ -159,7 +189,10 @@ impl ChannelTurnDispatcher {
             .provider(self.provider.clone())
             // MANDATORY: stop the per-session engine from re-registering
             // channels / spawning pollers / spawning another subscriber.
-            .without_channels(true);
+            .without_channels(true)
+            // SECURITY — reduce/jail the toolset for this REMOTE sender so
+            // a channel turn cannot reach host filesystem/shell tools.
+            .channel_tool_posture(scope.clone());
         if let Some(session) = existing {
             bootstrap = bootstrap.resume(session);
         }
@@ -196,11 +229,13 @@ impl TurnDispatcher for ChannelTurnDispatcher {
         msg: &wcore_channels::IncomingMessage,
     ) -> anyhow::Result<Option<String>> {
         let hashed = Self::hashed_session_id(session_key);
+        let scope = self.scope_for(channel_name);
         tracing::debug!(
             channel = %channel_name,
+            posture = ?scope.posture,
             "channel turn dispatch"
         );
-        let engine = self.engine_for(&hashed).await?;
+        let engine = self.engine_for(&hashed, &scope).await?;
         // The inbound message id doubles as the turn's msg_id (stable per
         // inbound event); the dedupe cache upstream already guarantees one
         // dispatch per id.

@@ -24,8 +24,8 @@ pub mod outgoing;
 
 pub use config::{ChannelConfig, ChannelConfigLoader};
 pub use dispatch::{
-    build_session_key, classify, decide_access, evaluate, AccessDecision, DedupeCache, DedupeKey,
-    DispatchOutcome, DmPolicy, GroupPolicy, InboundPolicy, TurnAdmission,
+    build_session_key, classify, decide_access, evaluate, AccessDecision, ChannelToolPosture,
+    DedupeCache, DedupeKey, DispatchOutcome, DmPolicy, GroupPolicy, InboundPolicy, TurnAdmission,
 };
 pub use error::ChannelError;
 pub use event::{

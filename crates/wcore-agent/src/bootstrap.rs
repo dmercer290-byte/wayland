@@ -141,6 +141,12 @@ pub struct AgentBootstrap {
     /// turns. Off by default so per-session / sub-agent / ACP builds never
     /// spawn it.
     enable_inbound_dispatch: bool,
+    /// Channel tool posture for THIS engine. `Some` only for per-session
+    /// engines built by `ChannelTurnDispatcher` — it reduces/jails the
+    /// toolset so a remote channel sender cannot reach host filesystem /
+    /// shell tools. `None` (the default, and always the case for the local
+    /// CLI / TUI / json-stream engines) leaves the full toolset intact.
+    channel_tool_posture: Option<crate::channel_tools::ChannelToolScope>,
 }
 
 impl AgentBootstrap {
@@ -156,7 +162,21 @@ impl AgentBootstrap {
             span_sink: None,
             without_channels: false,
             enable_inbound_dispatch: false,
+            channel_tool_posture: None,
         }
+    }
+
+    /// Restrict (and, for `Workspace`, jail) the toolset of a
+    /// channel-originated engine. Set only by `ChannelTurnDispatcher` for
+    /// its per-session engines; the local CLI/TUI/json-stream engines leave
+    /// this `None` and keep the full toolset. See
+    /// [`crate::channel_tools::apply_posture`].
+    pub fn channel_tool_posture(
+        mut self,
+        scope: crate::channel_tools::ChannelToolScope,
+    ) -> Self {
+        self.channel_tool_posture = Some(scope);
+        self
     }
 
     /// Phase 1B-2 — skip the entire channel block (registration, start_all,
@@ -1750,6 +1770,22 @@ impl AgentBootstrap {
             }
         };
 
+        // Channel tool posture — for a per-session channel engine, reduce
+        // (and, in `Workspace`, jail) the toolset BEFORE it moves into the
+        // engine, so a remote sender cannot reach host filesystem/shell
+        // tools. No-op for the local CLI/TUI/json-stream engines (posture
+        // `None`) and for `Full`. Runs after all built-in registration; MCP
+        // tools survive every posture, so post-construction MCP wiring is
+        // unaffected.
+        if let Some(scope) = self.channel_tool_posture.as_ref() {
+            crate::channel_tools::apply_posture(&mut registry, scope);
+            tracing::info!(
+                target: "wcore_agent::bootstrap",
+                posture = ?scope.posture,
+                "channel engine tool posture applied"
+            );
+        }
+
         let mut engine = if let Some(session) = self.resume_session {
             AgentEngine::resume_with_provider(
                 provider.clone(),
@@ -2118,23 +2154,57 @@ impl AgentBootstrap {
             // early inbound event is dropped by the broadcast. Only when the
             // caller opted in via `enable_inbound_dispatch`.
             inbound_subscriber = if self.enable_inbound_dispatch {
-                // Per-channel inbound policies, keyed by channel name. A channel
-                // absent from this map uses the fail-closed default.
-                let policies: std::collections::HashMap<
-                    String,
-                    wcore_channels::InboundPolicy,
-                > = wcore_channels::config::ChannelConfigLoader::new(
+                // Load each channel's config ONCE, then derive two maps from
+                // it: the per-channel access policy (for the subscriber) and
+                // the per-channel tool posture (for the dispatcher's
+                // per-session engines). A channel absent from these maps uses
+                // the fail-closed access default and the safe Conversational
+                // tool posture respectively.
+                let channel_configs = wcore_channels::config::ChannelConfigLoader::new(
                     wcore_channels::config::ChannelConfigLoader::default_root(),
                 )
                 .load_all()
-                .map(|v| v.into_iter().map(|c| (c.name, c.inbound)).collect())
                 .unwrap_or_default();
+
+                // Resolve each channel's tool posture into a concrete scope.
+                // `Workspace` jails to the channel's `tool_workspace_root`
+                // when set, else this engine's working directory.
+                let postures: std::collections::HashMap<
+                    String,
+                    crate::channel_tools::ChannelToolScope,
+                > = channel_configs
+                    .iter()
+                    .map(|c| {
+                        let root = c
+                            .inbound
+                            .tool_workspace_root
+                            .clone()
+                            .map(std::path::PathBuf::from)
+                            .unwrap_or_else(|| std::path::PathBuf::from(&self.workspace));
+                        (
+                            c.name.clone(),
+                            crate::channel_tools::ChannelToolScope {
+                                posture: c.inbound.tools,
+                                workspace_root: root,
+                            },
+                        )
+                    })
+                    .collect();
+
+                let policies: std::collections::HashMap<
+                    String,
+                    wcore_channels::InboundPolicy,
+                > = channel_configs
+                    .into_iter()
+                    .map(|c| (c.name, c.inbound))
+                    .collect();
 
                 let dispatcher: Arc<dyn crate::channel_inbound::TurnDispatcher> =
                     Arc::new(crate::channel_dispatch::ChannelTurnDispatcher::new(
                         config_for_dispatch,
                         self.workspace.clone(),
                         provider.clone(),
+                        postures,
                     ));
                 let subscriber = crate::channel_inbound::InboundSubscriber::new(
                     std::sync::Arc::clone(&lifted),

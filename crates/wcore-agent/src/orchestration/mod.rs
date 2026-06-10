@@ -672,10 +672,18 @@ async fn execute_single_with_streaming(
             // giving a cooperative tool the chance to wind down before
             // the future is dropped.
             let call_cancel = cancel.child_token();
+            // The filesystem tools see is the registry's configured vfs when
+            // one is installed (e.g. a channel `Workspace` engine pins a
+            // `SandboxedFs` jail here), else an unconfined `RealFs` — the
+            // local-CLI default. Carried on the registry so no new parameter
+            // has to thread through the whole dispatch stack.
+            let tool_vfs = registry
+                .tool_vfs()
+                .unwrap_or_else(|| std::sync::Arc::new(wcore_tools::vfs::RealFs));
             let mut tool_ctx = wcore_tools::context::ToolContext::new(
                 id.clone(),
                 call_cancel.clone(),
-                std::sync::Arc::new(wcore_tools::vfs::RealFs),
+                tool_vfs,
                 None,
                 std::sync::Arc::new(wcore_tools::NullToolOutputSink),
             );

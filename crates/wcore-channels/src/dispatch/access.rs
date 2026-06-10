@@ -29,6 +29,36 @@ pub enum DmPolicy {
     Disabled,
 }
 
+/// Filesystem/shell posture for a channel-originated agent turn.
+///
+/// A channel sender is REMOTE and (depending on the access policy) may be
+/// untrusted, so the per-conversation agent engine must not inherit the
+/// local CLI's full host access. This enum selects which built-in tools
+/// the channel engine is built with — enforced at tool-registration time
+/// in `wcore-agent` (the `wcore-channels` crate only carries the config).
+///
+/// **Default is [`Conversational`](ChannelToolPosture::Conversational)** —
+/// the safe floor: no host filesystem, no shell. Operators opt UP to
+/// `Workspace` (jailed filesystem) or `Full` (host-wide) per channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelToolPosture {
+    /// No filesystem and no shell. Only conversational/network tools
+    /// (and operator-wired MCP servers) are exposed. The safe default
+    /// for remote chat senders — closes host-secret exfiltration.
+    #[default]
+    Conversational,
+    /// Filesystem tools (Read/Write/Edit/Grep/Glob) are available but
+    /// JAILED to a workspace root via `SandboxedFs`; shell/exec tools
+    /// (Bash, git, kubectl, …) remain unavailable because they bypass the
+    /// jail. Lets a channel agent do real, confined filesystem work.
+    Workspace,
+    /// Full host access — every tool, no jail. Identical to a local CLI
+    /// session. Dangerous for publicly-reachable channels; explicit
+    /// opt-in only.
+    Full,
+}
+
 /// Policy governing whether group/channel messages are accepted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +113,16 @@ pub struct InboundPolicy {
     /// [`crate::dispatch::build_session_key`].
     #[serde(default)]
     pub thread_sessions_per_user: bool,
+    /// Filesystem/shell posture for this channel's agent turns. Defaults
+    /// to [`ChannelToolPosture::Conversational`] (no host fs/shell) so a
+    /// remote sender cannot read host secrets. See [`ChannelToolPosture`].
+    #[serde(default)]
+    pub tools: ChannelToolPosture,
+    /// Root the `Workspace` posture jails filesystem tools to. Ignored
+    /// for `Conversational`/`Full`. When `None`, the agent engine's
+    /// working directory is used as the jail root.
+    #[serde(default)]
+    pub tool_workspace_root: Option<String>,
 }
 
 fn default_dm_policy() -> DmPolicy {
@@ -110,6 +150,8 @@ impl Default for InboundPolicy {
             sender_allowlist: Vec::new(),
             group_sessions_per_user: true,
             thread_sessions_per_user: false,
+            tools: ChannelToolPosture::Conversational,
+            tool_workspace_root: None,
         }
     }
 }
@@ -204,6 +246,9 @@ mod tests {
         assert!(p.sender_allowlist.is_empty());
         assert!(p.group_sessions_per_user);
         assert!(!p.thread_sessions_per_user);
+        // Tool posture defaults to the safe, no-host-access floor.
+        assert_eq!(p.tools, ChannelToolPosture::Conversational);
+        assert!(p.tool_workspace_root.is_none());
         // A DM under the default policy is denied (empty allowlist).
         assert!(matches!(
             decide_access(&dm_from("u1"), &p),
@@ -366,6 +411,22 @@ mod tests {
         let mut m = group_from("c1", "u1");
         m.chat_type = ChatType::Channel;
         assert_eq!(decide_access(&m, &p), AccessDecision::Allow);
+    }
+
+    #[test]
+    fn tool_posture_parses_and_defaults() {
+        // Absent `tools` key -> Conversational (the fail-closed default),
+        // even though `deny_unknown_fields` is set.
+        let p: InboundPolicy = toml::from_str("dm = \"open\"").unwrap();
+        assert_eq!(p.tools, ChannelToolPosture::Conversational);
+        // Each posture string round-trips.
+        let w: InboundPolicy =
+            toml::from_str("dm = \"open\"\ntools = \"workspace\"\ntool_workspace_root = \"/srv/agent\"")
+                .unwrap();
+        assert_eq!(w.tools, ChannelToolPosture::Workspace);
+        assert_eq!(w.tool_workspace_root.as_deref(), Some("/srv/agent"));
+        let f: InboundPolicy = toml::from_str("dm = \"open\"\ntools = \"full\"").unwrap();
+        assert_eq!(f.tools, ChannelToolPosture::Full);
     }
 
     #[test]

@@ -20,6 +20,10 @@ pub mod cancel;
 // drives an agent turn through the TurnDispatcher seam, then sends the
 // reply back. Completes the inbound path that was structurally missing.
 pub mod channel_inbound;
+// Channel tool posture: maps a per-channel `ChannelToolPosture` onto a
+// reduced/jailed toolset for channel-originated engines (closes remote
+// host-secret exfiltration). Consumed by `bootstrap` + `channel_dispatch`.
+pub mod channel_tools;
 // Phase 1B-2 — the real engine-backed `TurnDispatcher`. Builds one
 // per-session `AgentEngine` (via AgentBootstrap, `.without_channels(true)`
 // to avoid channel recursion) and drives an agent turn from each admitted

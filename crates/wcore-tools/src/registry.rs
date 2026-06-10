@@ -23,6 +23,16 @@ pub struct ToolRegistry {
     /// so the registry can be shared across async call sites without
     /// requiring `&mut self` at dispatch time.
     breakers: Arc<RwLock<HashMap<String, CircuitBreaker>>>,
+    /// Optional filesystem the orchestration dispatcher routes every
+    /// tool's `ToolContext` through. `None` (the default) means the
+    /// dispatcher uses an unconfined `RealFs` — the local-CLI behaviour.
+    /// A channel-originated engine in `Workspace` posture sets this to a
+    /// `SandboxedFs` rooted at its workspace so `Read`/`Grep`/`Glob`
+    /// (which honour `ctx.vfs`) cannot escape the jail. Carried on the
+    /// registry — which is already threaded into every orchestration
+    /// `execute_*` call — to avoid plumbing a new parameter through the
+    /// whole dispatch stack.
+    tool_vfs: Option<Arc<dyn crate::vfs::VirtualFs>>,
 }
 
 impl Default for ToolRegistry {
@@ -35,7 +45,45 @@ impl ToolRegistry {
         Self {
             tools: Vec::new(),
             breakers: Arc::new(RwLock::new(HashMap::new())),
+            tool_vfs: None,
         }
+    }
+
+    /// Set the filesystem every dispatched tool's `ToolContext` is built
+    /// with. See the [`tool_vfs`](Self::tool_vfs) field. Used by the
+    /// channel `Workspace` posture to install a `SandboxedFs` jail.
+    pub fn set_tool_vfs(&mut self, vfs: Arc<dyn crate::vfs::VirtualFs>) {
+        self.tool_vfs = Some(vfs);
+    }
+
+    /// The filesystem the dispatcher should build tool contexts with, if
+    /// one was installed. `None` means use the default `RealFs`.
+    pub fn tool_vfs(&self) -> Option<Arc<dyn crate::vfs::VirtualFs>> {
+        self.tool_vfs.clone()
+    }
+
+    /// Drop every registered tool for which `keep` returns `false`.
+    ///
+    /// Applied once, AFTER the full tool set is registered, to enforce a
+    /// reduced toolset on a restricted engine (e.g. a channel-originated
+    /// engine that must not expose host filesystem/shell tools to a remote
+    /// sender). Filtering at the registry — rather than only omitting tools
+    /// from the LLM schema — means a dropped tool is also un-dispatchable:
+    /// `get()` returns `None`, so even a hallucinated call cannot reach it.
+    /// The matching circuit-breaker entries are pruned too.
+    pub fn retain<F>(&mut self, keep: F)
+    where
+        F: Fn(&dyn Tool) -> bool,
+    {
+        let mut kept_names: Vec<String> = Vec::with_capacity(self.tools.len());
+        self.tools.retain(|t| {
+            let keep_it = keep(t.as_ref());
+            if keep_it {
+                kept_names.push(t.name().to_string());
+            }
+            keep_it
+        });
+        self.breakers.write().retain(|name, _| kept_names.contains(name));
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
@@ -374,6 +422,39 @@ mod tests {
         for def in &defs {
             assert_eq!(def.input_schema, expected_schema);
         }
+    }
+
+    // --- retain / tool_vfs tests ---
+
+    #[test]
+    fn retain_drops_unmatched_tools_and_prunes_breakers() {
+        let mut registry = ToolRegistry::new();
+        registry.register(make_tool_with_category("Read", "fs read", ToolCategory::Info));
+        registry.register(make_tool_with_category("Bash", "shell", ToolCategory::Exec));
+        registry.register(make_tool_with_category("web", "net", ToolCategory::Info));
+
+        // Keep only "web".
+        registry.retain(|t| t.name() == "web");
+
+        let mut names = registry.tool_names();
+        names.sort();
+        assert_eq!(names, vec!["web"], "only the kept tool survives");
+        // Dropped tools are un-dispatchable, not merely hidden from the schema.
+        assert!(registry.get("Read").is_none());
+        assert!(registry.get("Bash").is_none());
+        // Breaker entries for dropped tools are pruned; the survivor keeps one.
+        assert!(!registry.breaker_is_open("web"), "survivor breaker intact");
+        assert!(registry.breakers.read().contains_key("web"));
+        assert!(!registry.breakers.read().contains_key("Read"));
+        assert!(!registry.breakers.read().contains_key("Bash"));
+    }
+
+    #[test]
+    fn tool_vfs_defaults_none_and_round_trips() {
+        let mut registry = ToolRegistry::new();
+        assert!(registry.tool_vfs().is_none(), "default is unconfined RealFs");
+        registry.set_tool_vfs(Arc::new(crate::vfs::RealFs));
+        assert!(registry.tool_vfs().is_some(), "installed vfs is observable");
     }
 
     // --- to_tool_defs_filtered tests ---

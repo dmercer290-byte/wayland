@@ -2101,10 +2101,17 @@ impl AgentEngine {
     /// `call_id` is left empty in the snapshot; production dispatch
     /// substitutes the live ToolUse id per call.
     pub fn current_tool_context(&self) -> wcore_tools::context::ToolContext {
+        // Mirror the production dispatcher: build the context with the
+        // registry's configured vfs (a `SandboxedFs` jail for a channel
+        // `Workspace` engine), falling back to unconfined `RealFs`.
+        let vfs = self
+            .tools
+            .tool_vfs()
+            .unwrap_or_else(|| std::sync::Arc::new(wcore_tools::vfs::RealFs));
         let mut ctx = wcore_tools::context::ToolContext::new(
             String::new(),
             wcore_tools::context::ToolContext::test_default().cancel,
-            std::sync::Arc::new(wcore_tools::vfs::RealFs),
+            vfs,
             None,
             std::sync::Arc::new(wcore_tools::NullToolOutputSink),
         );
