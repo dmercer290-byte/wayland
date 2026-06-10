@@ -1565,8 +1565,14 @@ export const CATALOG_DATA_VERSION = 1;
 function scheduleStartupMigration(): void {
   if (_migrationScheduled) return;
   _migrationScheduled = true;
-  app
-    .whenReady()
+  // In the standalone (non-Electron) server runtime the `electron` module is
+  // undefined, so `app` is undefined and `app.whenReady()` would throw. There
+  // is no `whenReady` gate to wait on there - storage is already initialized
+  // before the registry IPC is wired - so resolve immediately. The Electron
+  // path keeps deferring to `app.whenReady()` exactly as before.
+  const ready: Promise<unknown> =
+    typeof app?.whenReady === 'function' ? app.whenReady() : Promise.resolve();
+  ready
     .then(async () => {
       if (!_repo) return;
       try {

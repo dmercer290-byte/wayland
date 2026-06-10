@@ -35,6 +35,12 @@ import {
   sweepStalledAutonomousSteps,
   AUTONOMOUS_WATCHDOG_INTERVAL_MS,
 } from '@process/services/workflow/autonomousWatchdog';
+import { handleParentWorkflowTurn } from '@process/services/workflow/parentTurnDriver';
+import { resumeInterruptedParentRuns } from '@process/services/workflow/resumeRuns';
+import {
+  sweepStalledParentRuns,
+  PARENT_WATCHDOG_INTERVAL_MS,
+} from '@process/services/workflow/parentWatchdog';
 import { setWorkflowSessionService } from '@process/services/workflow/workflowSessionServiceSingleton';
 import { SkillLibrary } from '@process/services/skills/SkillLibrary';
 import { ProcessConfig } from '@process/utils/initStorage';
@@ -294,6 +300,62 @@ void getDatabase()
       })();
     });
 
+    // Phase 2a - the PARENT workflow driver loop. The listener above handles
+    // autonomous CHILD conversations; this one handles the workflow's OWN
+    // (parent) conversation: when its turn finishes, ask the run driver what to
+    // do next (continueRun = the BRAIN) and, on `advance`, send the next-step
+    // directive into the same conversation (the HAND). `handleParentWorkflowTurn`
+    // skips any conversation the child path already owns (carries
+    // `extra.autonomousDispatch`) so each conversation is driven by exactly one
+    // path. All errors are swallowed inside the helper.
+    //
+    // The HAND uses the same workerTaskManager send path cron uses; the directive
+    // is sent `hidden` so the control prompt never appears in the chat tape.
+    const isAutonomousChild = async (conversationId: string): Promise<boolean> => {
+      try {
+        const conv = await conversationServiceImpl.getConversation(conversationId);
+        const extra = (conv?.extra ?? {}) as Record<string, unknown>;
+        const dispatch = extra.autonomousDispatch;
+        return dispatch !== null && typeof dispatch === 'object' && !Array.isArray(dispatch);
+      } catch {
+        return false;
+      }
+    };
+    const sendWorkflowDirective = async (conversationId: string, directive: string): Promise<void> => {
+      const task = await workerTaskManager.getOrBuildTask(conversationId, { yoloMode: true });
+      await task.sendMessage({
+        content: directive,
+        input: directive,
+        msg_id: `workflow-advance-${conversationId}-${Date.now()}`,
+        hidden: true,
+      });
+    };
+    ipcBridge.conversation?.turnCompleted?.on?.((event) => {
+      void handleParentWorkflowTurn(event, {
+        service: workflowService,
+        isAutonomousChild,
+        sendDirective: sendWorkflowDirective,
+      });
+    });
+
+    // Phase 2b - boot resume. A run that was `running` with a step `now` when
+    // the app last quit is interrupted, not done. On a fresh service, re-arm
+    // each such session: in auto mode re-poke the step; in step mode surface
+    // it as `awaiting_input` so the user can resume. Pure decision is unit
+    // tested in resumeRuns.test.ts; the send wiring reuses the same HAND.
+    void resumeInterruptedParentRuns(workflowService, {
+      sendDirective: sendWorkflowDirective,
+      onRepoke: (session) => {
+        const nowStep = session.steps.find((s) => s.status === 'now');
+        void usageLogger.record({
+          eventType: 'workflow.resume_repoke',
+          metadata: { session_id: session.id, step_n: nowStep?.n ?? null, workflow_name: session.workflow_name },
+        });
+      },
+    }).catch((err) => {
+      console.warn('[initBridge] workflow boot-resume sweep failed:', err);
+    });
+
     // BUG-6 GAP-A watchdog. The completion listener above is purely event-driven:
     // a child agent that hangs without ever emitting a terminal turn would leave
     // its step `running` forever (the 194-hour ghost). Sweep periodically and
@@ -316,6 +378,29 @@ void getDatabase()
       })();
     }, AUTONOMOUS_WATCHDOG_INTERVAL_MS);
     autonomousWatchdog.unref?.();
+
+    // Phase 2b.3 - parent-run stall watchdog. The autonomous sweep above only
+    // catches steps with an `autonomous_run`; a plain in-chat parent run whose
+    // agent crashes mid-turn emits no event and would otherwise hang `running`
+    // forever. This backstop parks such a run at `awaiting_input` so the UI
+    // surfaces it as "interrupted - resume?" instead of pretending to work.
+    const parentWatchdog = setInterval(() => {
+      void (async () => {
+        try {
+          const swept = await sweepStalledParentRuns(workflowService);
+          for (const s of swept) {
+            console.warn(`[initBridge] parent watchdog parked stalled workflow run ${s.sessionId}/${s.stepN}`);
+            await usageLogger.record({
+              eventType: 'workflow.parent_run_stalled',
+              metadata: { session_id: s.sessionId, step_n: s.stepN },
+            });
+          }
+        } catch (err) {
+          console.warn('[initBridge] parent watchdog sweep failed:', err);
+        }
+      })();
+    }, PARENT_WATCHDOG_INTERVAL_MS);
+    parentWatchdog.unref?.();
   })
   .catch((error) => {
     console.error('[initBridge] Failed to initialize usage telemetry bridge:', error);

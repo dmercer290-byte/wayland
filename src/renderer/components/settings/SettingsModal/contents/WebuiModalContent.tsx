@@ -18,6 +18,7 @@ import ChannelTelegramLogo from '@/renderer/assets/channel-logos/telegram.svg';
 import ChannelWecomLogo from '@/renderer/assets/channel-logos/wecom.svg';
 import ChannelWeixinLogo from '@/renderer/assets/channel-logos/weixin.svg';
 import { isElectronDesktop } from '@/renderer/utils/platform';
+import { withCsrfToken } from '@process/webserver/middleware/csrfClient';
 import { Button, Form, Input, Message, Switch, Tooltip } from '@arco-design/web-react';
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -494,10 +495,32 @@ const WebuiModalContent: React.FC = () => {
       if (window.electronAPI?.webuiChangePassword) {
         result = await window.electronAPI.webuiChangePassword(values.newPassword, values.currentPassword);
       } else {
-        // Fallback: use bridge
-        result = await webui.changePassword.invoke({
-          newPassword: values.newPassword,
+        // Browser (headless / WebUI) fallback: call the safe HTTP route. It
+        // enforces JWT auth (from the cookie via credentials:'include'),
+        // verifies the current password, is rate-limited, and revokes all
+        // sessions on success. The webui.changePassword bridge is in the remote
+        // denylist (and lacks the current-password check), so it cannot be used
+        // here. CSRF token + JWT cookie travel exactly like the login request.
+        const response = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(
+            withCsrfToken({
+              currentPassword: values.currentPassword,
+              newPassword: values.newPassword,
+            })
+          ),
         });
+        const data = (await response.json().catch(() => ({}))) as {
+          success?: boolean;
+          error?: string;
+          details?: string[];
+        };
+        result = {
+          success: Boolean(data.success),
+          msg: data.details?.join('; ') || data.error,
+        };
       }
 
       if (result.success) {

@@ -21,7 +21,7 @@
  *    silently swallow a workflow mutation.
  */
 
-import type { StepStatus, WorkflowSession } from '@/common/types/workflowTypes';
+import type { StepStatus, WorkflowInteractivity, WorkflowSession } from '@/common/types/workflowTypes';
 import type { WorkflowUpdateSessionStatePatch } from '@/common/adapter/ipcBridge';
 import { ipcBridge } from '@/common';
 import type { WorkflowSessionService } from '@process/services/workflow/WorkflowSessionService';
@@ -54,9 +54,12 @@ function requireService(endpoint: string): WorkflowSessionService {
 /**
  * Dispatch a {@link WorkflowUpdateSessionStatePatch} to the right service
  * method. The IPC patch shape lives in `ipcBridge.ts` (SPEC §6.4); the
- * dispatcher fans the union out into discrete service calls. Renderer-driven
- * patches always carry `source = 'user'` and no dispatch id - worker-driven
- * transitions land via the W5 `dispatchAutonomousStep` path instead.
+ * dispatcher fans the union out into discrete service calls. The transition
+ * `source` is threaded from the renderer when present (`'parent'` for in-chat
+ * agent-narrated `<step>` markers, so the stepCursor leapfrog guard activates;
+ * `'user'` for explicit rail jumps) and defaults to `'user'` when omitted -
+ * the historical behaviour. Worker-driven transitions land via the W5
+ * `dispatchAutonomousStep` path instead and never carry a renderer `source`.
  */
 async function applyPatch(
   service: WorkflowSessionService,
@@ -68,7 +71,7 @@ async function applyPatch(
     return service.applyStepTransition(sessionId, {
       step_n: patch.setStepStatus.n,
       status: patch.setStepStatus.status as StepStatus,
-      source: 'user',
+      source: patch.setStepStatus.source ?? 'user',
       dispatch_id: null,
       timestamp: completedAt,
     });
@@ -85,11 +88,29 @@ async function applyPatch(
   if (patch.setSessionStatus === 'ended') {
     return service.endSession(sessionId);
   }
+  if (patch.setRunMode !== undefined) {
+    // Drive the run-state machine through the lossless service helpers so the
+    // pause/resume invariants (running<->paused, awaiting_input->running) hold:
+    //  - paused  -> pause()   (running -> paused; no-op otherwise)
+    //  - running -> resume()  (paused|awaiting_input -> running; the Continue
+    //                          affordance on a step-mode awaiting_input run)
+    //  - else    -> setRunMode() directly (e.g. terminal `done`)
+    if (patch.setRunMode === 'paused') return service.pause(sessionId);
+    if (patch.setRunMode === 'running') return service.resume(sessionId);
+    return service.setRunMode(sessionId, patch.setRunMode);
+  }
   if (patch.setBeginSent !== undefined) {
     // Forward the renderer's proposed timestamp so the round-trip lets the
     // renderer detect whether its call won the cross-mount race (otherwise
     // duplicate begin sends slip through and the agent sees two kickoffs).
     return service.markBeginSent(sessionId, patch.setBeginSent);
+  }
+  if (patch.setInteractivity !== undefined) {
+    return service.setInteractivity(sessionId, patch.setInteractivity as WorkflowInteractivity);
+  }
+  if (patch.backtrackToStep !== undefined) {
+    const { session } = await service.backtrackToStep(sessionId, patch.backtrackToStep);
+    return session;
   }
   // `setCurrentStep`, `setSessionStatus = 'active' | 'errored'`,
   // `recordAutonomousDispatch`, and `recordAutonomousResult` are reserved

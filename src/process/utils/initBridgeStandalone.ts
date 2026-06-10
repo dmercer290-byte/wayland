@@ -43,6 +43,7 @@ import { initSystemSettingsBridge } from '@process/bridge/systemSettingsBridge';
 import { initTaskBridge } from '@process/bridge/taskBridge';
 import { initSpeechToTextBridge } from '@process/bridge/speechToTextBridge';
 import { initHubBridge } from '@process/bridge/hubBridge';
+import { initModelRegistryIpc } from '@process/providers/ipc/modelRegistryIpc';
 
 logger.config({ print: true });
 
@@ -80,6 +81,16 @@ export async function initBridgeStandalone(): Promise<void> {
   initStarOfficeBridge();
   initSpeechToTextBridge();
   initHubBridge();
+
+  // Model-registry IPC powers the Models page + the model picker. The Electron
+  // bridge wires this in `bridge/index.ts`; standalone must do it too or the
+  // `modelRegistry.*` handlers (including connect) are never registered, so the
+  // Models page stays empty and boot-time env-key import has nothing to call.
+  try {
+    await initModelRegistryIpc();
+  } catch (error) {
+    console.error('[server] Failed to initialize model registry IPC:', error);
+  }
 
   // Initialize ACP detector to scan for installed CLI agents (claude, codex, etc.)
   // Must mirror Electron's initializeAcpDetector() call in src/index.ts

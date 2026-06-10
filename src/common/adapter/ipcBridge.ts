@@ -42,6 +42,9 @@ import type {
   AskRecord,
   ResolvedSkill,
   StepStatus,
+  StepTransitionSource,
+  WorkflowInteractivity,
+  WorkflowRunMode,
   WorkflowSession,
   WorkflowSessionStatus,
 } from '../types/workflowTypes';
@@ -2214,15 +2217,38 @@ export const workflow = {
 // as a sentinel so the renderer can guarantee exactly-once begin semantics
 // across Strict Mode double-mount, refresh, and back-navigation.
 export type WorkflowUpdateSessionStatePatch = {
-  setStepStatus?: { n: number; status: StepStatus; completed_at?: number };
+  /**
+   * `source` is the provenance of the transition. The renderer threads
+   * `'parent'` for in-chat `<step>` markers narrated by the agent (so the
+   * stepCursor no-forward-leapfrog guard activates) and `'user'` for explicit
+   * rail jumps. Absent → the bridge defaults to `'user'` (the historical
+   * behaviour) so existing callers are unchanged.
+   */
+  setStepStatus?: { n: number; status: StepStatus; completed_at?: number; source?: StepTransitionSource };
   setCurrentStep?: number;
   appendAsk?: AskRecord;
   answerAsk?: { askId: string; answer: string; answered_at: number };
   setSessionStatus?: WorkflowSessionStatus;
+  /**
+   * Drive the run-state machine (Phase 2c). `paused` routes to `pause()`,
+   * `running` to `resume()` (the Continue affordance on an `awaiting_input`
+   * step-mode run), and `done` to `setRunMode()` directly. Idempotent.
+   */
+  setRunMode?: WorkflowRunMode;
   recordAutonomousDispatch?: { stepN: number; dispatchId: string };
   recordAutonomousResult?: { stepN: number; success: boolean };
   /** Epoch ms when the hidden begin auto-send fired. Idempotent - service no-ops if already set. */
   setBeginSent?: number;
+  /**
+   * Flip the interactivity mode (Phase 3 collaborative surface toggle).
+   * Routes to `service.setInteractivity`. Idempotent.
+   */
+  setInteractivity?: WorkflowInteractivity;
+  /**
+   * Regress the run to step N (Phase 3 backtrack affordance).
+   * Routes to `service.backtrackToStep`. Emits `workflow.backtrack` telemetry.
+   */
+  backtrackToStep?: number;
 };
 
 // Telemetry-driven Launchpad predictive widget. The renderer fires

@@ -103,7 +103,21 @@ const WorkflowDetailModal: React.FC<WorkflowDetailModalProps> = ({ entry, onClos
       ]);
 
       const modelInfo = cachedModels?.[backend];
-      const models = modelInfo?.availableModels ?? [];
+      let models = modelInfo?.availableModels ?? [];
+
+      // The ACP cache only fills as a side-effect of running that backend in a
+      // chat, so a backend the user hasn't opened yet (commonly Wayland Core or
+      // Gemini) shows an empty picker. Fall back to the model registry's curated
+      // set for the backend - the same source the home picker uses - so the
+      // picker is self-sufficient and never dead-ends the launch.
+      if (models.length === 0) {
+        try {
+          const curated = await ipcBridge.modelRegistry.curatedForAgent.invoke({ agentKey: backend });
+          models = curated.map((m) => ({ id: m.id, label: m.displayName }));
+        } catch {
+          // Registry unavailable - leave empty; the picker shows the connect hint.
+        }
+      }
       setModelOptions(models);
 
       const backendConfig = acpConfig?.[backend as AcpBackendAll] as Record<string, unknown> | undefined;
@@ -529,7 +543,7 @@ const WorkflowDetailModal: React.FC<WorkflowDetailModalProps> = ({ entry, onClos
                 <span className='text-12px italic' style={{ color: 'var(--color-text-3)' }}>
                   {availableAgents === null
                     ? t('picker.loadingModels', 'Loading models…')
-                    : t('picker.noModelsForBackend', 'No models cached - open this agent in /guid to populate')}
+                    : t('picker.noModelsForBackend', 'No models yet — connect a provider in Settings → Models')}
                 </span>
               )}
             </div>

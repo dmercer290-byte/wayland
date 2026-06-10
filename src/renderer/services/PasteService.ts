@@ -156,7 +156,13 @@ class PasteServiceClass {
 
         // Check whether the file has a path (in Electron, File has an extra `path` property)
 
-        if (!filePath && file.type.startsWith('image/')) {
+        // Always read image bytes from the clipboard File itself, never from `filePath`.
+        // When a screenshot is cropped, the clipboard carries the cropped image bytes, but
+        // some crop tools also place a file URL pointing at the original (uncropped) file on
+        // the pasteboard. Trusting `filePath` for images would attach that uncropped original
+        // and leak whatever the user cropped out. The `filePath` shortcut is only safe for
+        // non-image files copied/dragged from the file manager (handled below).
+        if (file.type.startsWith('image/')) {
           // Clipboard image; check whether this type is supported
           const fileExt = getFileExtension(file.name) || getExtensionFromMimeType(file.type);
 

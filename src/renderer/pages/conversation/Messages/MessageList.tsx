@@ -7,6 +7,8 @@
 import { ChevronDown } from 'lucide-react';
 import type { CodexToolCallUpdate, IMessageAcpToolCall, IMessageToolGroup, TMessage } from '@/common/chat/chatLib';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
+import { useWorkflowViewMode } from '@/renderer/pages/guid/components/workflow/workflowViewMode';
+import { WorkflowTranscript } from '@/renderer/pages/guid/components/workflow/WorkflowTranscript';
 import { iconColors } from '@/renderer/styles/colors';
 import { CHAT_MESSAGE_JUMP_EVENT, type ChatMessageJumpDetail } from '@/renderer/utils/chat/chatMinimapEvents';
 import { Image } from '@arco-design/web-react';
@@ -162,7 +164,7 @@ const MessageItem: React.FC<{ message: TMessage; highlighted?: boolean }> = Reac
     prev.highlighted === next.highlighted
 );
 
-const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }> = ({ emptySlot }) => {
+const ConversationMessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }> = ({ emptySlot }) => {
   const list = useMessageList();
   const conversationContext = useConversationContextSafe();
   useAutoPreviewOfficeFiles(conversationContext);
@@ -413,6 +415,22 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
       <SelectionReplyButton messages={list} />
     </div>
   );
+};
+
+/**
+ * Swaps to the polished WorkflowTranscript when a workflow run is in 'workflow'
+ * view mode. The branch lives in this thin wrapper (only context reads, no other
+ * hooks) so toggling views mounts/unmounts a whole child component instead of
+ * changing the hook count inside one component (which React forbids).
+ */
+const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }> = (props) => {
+  const conversationContext = useConversationContextSafe();
+  const wf = useWorkflowViewMode();
+  const workflowSessionId = conversationContext?.workflowSessionId;
+  if (wf.isWorkflow && wf.mode === 'workflow' && workflowSessionId) {
+    return <WorkflowTranscript />;
+  }
+  return <ConversationMessageList {...props} />;
 };
 
 export default MessageList;

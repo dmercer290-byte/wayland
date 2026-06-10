@@ -31,20 +31,24 @@
 import { randomUUID } from 'crypto';
 import { ipcBridge } from '@/common';
 import type { TProviderWithModel } from '@/common/config/storage';
-import type {
-  AskRecord,
-  ResolvedSkill,
-  StepState,
-  StepTransition,
-  WorkflowSession,
+import {
+  isWorkflowInteractivity,
+  type AskRecord,
+  type ResolvedSkill,
+  type StepState,
+  type StepTransition,
+  type WorkflowInteractivity,
+  type WorkflowSession,
 } from '@/common/types/workflowTypes';
 import type { SkillIndexEntry } from '@/common/types/skillTypes';
+import { getFullAutoMode } from '@/common/types/agentModes';
 import type { AgentType } from '@process/task/agentTypes';
 import type { IConversationService, CreateConversationParams } from '../IConversationService';
 import type { UsageEventLogger } from '../usage/UsageEventLogger';
-import type { WorkflowSessionPatch, WorkflowSessionRepository } from './WorkflowSessionRepository';
+import type { WorkflowSessionRepository } from './WorkflowSessionRepository';
 import { parseSteps, type ParsedStep } from './parseSteps';
-import { applyTransition } from './applyTransition';
+import { backtrackTo, deriveCurrentStep, resolveTransition } from './stepCursor';
+import { decideAfterTurn, runModeOnPause, runModeOnResume } from './runDriver';
 import { composeWorkflowSystemPrompt } from './composeWorkflowSystemPrompt';
 import { resolveWorkflowPalette } from '@renderer/pages/guid/components/workflow/workflowPalette';
 
@@ -190,11 +194,38 @@ export class WorkflowSessionService {
     const totalSteps = steps.length;
 
     const entry = await this.skillLibrary.get(workflow_name);
-    const workflowTitle = entry?.description?.trim() || workflow_name;
+    // Header title is the clean workflow NAME (humanized slug, e.g.
+    // "publish-blog-post" -> "Publish Blog Post"), NOT the long description -
+    // the description was truncating the header to a single character.
+    const humanizeName = (slug: string): string =>
+      slug
+        .split(/[-_\s]+/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    const workflowTitle = humanizeName(workflow_name) || entry?.description?.trim() || workflow_name;
     const category = entry?.metadata?.category ?? null;
     const palette = resolveWorkflowPalette(category);
 
-    const depends = entry?.metadata?.depends ?? [];
+    // Run cadence: honour an explicit `interactivity` field on the workflow's
+    // metadata when present and valid, else default to step-by-step. (Phase 3
+    // surfaces the user-facing toggle; this wires the source end-to-end now.)
+    const metaInteractivity = (entry?.metadata as { interactivity?: unknown } | undefined)?.interactivity;
+    const interactivity: WorkflowInteractivity = isWorkflowInteractivity(metaInteractivity)
+      ? metaInteractivity
+      : 'step';
+
+    // `depends` is typed string[] but vendored index.json often ships it as a
+    // space-delimited string ("skill-a skill-b auth"). Normalise at runtime.
+    const rawDepends: unknown = entry?.metadata?.depends ?? [];
+    const depends: string[] = Array.isArray(rawDepends)
+      ? (rawDepends as string[])
+      : typeof rawDepends === 'string'
+        ? rawDepends
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean)
+        : [];
     const resolved = await this.resolveSkillEntries(depends);
     const skills = resolved.skills;
 
@@ -226,6 +257,13 @@ export class WorkflowSessionService {
       cliPath = paramsCliPath ?? launchTarget.cliPath;
     }
 
+    // Workflows run their own tools without interrogating the user for every
+    // bash / file permission - the meaningful "stops" in a workflow are the
+    // run-state review and decision beats, NOT raw tool calls. Default to the
+    // backend's full-auto mode (the same mode cron tasks use); an explicit
+    // launch-provided sessionMode still wins.
+    const effectiveSessionMode = sessionMode ?? getFullAutoMode(backend);
+
     const conversationParams: CreateConversationParams = {
       type: agentTypeForBackend(backend),
       name: workflowTitle,
@@ -238,7 +276,7 @@ export class WorkflowSessionService {
         ...(agentName ? { agentName } : {}),
         ...(customAgentId ? { customAgentId } : {}),
         ...(presetAssistantId ? { presetAssistantId } : {}),
-        ...(sessionMode ? { sessionMode } : {}),
+        ...(effectiveSessionMode ? { sessionMode: effectiveSessionMode } : {}),
         workflowSessionId: sessionId,
         workflowName: workflow_name,
       },
@@ -276,6 +314,8 @@ export class WorkflowSessionService {
       updated_at: now,
       completed_at: null,
       begin_sent_at: null,
+      run_mode: 'running',
+      interactivity,
     };
 
     this.repo.insert(session);
@@ -303,6 +343,15 @@ export class WorkflowSessionService {
 
   async findById(sessionId: string): Promise<WorkflowSession | null> {
     return this.repo.findById(sessionId);
+  }
+
+  /**
+   * Map a conversation to its workflow session (or null). Synchronous - the
+   * repo is a synchronous better-sqlite3 query - so the parent-turn driver
+   * hand can route a `turnCompleted` event without an await. See SPEC §6.3.
+   */
+  findByConversationId(conversationId: string): WorkflowSession | null {
+    return this.repo.findByConversationId(conversationId);
   }
 
   async findActive(workflow_name: string): Promise<WorkflowSession | null> {
@@ -385,37 +434,12 @@ export class WorkflowSessionService {
       );
     }
 
-    // W6: the parent agent narrates progress via `<step n status>` markers in its
-    // streamed reply. A single verbose turn can emit `now` for several steps at
-    // once; because applyTransition is per-step, each would be accepted and the
-    // rail would paint multiple steps `now` / jump current_step with no work
-    // actually done. A PARENT may only move a step to `now` once every earlier
-    // step is terminal (done/skipped/errored). Worker (intentional out-of-order
-    // autonomous runs) and user (explicit rail jumps) sources are not gated.
-    if (transition.status === 'now' && transition.source === 'parent') {
-      const earlierIncomplete = current.steps.some(
-        (s, i) => i < stepIdx && (s.status === 'todo' || s.status === 'now')
-      );
-      if (earlierIncomplete) {
-        await this.telemetry.record({
-          eventType: 'workflow.regress_attempt',
-          metadata: {
-            session_id: sessionId,
-            workflow_name: current.workflow_name,
-            step_n: transition.step_n,
-            incoming_status: transition.status,
-            current_status: current.steps[stepIdx].status,
-            source: transition.source,
-            reason: 'out_of_order',
-          },
-        });
-        return current;
-      }
-    }
+    // Pure structural resolution: the monotonic status matrix, the no-forward-
+    // leapfrog guard (parent markers only), timestamp stamping, and the single
+    // authoritative `current_step` derivation all live in stepCursor now.
+    const outcome = resolveTransition(current.steps, transition);
 
-    const result = applyTransition(current.steps[stepIdx].status, transition);
-
-    if (result.accepted === false) {
+    if (outcome.accepted === false) {
       await this.telemetry.record({
         eventType: 'workflow.regress_attempt',
         metadata: {
@@ -425,43 +449,16 @@ export class WorkflowSessionService {
           incoming_status: transition.status,
           current_status: current.steps[stepIdx].status,
           source: transition.source,
-          reason: result.reason,
+          reason: outcome.reason,
         },
       });
       return current;
     }
 
-    const newStatus = result.newStatus;
-    const updatedStep: StepState = { ...current.steps[stepIdx], status: newStatus };
-    if (newStatus === 'now' && updatedStep.started_at === null) {
-      updatedStep.started_at = transition.timestamp;
-    }
-    if (newStatus === 'done') {
-      updatedStep.completed_at = transition.timestamp;
-      if (updatedStep.started_at === null) {
-        updatedStep.started_at = transition.timestamp;
-      }
-    }
-
-    const newSteps = current.steps.map((s, i) => (i === stepIdx ? updatedStep : s));
-
-    let newCurrentStep = current.current_step;
-    if (newStatus === 'now') {
-      newCurrentStep = transition.step_n;
-    } else if (newStatus === 'done' && transition.step_n === current.total_steps) {
-      // Final step done → park current_step one past the end so the rail
-      // knows the workflow has reached its terminal cursor (status flip to
-      // `complete` is a separate explicit call).
-      newCurrentStep = current.total_steps + 1;
-    } else if (newStatus === 'done' && transition.step_n >= current.current_step) {
-      newCurrentStep = transition.step_n + 1;
-    }
-
-    const patch: WorkflowSessionPatch = {
-      steps: newSteps,
-      current_step: newCurrentStep,
-    };
-    const updated = this.repo.update(sessionId, patch);
+    const updated = this.repo.update(sessionId, {
+      steps: outcome.steps,
+      current_step: outcome.current_step,
+    });
 
     await this.telemetry.record({
       eventType: 'workflow.step_transition',
@@ -469,7 +466,7 @@ export class WorkflowSessionService {
         session_id: sessionId,
         workflow_name: current.workflow_name,
         step_n: transition.step_n,
-        new_status: newStatus,
+        new_status: outcome.status,
         source: transition.source,
         dispatch_id: transition.dispatch_id,
       },
@@ -478,6 +475,190 @@ export class WorkflowSessionService {
     ipcBridge.workflow.sessionChanged.emit({ session_id: sessionId, action: 'update' });
 
     return updated;
+  }
+
+  /**
+   * Pause the run driver losslessly: `running` → `paused`; any other run_mode is
+   * left unchanged (idempotent). The agent's current turn is unaffected; the
+   * driver simply will not advance until {@link resume}. No-op-safe.
+   */
+  async pause(sessionId: string): Promise<WorkflowSession> {
+    const current = this.repo.findById(sessionId);
+    if (current === null) {
+      throw new Error(`WorkflowSessionService.pause: unknown session ${sessionId}`);
+    }
+    const nextMode = runModeOnPause(current.run_mode);
+    if (nextMode === current.run_mode) {
+      return current;
+    }
+    const updated = this.repo.update(sessionId, { run_mode: nextMode });
+    ipcBridge.workflow.sessionChanged.emit({ session_id: sessionId, action: 'update' });
+    return updated;
+  }
+
+  /**
+   * Resume the run driver: `paused` | `awaiting_input` → `running`; any other
+   * run_mode is left unchanged (idempotent). No-op-safe.
+   */
+  async resume(sessionId: string): Promise<WorkflowSession> {
+    const current = this.repo.findById(sessionId);
+    if (current === null) {
+      throw new Error(`WorkflowSessionService.resume: unknown session ${sessionId}`);
+    }
+    const nextMode = runModeOnResume(current.run_mode);
+    if (nextMode === current.run_mode) {
+      return current;
+    }
+    const updated = this.repo.update(sessionId, { run_mode: nextMode });
+    ipcBridge.workflow.sessionChanged.emit({ session_id: sessionId, action: 'update' });
+    return updated;
+  }
+
+  /**
+   * Set the run driver gate directly (e.g. the driver loop flipping a step-mode
+   * run to `awaiting_input` after a turn, or finalizing to `done`). Idempotent.
+   */
+  async setRunMode(sessionId: string, runMode: WorkflowSession['run_mode']): Promise<WorkflowSession> {
+    const current = this.repo.findById(sessionId);
+    if (current === null) {
+      throw new Error(`WorkflowSessionService.setRunMode: unknown session ${sessionId}`);
+    }
+    if (current.run_mode === runMode) {
+      return current;
+    }
+    const updated = this.repo.update(sessionId, { run_mode: runMode });
+    ipcBridge.workflow.sessionChanged.emit({ session_id: sessionId, action: 'update' });
+    return updated;
+  }
+
+  /**
+   * Set the interactivity mode (step-by-step vs fully-autonomous). Idempotent:
+   * if the session already has the requested mode, returns the current session
+   * without writing. Emits `sessionChanged` so the renderer rail re-renders
+   * the interactivity toggle. See SPEC Phase 3 (collaborative surface).
+   */
+  async setInteractivity(sessionId: string, mode: WorkflowInteractivity): Promise<WorkflowSession> {
+    const current = this.repo.findById(sessionId);
+    if (current === null) {
+      throw new Error(`WorkflowSessionService.setInteractivity: unknown session ${sessionId}`);
+    }
+    if (current.interactivity === mode) {
+      return current;
+    }
+    const updated = this.repo.update(sessionId, { interactivity: mode });
+    ipcBridge.workflow.sessionChanged.emit({ session_id: sessionId, action: 'update' });
+    return updated;
+  }
+
+  /**
+   * Sanctioned backward regress: re-run the workflow from step `n`. Step `n`
+   * becomes `now`, every later step is invalidated back to `todo`, and the
+   * cursor moves to `n`. Re-arms the run driver (`run_mode` → `running`) so the
+   * re-run proceeds. Emits `workflow.backtrack` telemetry. The returned snapshot
+   * is the pre-backtrack steps array (one-level undo, held by the caller).
+   */
+  async backtrackToStep(sessionId: string, n: number): Promise<{ session: WorkflowSession; snapshot: StepState[] }> {
+    const current = this.repo.findById(sessionId);
+    if (current === null) {
+      throw new Error(`WorkflowSessionService.backtrackToStep: unknown session ${sessionId}`);
+    }
+    const { steps, current_step, snapshot } = backtrackTo(current.steps, n);
+    const updated = this.repo.update(sessionId, { steps, current_step, run_mode: 'running' });
+    await this.telemetry.record({
+      eventType: 'workflow.backtrack',
+      metadata: {
+        session_id: sessionId,
+        workflow_name: current.workflow_name,
+        to_step: n,
+        invalidated: snapshot.filter((s) => s.n >= n).length,
+      },
+    });
+    ipcBridge.workflow.sessionChanged.emit({ session_id: sessionId, action: 'update' });
+    return { session: updated, snapshot };
+  }
+
+  /**
+   * Driver step: decide what to do now that the parent agent's turn completed,
+   * and apply the safe state transition. Returns the decision plus (when the
+   * decision is `advance`) the directive the caller should hand to the agent to
+   * drive the next step. This is the BRAIN; the caller (Phase 2 initBridge loop /
+   * renderer hand) is the HAND that performs the actual send.
+   *
+   *  - `complete`     → flip the session to `complete` + run_mode `done`.
+   *  - `await_input`  → flip run_mode to `awaiting_input` (step-mode halt).
+   *  - `halt`         → no state change.
+   *  - `advance`      → mark the next step `now` and return its directive.
+   */
+  async continueRun(
+    sessionId: string,
+    opts: { repokeActiveStep?: boolean } = {}
+  ): Promise<{ decision: ReturnType<typeof decideAfterTurn>; directive: string | null; session: WorkflowSession }> {
+    const current = this.repo.findById(sessionId);
+    if (current === null) {
+      throw new Error(`WorkflowSessionService.continueRun: unknown session ${sessionId}`);
+    }
+
+    // A workflow whose session has terminated (user `endSession` → `ended`, or a
+    // prior natural `complete`) must never be driven again. `findByConversationId`
+    // does NOT filter on status, so without this guard a stray turn on the same
+    // conversation would re-enter the run and advance an already-finished
+    // workflow. Halt unconditionally.
+    if (current.status !== 'active') {
+      return { decision: 'halt', directive: null, session: current };
+    }
+
+    const decision = decideAfterTurn(current);
+
+    if (decision === 'complete') {
+      await this.completeSession(sessionId);
+      const session = await this.setRunMode(sessionId, 'done');
+      return { decision, directive: null, session };
+    }
+    if (decision === 'await_input') {
+      const session = await this.setRunMode(sessionId, 'awaiting_input');
+      return { decision, directive: null, session };
+    }
+    if (decision === 'halt') {
+      return { decision, directive: null, session: current };
+    }
+
+    // decision === 'advance'. The active step is the first non-terminal one.
+    // `deriveCurrentStep` returns a 1-based POSITION, so the active step lives at
+    // that index (mirrors composeStepContext's `steps[current_step - 1]`).
+    // Looking it up by `s.n === position` would mis-target a non-contiguously
+    // numbered workflow (e.g. `## Step 2 / 5 / 7`).
+    const idx = deriveCurrentStep(current.steps) - 1;
+    const before = current.steps[idx];
+    let session = current;
+    let flippedToNow = false;
+    if (before && before.status === 'todo') {
+      session = await this.applyStepTransition(sessionId, {
+        step_n: before.n,
+        status: 'now',
+        source: 'worker',
+        dispatch_id: null,
+        timestamp: Date.now(),
+      });
+      flippedToNow = true;
+    } else {
+      // The active step is already `now` (the agent is on it, or this is a boot
+      // re-poke). No transition writes here, so touch `updated_at` directly:
+      // the parent stall watchdog keys off it to tell an actively-driving long
+      // step from a crash, and a just-resumed run from a dead one.
+      session = this.repo.update(sessionId, {});
+    }
+    const target = session.steps[idx];
+
+    // Idempotency gate - this closes the auto-mode send-storm. Only the todo→now
+    // EDGE drives a send from the live driver loop: a step already `now` means
+    // the agent is on it (or has stalled, which the parent watchdog owns), so
+    // re-emitting the same directive every turn would storm the conversation.
+    // Boot-resume passes `repokeActiveStep` to re-poke the live `now` step
+    // exactly once after the agent process itself is gone.
+    const shouldSend = flippedToNow || opts.repokeActiveStep === true;
+    const directive =
+      shouldSend && target ? `Proceed to step ${target.n}: ${target.title}\n\n${target.body_excerpt}`.trim() : null;
+    return { decision, directive, session };
   }
 
   /** Append a new {@link AskRecord} to the session's asks tape. */

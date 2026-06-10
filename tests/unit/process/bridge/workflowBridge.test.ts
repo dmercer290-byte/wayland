@@ -85,6 +85,8 @@ function makeFakeSession(overrides: Partial<WorkflowSession> = {}): WorkflowSess
     updated_at: 0,
     completed_at: null,
     begin_sent_at: null,
+    run_mode: 'running',
+    interactivity: 'step',
     ...overrides,
   };
 }
@@ -102,6 +104,11 @@ function makeFakeService() {
     endSession: vi.fn(),
     markBeginSent: vi.fn(),
     deleteSession: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    setRunMode: vi.fn(),
+    setInteractivity: vi.fn(),
+    backtrackToStep: vi.fn(),
   };
 }
 
@@ -231,6 +238,32 @@ describe('workflowBridge - handler routing', () => {
     expect(result).toEqual({ session });
   });
 
+  it('updateSessionState.setStepStatus threads an explicit parent source through', async () => {
+    const svc = makeFakeService();
+    const session = makeFakeSession();
+    svc.applyStepTransition.mockResolvedValue(session);
+    initWorkflowBridge(svc as never);
+
+    const handler = captured<{ sessionId: string; patch: Record<string, unknown> }, { session: WorkflowSession }>(
+      updateSessionStateProvider
+    );
+    await handler({
+      sessionId: 'sess-1',
+      patch: { setStepStatus: { n: 3, status: 'now', source: 'parent', completed_at: 1700000000001 } },
+    });
+
+    // The renderer-supplied `source` must reach the service verbatim so the
+    // stepCursor leapfrog guard (parent markers only) finally activates - it
+    // was inert while the bridge hardcoded 'user'.
+    expect(svc.applyStepTransition).toHaveBeenCalledWith('sess-1', {
+      step_n: 3,
+      status: 'now',
+      source: 'parent',
+      dispatch_id: null,
+      timestamp: 1700000000001,
+    });
+  });
+
   it('updateSessionState.appendAsk dispatches to appendAsk', async () => {
     const svc = makeFakeService();
     const session = makeFakeSession();
@@ -303,6 +336,42 @@ describe('workflowBridge - handler routing', () => {
     expect(svc.endSession).toHaveBeenCalledWith('sess-1');
   });
 
+  it('updateSessionState.setRunMode=paused dispatches to pause', async () => {
+    const svc = makeFakeService();
+    svc.pause.mockResolvedValue(makeFakeSession({ run_mode: 'paused' }));
+    initWorkflowBridge(svc as never);
+
+    const handler = captured<{ sessionId: string; patch: Record<string, unknown> }, { session: WorkflowSession }>(
+      updateSessionStateProvider
+    );
+    await handler({ sessionId: 'sess-1', patch: { setRunMode: 'paused' } });
+    expect(svc.pause).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('updateSessionState.setRunMode=running dispatches to resume (Continue affordance)', async () => {
+    const svc = makeFakeService();
+    svc.resume.mockResolvedValue(makeFakeSession({ run_mode: 'running' }));
+    initWorkflowBridge(svc as never);
+
+    const handler = captured<{ sessionId: string; patch: Record<string, unknown> }, { session: WorkflowSession }>(
+      updateSessionStateProvider
+    );
+    await handler({ sessionId: 'sess-1', patch: { setRunMode: 'running' } });
+    expect(svc.resume).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('updateSessionState.setRunMode=done dispatches to setRunMode directly', async () => {
+    const svc = makeFakeService();
+    svc.setRunMode.mockResolvedValue(makeFakeSession({ run_mode: 'done' }));
+    initWorkflowBridge(svc as never);
+
+    const handler = captured<{ sessionId: string; patch: Record<string, unknown> }, { session: WorkflowSession }>(
+      updateSessionStateProvider
+    );
+    await handler({ sessionId: 'sess-1', patch: { setRunMode: 'done' } });
+    expect(svc.setRunMode).toHaveBeenCalledWith('sess-1', 'done');
+  });
+
   it('updateSessionState throws on an empty patch', async () => {
     const svc = makeFakeService();
     initWorkflowBridge(svc as never);
@@ -328,6 +397,36 @@ describe('workflowBridge - handler routing', () => {
     // The bridge must forward the value (not ignore it) so the renderer can
     // detect whether its specific call won the cross-mount begin-send race.
     expect(svc.markBeginSent).toHaveBeenCalledWith('sess-1', 1_700_000_000_000);
+    expect(result).toEqual({ session });
+  });
+
+  it('updateSessionState.setInteractivity dispatches to setInteractivity', async () => {
+    const svc = makeFakeService();
+    const session = makeFakeSession({ interactivity: 'auto' });
+    svc.setInteractivity.mockResolvedValue(session);
+    initWorkflowBridge(svc as never);
+
+    const handler = captured<{ sessionId: string; patch: Record<string, unknown> }, { session: WorkflowSession }>(
+      updateSessionStateProvider
+    );
+    const result = await handler({ sessionId: 'sess-1', patch: { setInteractivity: 'auto' } });
+
+    expect(svc.setInteractivity).toHaveBeenCalledWith('sess-1', 'auto');
+    expect(result).toEqual({ session });
+  });
+
+  it('updateSessionState.backtrackToStep dispatches to backtrackToStep and returns the session', async () => {
+    const svc = makeFakeService();
+    const session = makeFakeSession({ current_step: 2 });
+    svc.backtrackToStep.mockResolvedValue({ session, snapshot: [] });
+    initWorkflowBridge(svc as never);
+
+    const handler = captured<{ sessionId: string; patch: Record<string, unknown> }, { session: WorkflowSession }>(
+      updateSessionStateProvider
+    );
+    const result = await handler({ sessionId: 'sess-1', patch: { backtrackToStep: 2 } });
+
+    expect(svc.backtrackToStep).toHaveBeenCalledWith('sess-1', 2);
     expect(result).toEqual({ session });
   });
 

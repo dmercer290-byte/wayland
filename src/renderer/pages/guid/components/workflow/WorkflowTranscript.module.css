@@ -1,0 +1,193 @@
+/**
+ * @license
+ * Copyright 2026 Ferrox Labs
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * WorkflowTranscript - consulting-style transcript view.
+ * All colors use semantic tokens; no hardcoded hex values.
+ */
+
+.root {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Generous bottom spacing so content clears the composer */
+.spacer {
+  height: 24px;
+  flex-shrink: 0;
+}
+
+/* Empty state */
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-3);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Step tag divider */
+.steptag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-3);
+  border-top: 1px solid var(--color-border-2);
+  margin-top: 12px;
+}
+
+.steptag:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+
+.steptagDone {
+  color: var(--color-success, #16a34a);
+}
+
+.steptagIcon {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+/* Message row */
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  max-width: 780px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.rowUser {
+  flex-direction: row-reverse;
+}
+
+.rowAssistant {
+  flex-direction: row;
+}
+
+.rowPermission {
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Avatar badges */
+.avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.avatarW {
+  background-color: var(--color-primary-light-2, rgba(var(--primary-6), 0.15));
+  color: var(--color-primary-6, rgb(var(--primary-6)));
+  border: 1px solid var(--color-primary-light-3, rgba(var(--primary-6), 0.3));
+}
+
+.avatarS {
+  background-color: var(--color-fill-3);
+  color: var(--color-text-2);
+  border: 1px solid var(--color-border-2);
+}
+
+/* Message body */
+.body {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-1);
+}
+
+/* Activity collapsible */
+.activity {
+  padding: 4px 0;
+  max-width: 780px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.activityHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--color-text-3);
+  font-size: 12px;
+  transition: background-color 0.15s;
+  text-align: left;
+}
+
+.activityHeader:hover {
+  background-color: var(--color-fill-2);
+  color: var(--color-text-2);
+}
+
+.activityIcon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--color-text-4);
+}
+
+.activityLabel {
+  font-size: 12px;
+  color: inherit;
+}
+
+.activityList {
+  list-style: none;
+  margin: 4px 0 0 22px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.activityItem {
+  font-size: 12px;
+  color: var(--color-text-3);
+  padding: 2px 0;
+}
+
+.activityItem::before {
+  content: '\2022';
+  margin-right: 6px;
+  opacity: 0.5;
+}

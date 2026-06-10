@@ -89,7 +89,7 @@
   border: 1px solid var(--wc-hairline);
   border-radius: var(--wc-r-md);
   padding: 15px 16px;
-  background: linear-gradient(180deg, var(--wc-surface-1), rgba(34, 34, 34, 0.3));
+  background: linear-gradient(180deg, var(--wc-surface-1), var(--wc-surface-2));
 }
 
 /* Services & Keys credential card - matches the surface hairline, not the
@@ -766,7 +766,7 @@
   border-radius: var(--wc-r-md);
   padding: 16px 18px;
   margin-top: 18px;
-  background: linear-gradient(180deg, var(--wc-surface-1), rgba(34, 34, 34, 0.4));
+  background: linear-gradient(180deg, var(--wc-surface-1), var(--wc-surface-2));
 }
 .inTitle {
   font-size: 0.84rem;

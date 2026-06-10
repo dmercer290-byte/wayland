@@ -34,18 +34,23 @@
  * send a normal "begin" message - W4 will add the hidden flag (TODO).
  */
 
-import { Modal } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Modal, Radio } from '@arco-design/web-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { ipcBridge } from '@/common';
-import type { WorkflowSession } from '@/common/types/workflowTypes';
+import type { WorkflowInteractivity, WorkflowSession } from '@/common/types/workflowTypes';
 import { useWorkflowSession } from '@/renderer/hooks/workflow/useWorkflowSession';
 import { AskCard } from '@/renderer/pages/guid/components/workflow/AskCard';
+import { QueuedSteeringChip } from '@/renderer/pages/guid/components/workflow/QueuedSteeringChip';
+import { StepReviewBeat } from '@/renderer/pages/guid/components/workflow/StepReviewBeat';
+import { WorkflowClarifyCard } from '@/renderer/pages/guid/components/workflow/WorkflowClarifyCard';
 import { WorkflowCompleteCard } from '@/renderer/pages/guid/components/workflow/WorkflowCompleteCard';
 import { WorkflowHeader } from '@/renderer/pages/guid/components/workflow/WorkflowHeader';
 import { WorkflowLaunchOverlay } from '@/renderer/pages/guid/components/workflow/WorkflowLaunchOverlay';
 import { WorkflowStatusBar } from '@/renderer/pages/guid/components/workflow/WorkflowStatusBar';
 import { WorkflowStepRail } from '@/renderer/pages/guid/components/workflow/WorkflowStepRail';
+import { WorkflowViewModeProvider, useWorkflowViewModeState } from '@/renderer/pages/guid/components/workflow/workflowViewMode';
 
 import styles from './WorkflowSurface.module.css';
 
@@ -90,11 +95,36 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
   onRunAgain,
   onLaunchNext,
 }) => {
+  const { t } = useTranslation();
   const session = useWorkflowSession(sessionId, initialSession);
   const [launched, setLaunched] = useState(false);
+  const [clarified, setClarified] = useState(false);
+  const contextNoteRef = useRef<string>('');
+  const noteSentRef = useRef(false);
   const [paused, setPaused] = useState(false);
+  const viewModeValue = useWorkflowViewModeState();
 
   const data = session.data;
+
+  // Thread step titles into the view-mode context so the WorkflowTranscript can
+  // label its step-tag dividers (it is mounted deep inside the chat tree and has
+  // no other access to the session's steps).
+  const viewModeProviderValue = useMemo(
+    () => ({ ...viewModeValue, stepTitles: (data?.steps ?? []).map((s) => s.title) }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewModeValue.mode, viewModeValue.isWorkflow, data?.steps]
+  );
+
+  const handleClarifyStart = useCallback((note: string) => {
+    contextNoteRef.current = note.trim();
+    setClarified(true);
+  }, []);
+
+  const handleContinue = useCallback(() => {
+    void session.resumeRun().catch((err) => {
+      console.warn('[WorkflowSurface] resumeRun failed:', err);
+    });
+  }, [session]);
 
   const handleOverlayComplete = useCallback(() => {
     setLaunched(true);
@@ -147,12 +177,37 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
     [session]
   );
 
-  const handleRunAutonomously = useCallback(
-    (n: number) => {
-      void session.runStepAutonomously(n);
+  const handleSetInteractivity = useCallback(
+    (mode: WorkflowInteractivity) => {
+      void session.setInteractivity(mode).catch((err) => {
+        console.warn('[WorkflowSurface] setInteractivity failed:', err);
+      });
     },
     [session]
   );
+
+  const handleRevise = useCallback(() => {
+    const conversationId = data?.conversation_id;
+    const stepN = data?.current_step ?? 1;
+    if (!conversationId) return;
+    void ipcBridge.conversation.sendMessage
+      .invoke({
+        input: `Please revise step ${stepN} and show the updated result.`,
+        msg_id: `workflow-revise-${sessionId}-${stepN}-${Date.now()}`,
+        conversation_id: conversationId,
+      })
+      .catch((err: unknown) => {
+        console.warn('[WorkflowSurface] revise send failed:', err);
+      });
+  }, [data?.conversation_id, data?.current_step, sessionId]);
+
+  const handleGoBack = useCallback(() => {
+    const currentStep = data?.current_step;
+    if (currentStep == null || currentStep <= 1) return;
+    void session.backtrackToStep(currentStep - 1).catch((err) => {
+      console.warn('[WorkflowSurface] backtrackToStep failed:', err);
+    });
+  }, [session, data?.current_step]);
 
   const handleAskSubmit = useCallback(
     (askId: string, answer: string) => {
@@ -218,6 +273,7 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
   const inFlightRef = useRef(false);
   useEffect(() => {
     if (!launched || !data) return;
+    if (!clarified) return;
     if (data.begin_sent_at !== null) return;
     if (inFlightRef.current) return;
     inFlightRef.current = true;
@@ -253,7 +309,28 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
         inFlightRef.current = false;
         console.warn('[WorkflowSurface] begin send failed:', err);
       });
-  }, [launched, data, session]);
+  }, [launched, clarified, data, session]);
+
+  // Send the optional context note as the first user message once the begin
+  // send has landed (begin_sent_at transitions from null to non-null).
+  // Best-effort: failure is logged but does not block the run.
+  useEffect(() => {
+    if (data?.begin_sent_at == null) return;
+    if (!contextNoteRef.current) return;
+    if (noteSentRef.current) return;
+    noteSentRef.current = true;
+    const note = contextNoteRef.current;
+    contextNoteRef.current = '';
+    void ipcBridge.conversation.sendMessage
+      .invoke({
+        input: note,
+        msg_id: `workflow-clarify-note-${sessionId}-${Date.now()}`,
+        conversation_id: data.conversation_id,
+      })
+      .catch((err: unknown) => {
+        console.warn('[WorkflowSurface] clarify note send failed:', err);
+      });
+  }, [data?.begin_sent_at, data?.conversation_id, sessionId]);
 
   if (!data) {
     return null;
@@ -277,53 +354,101 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
     );
   }
 
-  return (
-    <div className={rootClass} data-testid='workflow-surface' data-launched='true' data-status={data.status}>
-      <div className={styles.body}>
-        <div className={styles.main}>
-          <div className={styles.headerSlot}>
-            <WorkflowHeader
-              session={data}
-              paused={paused}
-              onPauseToggle={handlePauseToggle}
-              onEnd={handleEnd}
-              onDelete={handleDelete}
-            />
-          </div>
-          {pendingAsks.length > 0 && (
-            <div className={styles.asks} data-testid='workflow-surface-asks'>
-              {pendingAsks.map((ask) => (
-                <AskCard
-                  key={ask.id}
-                  ask={ask}
-                  onSubmit={(answer) => handleAskSubmit(ask.id, answer)}
-                  onSkip={() => handleAskSkip(ask.id)}
-                />
-              ))}
-            </div>
-          )}
-          <div className={styles.children}>{children}</div>
-        </div>
+  // Show the clarify card only for fresh sessions (begin_sent_at null) that
+  // have not yet been confirmed by the user. Resumed sessions bypass it.
+  const showClarifyCard = data.begin_sent_at === null && !clarified;
 
-        <div className={styles.right} data-testid='workflow-surface-right'>
-          {isComplete ? (
-            <WorkflowCompleteCard
-              session={data}
-              suggestedNext={suggestedNext}
-              onSaveRun={() => {
-                // Save-run defaults to no-op for v1; W4 wires persistence.
-              }}
-              onRunAgain={() => onRunAgain?.()}
-              onLaunchNext={(slug) => onLaunchNext?.(slug)}
-            />
-          ) : (
-            <WorkflowStepRail session={data} onJumpToStep={handleJumpToStep} onRunAutonomously={handleRunAutonomously}>
-              <WorkflowStatusBar session={data} />
-            </WorkflowStepRail>
-          )}
+  return (
+    <WorkflowViewModeProvider value={viewModeProviderValue}>
+      <div className={rootClass} data-testid='workflow-surface' data-launched='true' data-status={data.status}>
+        <div className={styles.body}>
+          <div className={styles.main}>
+            <div className={styles.headerSlot}>
+              <WorkflowHeader
+                session={data}
+                paused={paused}
+                onPauseToggle={handlePauseToggle}
+                onEnd={handleEnd}
+                onDelete={handleDelete}
+                onSetInteractivity={handleSetInteractivity}
+              />
+            </div>
+            <div className={styles.viewToggle}>
+              <Radio.Group
+                type='button'
+                size='small'
+                value={viewModeValue.mode}
+                onChange={(v) => viewModeValue.setMode(v as 'workflow' | 'conversation')}
+              >
+                <Radio value='workflow'>{t('workflow.view.workflow')}</Radio>
+                <Radio value='conversation'>{t('workflow.view.conversation')}</Radio>
+              </Radio.Group>
+            </div>
+            {showClarifyCard ? (
+              <WorkflowClarifyCard
+                workflowTitle={data.workflow_title}
+                mode={data.interactivity}
+                onSetMode={(m) => void session.setInteractivity(m).catch((err) => {
+                  console.warn('[WorkflowSurface] setInteractivity failed:', err);
+                })}
+                onStart={handleClarifyStart}
+              />
+            ) : (
+              <>
+                {pendingAsks.length > 0 && (
+                  <div className={styles.asks} data-testid='workflow-surface-asks'>
+                    {pendingAsks.map((ask) => (
+                      <AskCard
+                        key={ask.id}
+                        ask={ask}
+                        onSubmit={(answer) => handleAskSubmit(ask.id, answer)}
+                        onSkip={() => handleAskSkip(ask.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+                {data.run_mode === 'awaiting_input' && (
+                  <StepReviewBeat
+                    currentStep={data.current_step}
+                    totalSteps={data.total_steps}
+                    onAccept={handleContinue}
+                    onRevise={handleRevise}
+                    onGoBack={handleGoBack}
+                  />
+                )}
+                <div className={styles.children}>
+                  {data.run_mode === 'running' && (
+                    <QueuedSteeringChip
+                      // TODO(W5): wire onInterrupt to conversation stop IPC when available
+                      onInterrupt={undefined}
+                    />
+                  )}
+                  {children}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className={styles.right} data-testid='workflow-surface-right'>
+            {isComplete ? (
+              <WorkflowCompleteCard
+                session={data}
+                suggestedNext={suggestedNext}
+                onSaveRun={() => {
+                  // Save-run defaults to no-op for v1; W4 wires persistence.
+                }}
+                onRunAgain={() => onRunAgain?.()}
+                onLaunchNext={(slug) => onLaunchNext?.(slug)}
+              />
+            ) : (
+              <WorkflowStepRail session={data} onJumpToStep={handleJumpToStep}>
+                <WorkflowStatusBar session={data} />
+              </WorkflowStepRail>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </WorkflowViewModeProvider>
   );
 };
 

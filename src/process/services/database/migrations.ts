@@ -2184,6 +2184,80 @@ const migration_v49: IMigration = {
 };
 
 /**
+ * Migration v49 -> v50: Add run_mode + interactivity to workflow_sessions.
+ *
+ * Backs the workflow run-state machine (Workflows Redesign Phase 1):
+ *  - `run_mode`      – live driver gate ('running' | 'paused' | 'awaiting_input'
+ *                      | 'done'). The driver loop reads this to decide whether to
+ *                      advance, await human input, or halt on each turn completion.
+ *  - `interactivity` – user-chosen cadence ('step' | 'auto'); the binary toggle.
+ *
+ * Both are TEXT with app-side validation (isWorkflowRunMode / isWorkflowInteractivity);
+ * no DB-level CHECK since ALTER TABLE ADD COLUMN cannot add constraints. Existing
+ * rows backfill to the NOT NULL defaults ('running' / 'step'). Guards mirror v42.
+ */
+const migration_v50: IMigration = {
+  version: 50,
+  name: 'Add run_mode + interactivity columns to workflow_sessions',
+  up: (db) => {
+    const columns = db.pragma('table_info(workflow_sessions)') as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === 'run_mode')) {
+      db.exec(`ALTER TABLE workflow_sessions ADD COLUMN run_mode TEXT NOT NULL DEFAULT 'running'`);
+      console.log('[Migration v50] Added run_mode column to workflow_sessions');
+    }
+    if (!columns.some((c) => c.name === 'interactivity')) {
+      db.exec(`ALTER TABLE workflow_sessions ADD COLUMN interactivity TEXT NOT NULL DEFAULT 'step'`);
+      console.log('[Migration v50] Added interactivity column to workflow_sessions');
+    }
+  },
+  down: (db) => {
+    // SQLite DROP COLUMN is avoided per house style; recreate the v42-shaped table
+    // (v41 columns + begin_sent_at) without run_mode/interactivity, copy, swap, reindex.
+    db.exec(`
+      CREATE TABLE workflow_sessions_v42 (
+        id              TEXT PRIMARY KEY,
+        workflow_name   TEXT NOT NULL,
+        workflow_title  TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        current_step    INTEGER NOT NULL DEFAULT 1,
+        total_steps     INTEGER NOT NULL,
+        steps_json      TEXT NOT NULL,
+        skills_json     TEXT NOT NULL,
+        asks_json       TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'active',
+        palette         TEXT NOT NULL,
+        category        TEXT NOT NULL,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL,
+        completed_at    INTEGER,
+        begin_sent_at   INTEGER,
+        CHECK (status IN ('active', 'complete', 'errored', 'ended')),
+        CHECK (current_step >= 0),
+        CHECK (total_steps >= 0),
+        CHECK (current_step <= total_steps + 1)
+      )
+    `);
+    db.exec(`
+      INSERT INTO workflow_sessions_v42
+      SELECT id, workflow_name, workflow_title, conversation_id, current_step,
+             total_steps, steps_json, skills_json, asks_json, status, palette,
+             category, created_at, updated_at, completed_at, begin_sent_at
+      FROM workflow_sessions
+    `);
+    db.exec('DROP TABLE workflow_sessions');
+    db.exec('ALTER TABLE workflow_sessions_v42 RENAME TO workflow_sessions');
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_workflow_sessions_workflow_name_active ON workflow_sessions (workflow_name, status, updated_at DESC)'
+    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workflow_sessions_conversation ON workflow_sessions (conversation_id)');
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_workflow_sessions_active_recency ON workflow_sessions (status, updated_at DESC)'
+    );
+    console.log('[Migration v50] Rolled back: removed run_mode + interactivity columns');
+  },
+};
+
+/**
  * All migrations in order
  */
 // prettier-ignore
@@ -2196,7 +2270,7 @@ export const ALL_MIGRATIONS: IMigration[] = [
   migration_v31, migration_v32, migration_v33, migration_v34, migration_v35, migration_v36,
   migration_v37, migration_v38, migration_v39, migration_v40, migration_v41, migration_v42,
   migration_v43, migration_v44, migration_v45, migration_v46, migration_v47,
-  migration_v48, migration_v49,
+  migration_v48, migration_v49, migration_v50,
 ];
 
 /**

@@ -28,7 +28,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ipcBridge } from '@/common';
-import type { StepStatus, StepTransitionSource, WorkflowSession } from '@/common/types/workflowTypes';
+import type {
+  StepStatus,
+  StepTransitionSource,
+  WorkflowInteractivity,
+  WorkflowSession,
+} from '@/common/types/workflowTypes';
 
 export type UseWorkflowSessionReturn = {
   data: WorkflowSession | null;
@@ -46,6 +51,13 @@ export type UseWorkflowSessionReturn = {
   pause: () => void;
   /** Local-only resume flag - does not call IPC. */
   resume: () => void;
+  /**
+   * The Continue affordance for an `awaiting_input` step-mode run. Flips
+   * `run_mode` back to `running` via IPC (the bridge routes this to
+   * `service.resume`) and sends a "continue" prompt so the parent driver loop
+   * advances the next step on the resulting turn. Best-effort send.
+   */
+  resumeRun: () => Promise<void>;
   /** Sends setSessionStatus='ended' via IPC. */
   end: () => Promise<void>;
   /** Permanently deletes the session via IPC (distinct from `end`, which only flips status). */
@@ -63,6 +75,16 @@ export type UseWorkflowSessionReturn = {
    * persistence has both landed AND been reflected in local state.
    */
   markBeginSent: (at?: number) => Promise<WorkflowSession | null>;
+  /**
+   * Flip the interactivity mode (step-by-step vs fully-autonomous). Routes to
+   * `service.setInteractivity` via IPC. Idempotent.
+   */
+  setInteractivity: (mode: WorkflowInteractivity) => Promise<void>;
+  /**
+   * Regress the run to step N. Routes to `service.backtrackToStep` via IPC.
+   * Local data is updated with the resulting session.
+   */
+  backtrackToStep: (n: number) => Promise<void>;
 };
 
 const ACTIVE_STATUSES: ReadonlySet<WorkflowSession['status']> = new Set(['active', 'errored']);
@@ -84,6 +106,9 @@ export function useWorkflowSession(
   // the actual reading happens via WorkflowStepRail's own state since the
   // hook intentionally never persists it.
   const pausedRef = useRef<boolean>(false);
+  // Guards resumeRun against double-fire (a double-clicked Continue would
+  // otherwise send two "Continue" turns and drive the step twice).
+  const resumeInFlightRef = useRef<boolean>(false);
 
   // Stale-guard: keep the most recent sessionId so an in-flight refresh
   // doesn't overwrite state after the consumer switches sessions.
@@ -127,17 +152,18 @@ export function useWorkflowSession(
     async (
       stepN: number,
       status: StepStatus,
-      // `source` is forwarded for telemetry symmetry with the worker path; the
-      // main-side patch dispatcher always stamps renderer-driven transitions
-      // as `source = 'user'` regardless. Default kept so callers can omit it.
-      _source: StepTransitionSource = 'user'
+      // `source` is threaded to the main-side patch dispatcher so the stepCursor
+      // no-forward-leapfrog guard can distinguish agent-narrated `<step>` markers
+      // (`'parent'`) from explicit user rail jumps (`'user'`). Defaults to
+      // `'user'` so callers may omit it (rail-jump callers do).
+      source: StepTransitionSource = 'user'
     ) => {
       if (!sessionId) return;
       try {
         const result = await ipcBridge.workflow.updateSessionState.invoke({
           sessionId,
           patch: {
-            setStepStatus: { n: stepN, status, completed_at: Date.now() },
+            setStepStatus: { n: stepN, status, completed_at: Date.now(), source },
           },
         });
         if (activeSessionIdRef.current !== sessionId) return;
@@ -266,6 +292,84 @@ export function useWorkflowSession(
     pausedRef.current = false;
   }, []);
 
+  const resumeRun = useCallback(async () => {
+    if (!sessionId) return;
+    if (resumeInFlightRef.current) return;
+    resumeInFlightRef.current = true;
+    // Flip the persisted run gate back to `running` (bridge → service.resume),
+    // then nudge the agent so the parent driver loop fires on the next turn.
+    try {
+      const result = await ipcBridge.workflow.updateSessionState.invoke({
+        sessionId,
+        patch: { setRunMode: 'running' },
+      });
+      if (activeSessionIdRef.current === sessionId) {
+        setData(result.session);
+        setError(null);
+      }
+    } catch (err) {
+      if (activeSessionIdRef.current === sessionId) setError(toError(err));
+      resumeInFlightRef.current = false;
+      throw err;
+    }
+    const conversationId = data?.conversation_id;
+    if (!conversationId) {
+      resumeInFlightRef.current = false;
+      return;
+    }
+    try {
+      await ipcBridge.conversation.sendMessage.invoke({
+        input: 'Continue with the next step.',
+        msg_id: `workflow-continue-${sessionId}-${Date.now()}`,
+        conversation_id: conversationId,
+      });
+    } catch (err) {
+      console.warn('[useWorkflowSession] resumeRun send failed:', err);
+    } finally {
+      resumeInFlightRef.current = false;
+    }
+  }, [sessionId, data?.conversation_id]);
+
+  const setInteractivity = useCallback(
+    async (mode: WorkflowInteractivity) => {
+      if (!sessionId) return;
+      try {
+        const result = await ipcBridge.workflow.updateSessionState.invoke({
+          sessionId,
+          patch: { setInteractivity: mode },
+        });
+        if (activeSessionIdRef.current !== sessionId) return;
+        setData(result.session);
+        setError(null);
+      } catch (err) {
+        if (activeSessionIdRef.current !== sessionId) return;
+        setError(toError(err));
+        throw err;
+      }
+    },
+    [sessionId]
+  );
+
+  const backtrackToStep = useCallback(
+    async (n: number) => {
+      if (!sessionId) return;
+      try {
+        const result = await ipcBridge.workflow.updateSessionState.invoke({
+          sessionId,
+          patch: { backtrackToStep: n },
+        });
+        if (activeSessionIdRef.current !== sessionId) return;
+        setData(result.session);
+        setError(null);
+      } catch (err) {
+        if (activeSessionIdRef.current !== sessionId) return;
+        setError(toError(err));
+        throw err;
+      }
+    },
+    [sessionId]
+  );
+
   const isActive = useCallback(() => {
     return data !== null && ACTIVE_STATUSES.has(data.status);
   }, [data]);
@@ -280,10 +384,13 @@ export function useWorkflowSession(
     answerAsk,
     pause,
     resume,
+    resumeRun,
     end,
     remove,
     refresh,
     applyStepMarker,
     markBeginSent,
+    setInteractivity,
+    backtrackToStep,
   };
 }

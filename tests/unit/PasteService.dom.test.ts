@@ -58,6 +58,18 @@ function createImageFile(name: string, size = 100): File {
   return new File([data], name, { type: 'image/png' });
 }
 
+/**
+ * An image File that also carries a `path` (the Electron extra property).
+ * This mirrors a cropped screenshot where the crop tool puts both the cropped
+ * image bytes AND a file URL pointing at the original (uncropped) file on the
+ * pasteboard.
+ */
+function createImageFileWithPath(name: string, path: string, size = 100): File {
+  const file = createImageFile(name, size);
+  Object.defineProperty(file, 'path', { value: path, configurable: true });
+  return file;
+}
+
 describe('PasteService.handlePaste - filename deduplication', () => {
   let PasteService: typeof import('@/renderer/services/PasteService').PasteService;
   let tempFileCounter: number;
@@ -141,6 +153,28 @@ describe('PasteService.handlePaste - filename deduplication', () => {
     const names = addedFiles.map((f) => f.name);
     // All names must be unique
     expect(new Set(names).size).toBe(3);
+  });
+
+  it('uses the cropped clipboard bytes, not the original file path, for images carrying a path (privacy, #19)', async () => {
+    // Cropped screenshot: clipboard has the cropped image bytes, but the crop tool
+    // also placed a file URL for the original uncropped file on the pasteboard, so
+    // the File exposes a `path`. Attaching that path would leak the uncropped image.
+    const file = createImageFileWithPath('cropped.png', '/Users/me/Desktop/original-uncropped.png', 128);
+
+    const event = createMockClipboardEvent([file]);
+    const addedFiles: FileMetadata[] = [];
+
+    await PasteService.handlePaste(event, [], (files) => {
+      addedFiles.push(...files);
+    });
+
+    expect(addedFiles).toHaveLength(1);
+    // Must NOT attach the original on-disk path
+    expect(addedFiles[0].path).not.toBe('/Users/me/Desktop/original-uncropped.png');
+    // Must write the clipboard image bytes to a temp file instead
+    expect(ipcBridge.fs.createUploadFile.invoke).toHaveBeenCalledTimes(1);
+    expect(ipcBridge.fs.writeFile.invoke).toHaveBeenCalledTimes(1);
+    expect(addedFiles[0].path).toMatch(/^\/tmp\/upload-/);
   });
 
   it('tracks upload progress for WebUI pasted images', async () => {

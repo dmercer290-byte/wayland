@@ -31,11 +31,14 @@ export type UsageEventType =
   | 'workflow.autonomous_step_dispatched'
   | 'workflow.autonomous_step_completed'
   | 'workflow.autonomous_step_timeout'
+  | 'workflow.parent_run_stalled'
+  | 'workflow.resume_repoke'
   | 'workflow.marker_invalid'
   | 'workflow.marker_html_escaped'
   | 'workflow.marker_false_strip'
   | 'workflow.step_transition'
   | 'workflow.regress_attempt'
+  | 'workflow.backtrack'
   | 'workflow.orphaned_ask';
 
 export type UsageEvent = {

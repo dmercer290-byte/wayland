@@ -47,6 +47,7 @@
     "src/process/services/cost/SqliteBudgetRepository.bun.test.ts",
     "src/process/services/cost/BudgetController.bun.test.ts",
     "src/process/services/cost/gatewayUsage.bun.test.ts",
-    "src/common/adapter/bridgeAllowlist.budgets.bun.test.ts"
+    "src/common/adapter/bridgeAllowlist.budgets.bun.test.ts",
+    "src/process/services/skills/SkillLibrary.paths.bun.test.ts"
   ]
 }

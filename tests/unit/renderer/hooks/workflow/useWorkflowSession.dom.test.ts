@@ -246,6 +246,23 @@ describe('useWorkflowSession', () => {
     expect(call.patch.setBeginSent).toBeGreaterThan(0);
   });
 
+  it('resumeRun() flips run_mode to running via IPC then sends a continue prompt', async () => {
+    const seed = makeSession();
+    const resumed = makeSession({ run_mode: 'running' } as Partial<WorkflowSession>);
+    updateSessionStateMock.mockResolvedValue({ session: resumed });
+    const { result } = renderHook(() => useWorkflowSession('wf-1', seed));
+    await act(async () => {
+      await result.current.resumeRun();
+    });
+    expect(updateSessionStateMock).toHaveBeenCalledWith({
+      sessionId: 'wf-1',
+      patch: { setRunMode: 'running' },
+    });
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ conversation_id: 'conv-1', input: expect.stringMatching(/continue/i) })
+    );
+  });
+
   it('end() sends setSessionStatus=ended via updateSessionState', async () => {
     const seed = makeSession();
     const ended = makeSession({ status: 'ended' });
