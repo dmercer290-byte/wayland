@@ -21,6 +21,7 @@ pub mod event;
 pub mod manager;
 pub mod mock;
 pub mod outgoing;
+pub mod webhook;
 
 pub use config::{ChannelConfig, ChannelConfigLoader};
 pub use dispatch::{
@@ -35,6 +36,7 @@ pub use event::{
 pub use manager::{ChannelManager, TaggedEvent};
 pub use mock::MockChannel;
 pub use outgoing::OutgoingMessage;
+pub use webhook::{WebhookRequest, WebhookResponse};
 
 use async_trait::async_trait;
 
@@ -79,4 +81,27 @@ pub trait Channel: Send + Sync {
     /// config TOML. UI uses this to render a setup form; tests use
     /// it to validate config files.
     fn config_schema(&self) -> &str;
+
+    /// Handle an inbound webhook HTTP request routed to this channel by
+    /// the inbound webhook host.
+    ///
+    /// Default: **unsupported** — poll-based connectors (telegram,
+    /// matrix, signal, …) and any connector whose inbound path is not yet
+    /// signature-verified return `Rejected`, so the host never exposes an
+    /// unauthenticated parse to the network. Webhook connectors that
+    /// verify the platform signature (Slack, WhatsApp, Twilio SMS)
+    /// override this to verify → parse → enqueue (mirroring their existing
+    /// `ingest_*` methods) and return a [`WebhookResponse`].
+    ///
+    /// Takes `&self` (not `&mut self`): connectors enqueue through their
+    /// interior-mutable inbox, so the host can ingest concurrently with
+    /// the poll loop without an exclusive borrow.
+    async fn ingest_webhook(
+        &self,
+        _req: &WebhookRequest,
+    ) -> Result<WebhookResponse, ChannelError> {
+        Err(ChannelError::Rejected(
+            "channel does not accept inbound webhooks".to_string(),
+        ))
+    }
 }

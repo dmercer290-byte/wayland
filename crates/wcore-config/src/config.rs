@@ -166,6 +166,11 @@ pub struct ConfigFile {
     #[serde(default)]
     pub session: SessionConfig,
 
+    /// `[inbound_webhook]` — HTTP host for inbound platform webhooks
+    /// (Slack / WhatsApp / Twilio SMS). Off by default.
+    #[serde(default)]
+    pub inbound_webhook: InboundWebhookConfig,
+
     #[serde(default)]
     pub compact: CompactConfig,
 
@@ -638,6 +643,40 @@ impl Default for SessionConfig {
     }
 }
 
+/// Inbound webhook host (`[inbound_webhook]`).
+///
+/// When `enabled`, the agent stands up an HTTP listener that routes
+/// `POST`/`GET /webhooks/<channel>` requests to the matching channel's
+/// signature-verifying [`Channel::ingest_webhook`] path. Off by default —
+/// no listener is bound unless the operator opts in.
+///
+/// `public_base_url` must be set to the exact public URL (scheme + host)
+/// the platform calls when the host sits behind a reverse proxy: Twilio
+/// signs the full request URL, so a mismatch fails signature verification.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct InboundWebhookConfig {
+    /// Whether to bind the inbound webhook listener. Default `false`.
+    pub enabled: bool,
+    /// Socket address to bind. Default `"127.0.0.1:8787"` (loopback only;
+    /// front it with a TLS-terminating proxy for public exposure).
+    pub bind: String,
+    /// Public base URL the platform calls (scheme + host, no trailing
+    /// path). Required for Twilio signature verification behind a proxy;
+    /// `None` reconstructs the URL from the request `Host` header.
+    pub public_base_url: Option<String>,
+}
+
+impl Default for InboundWebhookConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: "127.0.0.1:8787".to_string(),
+            public_base_url: None,
+        }
+    }
+}
+
 // --- Default value functions ---
 
 fn default_provider() -> String {
@@ -714,6 +753,10 @@ pub struct Config {
     /// registration is a no-op.
     pub advertised_capabilities: crate::tools::AdvertisedCapabilitiesConfig,
     pub session: SessionConfig,
+    /// Resolved copy of the on-disk `[inbound_webhook]` block. Bootstrap
+    /// consults `enabled` to decide whether to spawn the inbound webhook
+    /// host (see `wcore_agent::inbound_webhook`).
+    pub inbound_webhook: InboundWebhookConfig,
     pub compact: CompactConfig,
     pub plan: PlanConfig,
     pub file_cache: FileCacheConfig,
@@ -794,6 +837,7 @@ impl Default for Config {
             builtin_tools: crate::tools::BuiltinToolsConfig::default(),
             advertised_capabilities: crate::tools::AdvertisedCapabilitiesConfig::default(),
             session: SessionConfig::default(),
+            inbound_webhook: InboundWebhookConfig::default(),
             compact: crate::compact::CompactConfig::default(),
             plan: crate::plan::PlanConfig::default(),
             file_cache: crate::file_cache::FileCacheConfig::default(),
@@ -1267,6 +1311,7 @@ impl Config {
             builtin_tools: crate::tools::BuiltinToolsConfig::default(),
             advertised_capabilities: crate::tools::AdvertisedCapabilitiesConfig::default(),
             session: merged.session,
+            inbound_webhook: merged.inbound_webhook,
             compact: merged.compact,
             plan: merged.plan,
             file_cache: merged.file_cache,
@@ -2339,6 +2384,15 @@ fn merge_config_files(global: ConfigFile, project: ConfigFile) -> ConfigFile {
     // bootstrap skips tracker installation.
     let session_cap = project.session_cap.or(global.session_cap);
 
+    // Inbound webhook host — a present project block (anything differing from
+    // the off-by-default) wins outright; otherwise inherit global. Mirrors the
+    // presence-over-default strategy used for memory/browser above.
+    let inbound_webhook = if project.inbound_webhook != InboundWebhookConfig::default() {
+        project.inbound_webhook
+    } else {
+        global.inbound_webhook
+    };
+
     // FleetDispatcher-class fix (audit 2026-05-24 §3) — browser section:
     // project overrides global if any policy field differs from
     // `BrowserPolicyConfig::default()`. Mirrors the memory/budget strategy
@@ -2360,6 +2414,7 @@ fn merge_config_files(global: ConfigFile, project: ConfigFile) -> ConfigFile {
         profiles,
         tools,
         session,
+        inbound_webhook,
         compact,
         plan,
         file_cache,

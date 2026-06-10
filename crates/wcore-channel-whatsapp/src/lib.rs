@@ -30,7 +30,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 use wcore_channels::{
-    Channel, ChannelError,
+    Channel, ChannelError, WebhookRequest, WebhookResponse,
     event::{ChannelEvent, ConnectionState, MessageReceipt},
     outgoing::OutgoingMessage,
 };
@@ -258,6 +258,46 @@ impl Channel for WhatsappChannel {
 
     fn config_schema(&self) -> &str {
         include_str!("../schemas/whatsapp.json")
+    }
+
+    /// Handle a Meta WhatsApp Cloud API webhook request.
+    ///
+    /// Meta drives two distinct flows over the same URL:
+    ///   * **GET** — the one-time subscription handshake. Meta calls with
+    ///     `hub.mode=subscribe`, `hub.verify_token=<operator token>`, and
+    ///     `hub.challenge=<nonce>`. When the mode is `subscribe` and the
+    ///     token matches the connector's configured `verify_token`, the
+    ///     challenge is echoed back verbatim; otherwise it is rejected.
+    ///   * **POST** — runtime delivery. The `X-Hub-Signature-256` header
+    ///     is verified against the app secret (in [`Self::ingest_event`]).
+    async fn ingest_webhook(
+        &self,
+        req: &WebhookRequest,
+    ) -> Result<WebhookResponse, ChannelError> {
+        if req.method == "GET" {
+            let configured = self.config.verify_token.as_deref();
+            let mode = req.query_get("hub.mode");
+            let token = req.query_get("hub.verify_token");
+            let challenge = req.query_get("hub.challenge");
+            match (mode, token, challenge, configured) {
+                (Some("subscribe"), Some(token), Some(challenge), Some(configured))
+                    if token == configured =>
+                {
+                    Ok(WebhookResponse::challenge(challenge))
+                }
+                _ => Err(ChannelError::Auth(
+                    "whatsapp webhook verification failed".into(),
+                )),
+            }
+        } else {
+            let sig = req.header("x-hub-signature-256").ok_or_else(|| {
+                ChannelError::Auth("missing whatsapp signature header".into())
+            })?;
+            match self.ingest_event(&req.body, sig).await {
+                Ok(()) => Ok(WebhookResponse::ok()),
+                Err(e) => Err(ChannelError::Rejected(e.to_string())),
+            }
+        }
     }
 }
 

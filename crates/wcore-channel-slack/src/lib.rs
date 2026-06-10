@@ -29,7 +29,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use tokio::sync::Mutex;
 use wcore_channels::{
-    Channel, ChannelError,
+    Channel, ChannelError, WebhookRequest, WebhookResponse,
     event::{ChannelEvent, ConnectionState, MessageReceipt},
     outgoing::OutgoingMessage,
 };
@@ -264,6 +264,35 @@ impl Channel for SlackChannel {
 
     fn config_schema(&self) -> &str {
         include_str!("../schemas/slack.json")
+    }
+
+    /// Verify a Slack Events API POST and enqueue any resulting event.
+    ///
+    /// Pulls the `X-Slack-Signature` + `X-Slack-Request-Timestamp` headers
+    /// the platform sends, then delegates to [`Self::ingest_event`] (which
+    /// runs the signing-secret HMAC + timestamp window). A
+    /// `url_verification` challenge surfaces as a `200` echoing the
+    /// challenge string; everything else is an empty `200`.
+    async fn ingest_webhook(
+        &self,
+        req: &WebhookRequest,
+    ) -> Result<WebhookResponse, ChannelError> {
+        let (sig, ts) = match (
+            req.header("x-slack-signature"),
+            req.header("x-slack-request-timestamp"),
+        ) {
+            (Some(sig), Some(ts)) => (sig, ts),
+            _ => {
+                return Err(ChannelError::Auth(
+                    "missing slack signature headers".into(),
+                ));
+            }
+        };
+        match self.ingest_event(&req.body, sig, ts).await {
+            Ok(Some(challenge)) => Ok(WebhookResponse::challenge(challenge)),
+            Ok(None) => Ok(WebhookResponse::ok()),
+            Err(e) => Err(ChannelError::Rejected(e.to_string())),
+        }
     }
 }
 

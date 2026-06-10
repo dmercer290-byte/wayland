@@ -8,8 +8,9 @@
 //!
 //! Inbound: Twilio sends `application/x-www-form-urlencoded` POSTs to a
 //! configured webhook URL on every incoming SMS. The engine's webhook
-//! router invokes `SmsChannel::ingest_webhook(full_url, raw_body, signature)`
-//! when a POST hits the channel's URL. The adapter verifies the
+//! router invokes the [`Channel::ingest_webhook`] trait method, which
+//! delegates to `SmsChannel::ingest_twilio_webhook(full_url, raw_body,
+//! signature)` when a POST hits the channel's URL. The adapter verifies the
 //! HMAC-SHA1 signature, parses the form body, and enqueues an
 //! `IncomingMessage` for the next `poll_events()`.
 //!
@@ -29,7 +30,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use tokio::sync::Mutex;
 use wcore_channels::{
-    Channel, ChannelError,
+    Channel, ChannelError, WebhookRequest, WebhookResponse,
     event::{ChannelEvent, ConnectionState, MessageReceipt},
     outgoing::OutgoingMessage,
 };
@@ -118,7 +119,11 @@ impl SmsChannel {
     ///
     /// Returns `Err(SmsError::SignatureMismatch)` if the signature is
     /// invalid; the engine should respond HTTP 403 in that case.
-    pub async fn ingest_webhook(
+    ///
+    /// Named distinctly from the [`Channel::ingest_webhook`] trait method
+    /// (which takes a `&WebhookRequest`) to avoid inherent-vs-trait method
+    /// resolution ambiguity; the trait override delegates here.
+    pub async fn ingest_twilio_webhook(
         &self,
         full_url: &str,
         raw_body: &str,
@@ -255,6 +260,29 @@ impl Channel for SmsChannel {
 
     fn config_schema(&self) -> &str {
         include_str!("schemas/sms.json")
+    }
+
+    /// Verify a Twilio webhook POST and enqueue the inbound SMS.
+    ///
+    /// Twilio signs the full request URL plus the sorted form body, so the
+    /// host must supply [`WebhookRequest::full_url`] matching the exact
+    /// public URL Twilio called (see the host's `public_base_url`). Pulls
+    /// the `X-Twilio-Signature` header and delegates to
+    /// [`Self::ingest_twilio_webhook`].
+    async fn ingest_webhook(
+        &self,
+        req: &WebhookRequest,
+    ) -> Result<WebhookResponse, ChannelError> {
+        let sig = req.header("x-twilio-signature").ok_or_else(|| {
+            ChannelError::Auth("missing twilio signature header".into())
+        })?;
+        match self
+            .ingest_twilio_webhook(&req.full_url, &req.body, sig)
+            .await
+        {
+            Ok(()) => Ok(WebhookResponse::ok()),
+            Err(e) => Err(ChannelError::Rejected(e.to_string())),
+        }
     }
 }
 
@@ -491,7 +519,7 @@ mod tests {
         let pairs = inbound::parse_form(body);
         let sig = inbound::expected_signature(TEST_TOKEN, url, &pairs);
 
-        ch.ingest_webhook(url, body, &sig).await.unwrap();
+        ch.ingest_twilio_webhook(url, body, &sig).await.unwrap();
 
         let evs = ch.poll_events().await.unwrap();
         assert_eq!(evs.len(), 1);
@@ -519,7 +547,10 @@ mod tests {
         let body = "MessageSid=SM1&From=%2B1&To=%2B2&Body=hi&NumMedia=0";
         // Wrong signature (well-formed base64, 28 chars, but not a valid HMAC).
         let bogus = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        let err = ch.ingest_webhook(url, body, bogus).await.unwrap_err();
+        let err = ch
+            .ingest_twilio_webhook(url, body, bogus)
+            .await
+            .unwrap_err();
         assert!(matches!(err, SmsError::SignatureMismatch));
     }
 
@@ -566,7 +597,7 @@ mod tests {
     async fn ingest_webhook_before_start_errors() {
         let ch = SmsChannel::new("test", cfg_for("https://unused.example"), store_for_test());
         let err = ch
-            .ingest_webhook(
+            .ingest_twilio_webhook(
                 "https://x",
                 "MessageSid=SM1&From=%2B1&To=%2B2&Body=hi",
                 "sig",

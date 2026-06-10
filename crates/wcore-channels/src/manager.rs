@@ -230,6 +230,27 @@ impl ChannelManager {
         names.sort();
         names
     }
+
+    /// Route an inbound webhook request to channel `name`'s
+    /// [`Channel::ingest_webhook`](crate::Channel::ingest_webhook). The
+    /// connector verifies the platform signature, parses the body, and
+    /// enqueues any resulting event(s) for the next `poll_events()` (which
+    /// the inbound subscriber drains). The returned
+    /// [`WebhookResponse`](crate::webhook::WebhookResponse) is what the host
+    /// writes back to the platform. Unknown channel → `Config` error (the
+    /// host maps it to a 404). Mirrors [`Self::send_to`] for inbound.
+    pub async fn ingest_webhook(
+        &self,
+        name: &str,
+        req: &crate::webhook::WebhookRequest,
+    ) -> Result<crate::webhook::WebhookResponse, ChannelError> {
+        let slot = self
+            .channels
+            .get(name)
+            .ok_or_else(|| ChannelError::Config(format!("unknown channel: {name}")))?;
+        let guard = slot.lock().await;
+        guard.ingest_webhook(req).await
+    }
 }
 
 impl Default for ChannelManager {

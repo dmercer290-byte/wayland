@@ -32,6 +32,10 @@
       "type": "string",
       "description": "Key used to look up the Meta App Secret in the CredentialsStore — used for X-Hub-Signature-256 verification."
     },
+    "verify_token": {
+      "type": "string",
+      "description": "Operator-chosen verify token for Meta's GET hub.challenge subscription handshake (must match the value set in the Meta App dashboard). Not a platform secret; when unset the GET verification handshake is rejected."
+    },
     "api_base_url": {
       "type": "string",
       "description": "Override for the Graph API base URL. Defaults to https://graph.facebook.com — tests inject a mockito URL here.",

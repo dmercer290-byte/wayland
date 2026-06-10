@@ -49,6 +49,10 @@ pub mod file_history;
 // `/v1/models` with 5s cap) for the `/doctor` TUI diagnostics surface.
 pub mod health;
 pub mod hooks;
+// Inbound webhook HTTP host — routes platform webhook POSTs (Slack /
+// WhatsApp / Twilio SMS) to each channel's signature-verifying
+// `Channel::ingest_webhook` via the `ChannelManager`.
+pub mod inbound_webhook;
 pub mod mcp_curator;
 pub mod orchestration;
 pub mod output;

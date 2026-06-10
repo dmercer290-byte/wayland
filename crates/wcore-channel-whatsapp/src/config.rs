@@ -37,6 +37,14 @@ pub struct WhatsappConfig {
     /// signature verification via `X-Hub-Signature-256`).
     pub credential_handle_app_secret: String,
 
+    /// Verify token for Meta's GET `hub.challenge` subscription handshake.
+    /// This is an operator-chosen string (set identically in the Meta App
+    /// dashboard), not a platform-issued secret, so it lives in config
+    /// rather than the CredentialsStore. When unset, the GET verification
+    /// handshake is rejected.
+    #[serde(default)]
+    pub verify_token: Option<String>,
+
     /// Override the Graph API base URL — tests point this at mockito.
     #[serde(default = "default_api_base")]
     pub api_base_url: String,
@@ -72,6 +80,7 @@ impl WhatsappConfig {
             default_recipient: String::new(),
             credential_handle_access_token: "whatsapp.test.access_token".to_string(),
             credential_handle_app_secret: "whatsapp.test.app_secret".to_string(),
+            verify_token: None,
             api_base_url: api_base.into(),
             graph_version: DEFAULT_GRAPH_VERSION.to_string(),
             max_retry_attempts: 3,

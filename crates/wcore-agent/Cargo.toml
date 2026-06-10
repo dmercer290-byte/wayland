@@ -132,6 +132,12 @@ base64.workspace = true
 # state + PKCE verifier generation are runtime paths, not test paths.
 hyper.workspace        = true
 hyper-util.workspace   = true
+# Inbound webhook host (`inbound_webhook.rs`) — axum 0.7 Router over a
+# tokio TcpListener routes `POST/GET /webhooks/:channel` to the matching
+# channel's `Channel::ingest_webhook`. Already in the workspace lockfile via
+# wcore-cli / wcore-acp (both declare axum 0.7 directly), so this adds no
+# new transitive deps.
+axum = "0.7"
 open.workspace         = true
 urlencoding.workspace  = true
 subtle.workspace       = true

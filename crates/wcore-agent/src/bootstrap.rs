@@ -84,6 +84,14 @@ pub struct BootstrapResult {
     /// the handle does NOT stop the task; aborting it does. `None` for every
     /// per-session / sub-agent / ACP build.
     pub inbound_subscriber: Option<tokio::task::JoinHandle<()>>,
+    /// Inbound webhook host task + its shutdown sender. `Some` only when
+    /// `[inbound_webhook] enabled = true` AND channels were not skipped.
+    /// **Hold the sender for the session lifetime** — dropping it closes the
+    /// watch channel and gracefully stops the host.
+    pub inbound_webhook: Option<(
+        tokio::task::JoinHandle<()>,
+        tokio::sync::watch::Sender<bool>,
+    )>,
 }
 
 /// Wave OL: plugin-provider router. Called after plugin discovery + init
@@ -1755,6 +1763,10 @@ impl AgentBootstrap {
         // `enable_inbound_dispatch` is set; the clone is cheap relative to
         // bootstrap and `self.config` is unavailable after the move.
         let config_for_dispatch = self.config.clone();
+        // Inbound webhook host config — captured before `self.config` moves
+        // into the engine. The host (Slack/WhatsApp/Twilio inbound POSTs) is
+        // spawned in the channel block below when enabled.
+        let inbound_webhook_cfg = self.config.inbound_webhook.clone();
 
         let channel_credentials: Option<
             std::sync::Arc<dyn wcore_config::credentials::CredentialsStore>,
@@ -2100,6 +2112,14 @@ impl AgentBootstrap {
         let channel_manager: std::sync::Arc<tokio::sync::Mutex<wcore_channels::ChannelManager>>;
         let channels_auto_registered: usize;
         let inbound_subscriber: Option<tokio::task::JoinHandle<()>>;
+        // Inbound webhook host handle + shutdown sender. The sender MUST be
+        // held for the session lifetime: dropping it closes the watch channel
+        // and triggers the host's graceful shutdown. Carried in
+        // `BootstrapResult` so the caller keeps it alive.
+        let inbound_webhook: Option<(
+            tokio::task::JoinHandle<()>,
+            tokio::sync::watch::Sender<bool>,
+        )>;
 
         if !self.without_channels {
             // Register adapters on the inner manager.
@@ -2243,6 +2263,21 @@ impl AgentBootstrap {
                 );
             }
 
+            // Inbound webhook host — when enabled, bind an HTTP listener that
+            // routes platform webhook POSTs (Slack / WhatsApp / Twilio SMS) to
+            // each channel's signature-verifying `ingest_webhook`. Off by
+            // default; only the signature-verified connectors override the
+            // trait method, so msteams' unauthenticated parse stays unexposed.
+            inbound_webhook =
+                crate::inbound_webhook::spawn(std::sync::Arc::clone(&lifted), &inbound_webhook_cfg);
+            if inbound_webhook.is_some() {
+                tracing::info!(
+                    target: "wcore_agent::bootstrap",
+                    bind = %inbound_webhook_cfg.bind,
+                    "inbound webhook host listening"
+                );
+            }
+
             // FleetDispatcher-class fix (audit 2026-05-24): SendMessageTool was
             // registered above with the boot-default `NullMessageTransport` so
             // its schema reaches the LLM from the start of the session. Now that
@@ -2277,11 +2312,13 @@ impl AgentBootstrap {
             // inbound subscriber is spawned (recursion guard).
             let _ = channel_credentials;
             let _ = config_for_dispatch;
+            let _ = inbound_webhook_cfg;
             channel_manager = std::sync::Arc::new(tokio::sync::Mutex::new(
                 wcore_channels::ChannelManager::new(),
             ));
             channels_auto_registered = 0;
             inbound_subscriber = None;
+            inbound_webhook = None;
         }
 
         // v0.8.1 U7 — spawn the cron runner. Errors resolving the
@@ -2429,6 +2466,7 @@ impl AgentBootstrap {
             channels_auto_registered,
             cron_runner,
             inbound_subscriber,
+            inbound_webhook,
         })
     }
 }
