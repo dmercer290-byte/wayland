@@ -10,7 +10,9 @@
 //!   surface as errors.
 
 use serde::Deserialize;
-use wcore_channels::event::{Attachment, ChannelEvent, ChatType, IncomingMessage, MediaKind};
+use wcore_channels::event::{
+    Attachment, ChannelEvent, ChatType, IncomingMessage, MediaKind, MentionKind,
+};
 
 use crate::error::SlackError;
 
@@ -63,7 +65,14 @@ fn parse_inner_event(ev: &serde_json::Value) -> Result<Parsed, SlackError> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| SlackError::MalformedPayload("inner event missing type".to_string()))?;
 
-    if ty != "message" {
+    // Slack delivers an @-mention in a channel as a dedicated `app_mention`
+    // event, distinct from the `message` event — so dropping everything but
+    // `message` made the bot deaf to channel mentions. Accept both. (Recommended
+    // subscription: `app_mention` for channels + `message.im` for DMs, so a
+    // channel mention arrives once; if both `app_mention` and `message.channels`
+    // are subscribed, the inbound dedupe cache collapses the shared `ts`.)
+    let is_app_mention = ty == "app_mention";
+    if ty != "message" && !is_app_mention {
         return Ok(Parsed::Ignored);
     }
 
@@ -181,6 +190,16 @@ fn parse_inner_event(ev: &serde_json::Value) -> Result<Parsed, SlackError> {
         thread_id,
         reply_to_message_id,
         platform: Some("slack".into()),
+        // An `app_mention` event IS an explicit @-mention of the bot; a plain
+        // `message` event is not (channel mentions arrive as app_mention, DMs
+        // as message.im which bypass mention gating). This is what makes
+        // require_mention gating actually admit a turn in a public channel.
+        was_mentioned: is_app_mention,
+        mention_kind: if is_app_mention {
+            Some(MentionKind::Native)
+        } else {
+            None
+        },
         // Fields we cannot populate from the inner event alone:
         //   sender_display / sender_handle — require a users.info API call.
         //   sender_alt_id — Slack exposes no secondary stable id in events.
@@ -188,7 +207,6 @@ fn parse_inner_event(ev: &serde_json::Value) -> Result<Parsed, SlackError> {
         //   chat_name — not present in the event payload.
         //   parent_chat_id — not applicable to Slack's flat channel model.
         //   account_id — multi-account routing not tracked at this layer.
-        //   was_mentioned / mention_kind — requires our bot user id.
         //   reply_to_text — Slack does not inline quoted text in events.
         ..Default::default()
     };
@@ -227,6 +245,50 @@ mod tests {
                 assert_eq!(msg.text, "hello world");
                 assert_eq!(msg.ts_secs, 1700000000);
                 assert_eq!(msg.id, "1700000000.000100");
+            }
+            other => panic!("expected MessageReceived, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn app_mention_sets_was_mentioned() {
+        let body = r#"{
+            "type":"event_callback",
+            "event": {
+                "type":"app_mention",
+                "channel":"C123",
+                "user":"U456",
+                "text":"<@UBOT> help",
+                "ts":"1700000000.000200"
+            }
+        }"#;
+        match parse_webhook(body).unwrap() {
+            Parsed::Event(ChannelEvent::MessageReceived { msg }) => {
+                assert!(msg.was_mentioned, "app_mention must set was_mentioned");
+                assert_eq!(msg.mention_kind, Some(MentionKind::Native));
+                assert_eq!(msg.chat_type, ChatType::Channel);
+                assert_eq!(msg.text, "<@UBOT> help");
+            }
+            other => panic!("expected MessageReceived, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plain_channel_message_is_not_a_mention() {
+        let body = r#"{
+            "type":"event_callback",
+            "event": {
+                "type":"message",
+                "channel":"C123",
+                "user":"U456",
+                "text":"just chatting",
+                "ts":"1700000000.000300"
+            }
+        }"#;
+        match parse_webhook(body).unwrap() {
+            Parsed::Event(ChannelEvent::MessageReceived { msg }) => {
+                assert!(!msg.was_mentioned);
+                assert_eq!(msg.mention_kind, None);
             }
             other => panic!("expected MessageReceived, got {other:?}"),
         }
