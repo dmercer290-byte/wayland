@@ -307,7 +307,7 @@ impl Channel for SlackChannel {
             .bot_token
             .as_deref()
             .ok_or_else(|| ChannelError::Auth("bot token not loaded".to_string()))?;
-        api::download_file(&self.http, &attachment.url, bot_token)
+        api::download_file(&self.http, &attachment.url, bot_token, api::MEDIA_HOSTS)
             .await
             .map_err(ChannelError::from)
     }

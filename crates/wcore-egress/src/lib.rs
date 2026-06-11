@@ -44,6 +44,7 @@ mod client;
 mod error;
 mod policy;
 mod request;
+mod url_allow;
 
 pub use client::{
     CONNECT_TIMEOUT, EgressClient, EgressClientBuilder, READ_TIMEOUT, TOOL_REQUEST_TIMEOUT,
@@ -54,6 +55,7 @@ pub use policy::{
     default_policy, global_policy_installed, install_global_policy,
 };
 pub use request::EgressRequestBuilder;
+pub use url_allow::host_in_allowlist;
 
 // Re-export the reqwest surface that migrated call sites still need to name
 // directly, so they do not have to keep a separate `reqwest` dependency just

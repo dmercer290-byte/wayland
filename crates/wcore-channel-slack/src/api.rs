@@ -275,16 +275,32 @@ pub async fn add_reaction(
     Ok(())
 }
 
-/// Download a Slack `url_private` file with the bot token. Single attempt;
-/// the media enricher bounds it with its own timeout. Slack returns the raw
-/// bytes on success; an unauthorized request yields an HTML login page (the
-/// caller MIME-sniffs and rejects non-media), so only transport/HTTP errors
-/// surface here.
+/// Slack file-download hosts. `url_private` arrives inside an inbound event
+/// (sender-influenced), and we attach the bot's `xoxb` token to the request —
+/// so the host is validated against this allowlist BEFORE the token is
+/// attached, fail-closed. This blocks both SSRF and exfiltration of the bot
+/// token to an attacker-controlled URL. Slack serves files from `files.slack.com`
+/// (and, for some grids, other `*.slack.com` hosts).
+pub const MEDIA_HOSTS: &[&str] = &["files.slack.com", ".slack.com"];
+
+/// Download a Slack `url_private` file with the bot token. The `url` comes from
+/// an inbound event, so it is validated against `allowed_hosts` (normally
+/// [`MEDIA_HOSTS`]) BEFORE the bot token is attached or any request is issued.
+/// Single attempt; the media enricher bounds it with its own timeout. Slack
+/// returns the raw bytes on success; an unauthorized request yields an HTML
+/// login page (the caller MIME-sniffs and rejects non-media), so only
+/// transport/HTTP errors surface here.
 pub async fn download_file(
     http: &wcore_egress::EgressClient,
     url: &str,
     bot_token: &str,
+    allowed_hosts: &[&str],
 ) -> Result<Vec<u8>, SlackError> {
+    if !wcore_egress::host_in_allowlist(url, allowed_hosts) {
+        return Err(SlackError::Api(
+            "refused media fetch: host not in Slack file-domain allowlist".to_string(),
+        ));
+    }
     let resp = http
         .get(url)
         .bearer_auth(bot_token)
@@ -394,9 +410,14 @@ mod reaction_tests {
             .create_async()
             .await;
         let http = wcore_egress::EgressClient::new();
-        let bytes = download_file(&http, &format!("{}/files/x.png", server.url()), "xoxb-tok")
-            .await
-            .unwrap();
+        let bytes = download_file(
+            &http,
+            &format!("{}/files/x.png", server.url()),
+            "xoxb-tok",
+            &["127.0.0.1"],
+        )
+        .await
+        .unwrap();
         assert_eq!(&bytes[..4], b"\x89PNG");
         mock.assert_async().await;
     }
@@ -410,9 +431,26 @@ mod reaction_tests {
             .create_async()
             .await;
         let http = wcore_egress::EgressClient::new();
-        let err = download_file(&http, &format!("{}/x", server.url()), "tok")
+        let err = download_file(&http, &format!("{}/x", server.url()), "tok", &["127.0.0.1"])
             .await
             .unwrap_err();
         assert!(matches!(err, SlackError::Auth(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn download_file_rejects_non_allowlisted_host_before_token() {
+        // A url_private pointing off Slack's file domains must be refused by the
+        // real allowlist before the bot token is ever attached/sent (SSRF +
+        // token-exfil guard). No mock server: the guard must short-circuit.
+        let http = wcore_egress::EgressClient::new();
+        let err = download_file(
+            &http,
+            "http://169.254.169.254/latest/meta-data/",
+            "xoxb-secret",
+            MEDIA_HOSTS,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, SlackError::Api(_)), "got {err:?}");
     }
 }

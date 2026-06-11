@@ -295,7 +295,7 @@ impl Channel for DiscordChannel {
         &self,
         attachment: &wcore_channels::Attachment,
     ) -> Result<Vec<u8>, ChannelError> {
-        rest::download_bytes(&self.http, &attachment.url)
+        rest::download_bytes(&self.http, &attachment.url, rest::MEDIA_HOSTS)
             .await
             .map_err(ChannelError::from)
     }

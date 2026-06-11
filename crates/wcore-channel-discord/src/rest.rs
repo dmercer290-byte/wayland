@@ -262,13 +262,28 @@ pub(crate) async fn add_reaction(
     status_to_result(resp.status(), "reaction")
 }
 
+/// Discord media CDN hosts. Inbound `attachment.url` values are attacker-
+/// controlled (they arrive verbatim in gateway JSON), so media fetches are
+/// confined to these hosts — fail-closed against SSRF to internal/metadata
+/// targets. Discord serves all attachment media from exactly these two.
+pub(crate) const MEDIA_HOSTS: &[&str] = &["cdn.discordapp.com", "media.discordapp.net"];
+
 /// Download a public Discord CDN media URL (no Authorization — the CDN is
-/// public; sending the bot token would be wrong). Single attempt; the media
+/// public; sending the bot token would be wrong). The `url` originates from an
+/// inbound message, so it is validated against `allowed_hosts` (normally
+/// [`MEDIA_HOSTS`]) before any request is issued. Single attempt; the media
 /// enricher bounds it with its own timeout.
 pub(crate) async fn download_bytes(
     http: &wcore_egress::EgressClient,
     url: &str,
+    allowed_hosts: &[&str],
 ) -> Result<Vec<u8>, DiscordError> {
+    if !wcore_egress::host_in_allowlist(url, allowed_hosts) {
+        return Err(DiscordError::Rejected {
+            code: 0,
+            description: "refused media fetch: host not in Discord CDN allowlist".to_string(),
+        });
+    }
     let resp = http
         .get(url)
         .timeout(Duration::from_secs(30))
@@ -463,9 +478,13 @@ mod reaction_tests {
             .create_async()
             .await;
         let http = wcore_egress::EgressClient::new();
-        let bytes = download_bytes(&http, &format!("{}/attachments/1/2/x.png", server.url()))
-            .await
-            .unwrap();
+        let bytes = download_bytes(
+            &http,
+            &format!("{}/attachments/1/2/x.png", server.url()),
+            &["127.0.0.1"],
+        )
+        .await
+        .unwrap();
         assert_eq!(&bytes[..4], b"\x89PNG");
         mock.assert_async().await;
     }
@@ -480,9 +499,24 @@ mod reaction_tests {
             .await;
         let http = wcore_egress::EgressClient::new();
         assert!(
-            download_bytes(&http, &format!("{}/x", server.url()))
+            download_bytes(&http, &format!("{}/x", server.url()), &["127.0.0.1"])
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn download_bytes_rejects_non_cdn_host_without_request() {
+        // An inbound attachment URL pointing at cloud metadata (SSRF) must be
+        // refused by the real CDN allowlist before any network call is made.
+        let http = wcore_egress::EgressClient::new();
+        let err = download_bytes(
+            &http,
+            "http://169.254.169.254/latest/meta-data/iam/",
+            MEDIA_HOSTS,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, DiscordError::Rejected { .. }), "got {err:?}");
     }
 }
