@@ -72,6 +72,9 @@ pub mod postgres_schema;
 pub mod tts;
 pub mod video_analyze;
 // v0.9.0 W1 B10 — cpal-backed audio recorder + OS-shell player.
+// Issue #14 — gated behind the off-by-default `voice` feature so the default
+// binary does not pull cpal → libasound.so.2 (ALSA) on Linux.
+#[cfg(feature = "voice")]
 pub mod voice_mode;
 
 // -- Re-exports so existing consumers keep using `wcore_agent::tool_backends::X`. --

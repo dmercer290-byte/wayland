@@ -159,8 +159,12 @@ tempfile.workspace     = true
 tar.workspace          = true
 flate2.workspace       = true
 tokio-postgres.workspace = true
-cpal.workspace         = true
-hound.workspace        = true
+# Issue #14 — voice_mode mic-capture deps. Optional + gated behind the
+# off-by-default `voice` feature so the default binary does NOT link the OS
+# audio lib (libasound.so.2 / ALSA on Linux), which must not be a hard
+# runtime dependency of a TUI. Enable with `--features voice`.
+cpal  = { workspace = true, optional = true }
+hound = { workspace = true, optional = true }
 
 workspace-hack.workspace = true
 
@@ -188,6 +192,12 @@ live-bedrock   = []
 # downloaded. Synthesis runtime is stubbed for v0.9.0 — turning the
 # feature on does not yet produce audio. Wire-up tracked for v0.9.1.
 piper_tts      = []
+# Issue #14 — voice_mode mic capture (cpal + hound). OFF by default: cpal
+# links the OS audio library (ALSA/libasound.so.2 on Linux, CoreAudio on
+# macOS, WASAPI on Windows). A TUI must not hard-require ALSA at runtime, so
+# the default binary is built without it. Enable voice input with
+# `cargo build -p wcore-cli --features voice` (wcore-cli re-exports this).
+voice          = ["dep:cpal", "dep:hound"]
 
 [dev-dependencies]
 # Self-reference with test-utils feature so wcore-agent's own

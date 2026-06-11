@@ -50,6 +50,10 @@ harness-failure-injection = []
 workflow = []
 monitor = []
 review_artifact = []
+# Issue #14 — re-export wcore-agent's optional `voice` feature so the binary
+# can be built with mic capture: `cargo build -p wcore-cli --features voice`.
+# OFF by default to keep libasound.so.2 (ALSA) off the default Linux binary.
+voice = ["wcore-agent/voice"]
 
 [dependencies]
 async-trait.workspace    = true

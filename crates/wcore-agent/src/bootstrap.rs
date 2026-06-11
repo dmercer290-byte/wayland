@@ -767,6 +767,11 @@ impl AgentBootstrap {
         // `is_available() == false`. Registered AFTER the TTS/STT block so
         // the LLM observability surfaces are wired before the voice loop
         // is reachable.
+        //
+        // Issue #14 — gated behind the off-by-default `voice` feature; the
+        // default binary ships without cpal so it does not hard-link
+        // libasound.so.2 (ALSA) on Linux.
+        #[cfg(feature = "voice")]
         if let Some(vm) = crate::tool_backends::voice_mode::build_voice_mode_backend() {
             registry.register(Box::new(wcore_tools::voice_mode::VoiceModeTool::new(vm)));
         }
