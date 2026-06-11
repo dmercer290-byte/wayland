@@ -1002,6 +1002,10 @@ const CHAT_START_PLATFORM: Partial<Record<ProviderId, string>> = {
   // Local Ollama daemon - dispatched as the OpenAI-compatible protocol against
   // its hardcoded loopback `/v1` endpoint, with no API key (keyless local).
   'ollama-local': 'openai-compatible',
+  // Ollama Cloud - OpenAI-compatible against ollama.com with the user's key.
+  // Without this entry chat-start returned `unsupported` and inference fell
+  // back to api.openai.com (401). See #36.
+  'ollama-cloud': 'openai-compatible',
   // Azure intentionally absent - the legacy dispatch has no Azure arm; a
   // future Azure chat-start will need its own dispatcher work.
 };
@@ -1041,6 +1045,9 @@ const CHAT_START_BASE_URL: Partial<Record<ProviderId, string>> = {
   // Hardcoded local Ollama OpenAI-compatible endpoint. Never user-overridable -
   // the keyless allowance is anchored to this fixed loopback host.
   'ollama-local': 'http://127.0.0.1:11434/v1',
+  // Ollama Cloud OpenAI-compatible root (mirrors the pinned models probe in
+  // providerEndpoints.ts). See #36.
+  'ollama-cloud': 'https://ollama.com/v1',
 };
 
 /** Short human label per provider - shown in the home-picker button text. */
@@ -1077,6 +1084,7 @@ const CHAT_START_NAME: Partial<Record<ProviderId, string>> = {
   'flux-router': 'Flux Router',
   'openai-compatible': 'OpenAI Compatible',
   'ollama-local': 'Ollama (Local)',
+  'ollama-cloud': 'Ollama (Cloud)',
 };
 
 /**
