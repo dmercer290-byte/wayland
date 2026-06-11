@@ -17,6 +17,9 @@ pub struct ChatDbRow {
     #[allow(dead_code)] // reserved for future group-message routing
     pub is_group: bool,
     pub ts_apple_ns: i64,
+    /// Absolute local paths of any attachments on this message (`~` expanded).
+    /// Empty when the message is text-only.
+    pub attachment_paths: Vec<String>,
 }
 
 /// Path to the default chat.db for the current user.
@@ -26,6 +29,39 @@ pub fn chat_db_path() -> PathBuf {
         .join("Library")
         .join("Messages")
         .join("chat.db")
+}
+
+/// Expand a leading `~/` (or bare `~`) in a chat.db attachment path to the
+/// current user's home directory. chat.db stores attachment filenames as
+/// `~/Library/Messages/Attachments/…`; everything downstream needs an absolute
+/// path. Non-`~` paths are returned unchanged.
+pub(crate) fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if home.is_empty() {
+            return path.to_string();
+        }
+        return format!("{home}/{rest}");
+    }
+    if path == "~"
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return home;
+    }
+    path.to_string()
+}
+
+/// Split a `GROUP_CONCAT(filename, char(31))` aggregate into absolute paths.
+/// The separator (ASCII Unit Separator, 0x1F) never appears in a filesystem
+/// path, so paths containing spaces survive. Empty entries are dropped and each
+/// surviving entry has its leading `~` expanded.
+pub(crate) fn parse_attachment_paths(concat: &str) -> Vec<String> {
+    concat
+        .split('\u{1f}')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(expand_tilde)
+        .collect()
 }
 
 /// Fetch new inbound message rows with `rowid > since_rowid`.
@@ -75,6 +111,13 @@ pub async fn fetch_outgoing_since(
 // Blocking implementations
 // ---------------------------------------------------------------------------
 
+// Attachment filenames are aggregated per message via GROUP_CONCAT using
+// ASCII Unit Separator (char(31)) as the delimiter — a byte that never appears
+// in a filesystem path, so paths containing spaces/newlines survive the split.
+// The `text != '' OR a.filename IS NOT NULL` guard keeps pure-attachment
+// messages (a photo with no caption) instead of dropping them, while still
+// excluding bodyless system rows. GROUP BY m.rowid collapses the
+// message_attachment_join fan-out back to one row per message.
 const SQL_NEW_MESSAGES: &str = "
   SELECT
     m.rowid           AS rowid,
@@ -82,15 +125,19 @@ const SQL_NEW_MESSAGES: &str = "
     COALESCE(h.id, '')   AS sender_handle,
     COALESCE(c.guid, '') AS chat_guid,
     CASE WHEN c.style = 43 OR c.chat_identifier LIKE 'chat%' THEN 1 ELSE 0 END AS is_group,
-    m.date            AS ts_apple_ns
+    m.date            AS ts_apple_ns,
+    COALESCE(GROUP_CONCAT(a.filename, char(31)), '') AS attachment_paths
   FROM message m
   LEFT JOIN handle h ON h.rowid = m.handle_id
   LEFT JOIN chat_message_join cmj ON cmj.message_id = m.rowid
   LEFT JOIN chat c ON c.rowid = cmj.chat_id
+  LEFT JOIN message_attachment_join maj ON maj.message_id = m.rowid
+  LEFT JOIN attachment a ON a.rowid = maj.attachment_id
   WHERE m.rowid > ?1
     AND m.is_from_me = 0
     AND m.handle_id != 0
-    AND COALESCE(m.text, '') != ''
+    AND (COALESCE(m.text, '') != '' OR a.filename IS NOT NULL)
+  GROUP BY m.rowid
   ORDER BY m.rowid ASC
 ";
 
@@ -173,6 +220,7 @@ fn fetch_new_messages_blocking(
 
     let rows = stmt
         .query_map([since_rowid], |row| {
+            let attachment_concat: String = row.get(6)?;
             Ok(ChatDbRow {
                 rowid: row.get(0)?,
                 text: row.get(1)?,
@@ -180,6 +228,7 @@ fn fetch_new_messages_blocking(
                 chat_guid: row.get(3)?,
                 is_group: row.get::<_, i32>(4)? != 0,
                 ts_apple_ns: row.get(5)?,
+                attachment_paths: parse_attachment_paths(&attachment_concat),
             })
         })
         .map_err(|e| IMessageError::Database(format!("query: {e}")))?
@@ -266,5 +315,30 @@ mod tests {
     #[test]
     fn match_outgoing_guid_empty_rows_is_none() {
         assert_eq!(match_outgoing_guid(&[], "anything"), None);
+    }
+
+    #[test]
+    fn parse_attachment_paths_splits_on_unit_separator_and_drops_empties() {
+        // Two paths joined by char(31); a path with a space must survive intact.
+        let concat = "/a/b/IMG 1.heic\u{1f}/a/b/clip.mov\u{1f}";
+        let got = parse_attachment_paths(concat);
+        assert_eq!(got, vec!["/a/b/IMG 1.heic", "/a/b/clip.mov"]);
+    }
+
+    #[test]
+    fn parse_attachment_paths_empty_is_empty_vec() {
+        assert!(parse_attachment_paths("").is_empty());
+    }
+
+    #[test]
+    fn expand_tilde_uses_home() {
+        // SAFETY: single-threaded test; restored implicitly at process exit.
+        unsafe { std::env::set_var("HOME", "/Users/test") };
+        assert_eq!(
+            expand_tilde("~/Library/Messages/Attachments/x/IMG.heic"),
+            "/Users/test/Library/Messages/Attachments/x/IMG.heic"
+        );
+        // A path that does not start with ~ is unchanged.
+        assert_eq!(expand_tilde("/abs/path.png"), "/abs/path.png");
     }
 }

@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 use wcore_channels::Channel;
 use wcore_channels::error::ChannelError;
 use wcore_channels::event::{
-    ChannelEvent, ChatType, ConnectionState, IncomingMessage, MessageReceipt,
+    Attachment, ChannelEvent, ChatType, ConnectionState, IncomingMessage, MediaKind, MessageReceipt,
 };
 use wcore_channels::outgoing::OutgoingMessage;
 use wcore_config::credentials::CredentialsStore;
@@ -30,6 +30,49 @@ use crate::db::{
 
 const SEND_QUEUE_MAX: usize = 50;
 const OSASCRIPT_TIMEOUT_MS: u64 = 15_000;
+
+/// Upper bound on a single attachment read in `fetch_media`. iMessage media is
+/// already on local disk (no network fetch), but a multi-GB video must not be
+/// slurped into memory; the enricher only needs bytes for vision/transcription.
+const MAX_ATTACHMENT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Coarse [`MediaKind`] for a local attachment path, keyed off its extension.
+/// Used only to label inbound attachments so the host enricher routes them
+/// (image → vision, audio/voice → transcription). Unknown → `Other`.
+fn media_kind_for_path(path: &str) -> MediaKind {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "png" | "gif" | "heic" | "heif" | "webp" | "tiff" | "bmp" => {
+            MediaKind::Image
+        }
+        "mov" | "mp4" | "m4v" | "avi" | "mkv" | "webm" => MediaKind::Video,
+        "caf" | "m4a" | "mp3" | "aac" | "wav" | "amr" | "aiff" => MediaKind::Audio,
+        "pdf" | "doc" | "docx" | "txt" | "rtf" | "pages" | "key" | "numbers" | "zip" => {
+            MediaKind::Document
+        }
+        _ => MediaKind::Other,
+    }
+}
+
+/// Build inbound [`Attachment`]s from on-disk chat.db attachment paths. The
+/// path is local (already downloaded by Messages.app), so there is no URL and
+/// no network/SSRF surface — `fetch_media` reads the bytes straight off disk.
+fn attachments_from_paths(paths: &[String]) -> Vec<Attachment> {
+    paths
+        .iter()
+        .map(|p| Attachment {
+            url: String::new(),
+            path: Some(p.clone()),
+            content_type: None,
+            kind: media_kind_for_path(p),
+            transcribed: None,
+        })
+        .collect()
+}
 
 // Budget for resolving a just-sent message's real GUID from chat.db. The send
 // is committed by AppleScript before the row lands in SQLite, so we poll a few
@@ -205,6 +248,35 @@ impl Channel for IMessageChannel {
     fn config_schema(&self) -> &str {
         include_str!("schemas/imessage.json")
     }
+
+    /// Read an inbound attachment's bytes off local disk. iMessage attachments
+    /// are written under `~/Library/Messages/Attachments` by Messages.app, so
+    /// the path is already local — there is no URL to fetch and no SSRF surface.
+    /// Bounded by [`MAX_ATTACHMENT_BYTES`] to avoid slurping a huge video into
+    /// memory.
+    async fn fetch_media(&self, attachment: &Attachment) -> Result<Vec<u8>, ChannelError> {
+        let Some(path) = attachment.path.clone() else {
+            return Err(ChannelError::Rejected(
+                "iMessage attachment has no local path".to_string(),
+            ));
+        };
+
+        tokio::task::spawn_blocking(move || {
+            let meta = std::fs::metadata(&path)
+                .map_err(|e| ChannelError::Transport(format!("stat attachment {path}: {e}")))?;
+            if meta.len() > MAX_ATTACHMENT_BYTES {
+                return Err(ChannelError::Rejected(format!(
+                    "iMessage attachment {} exceeds {} byte cap",
+                    meta.len(),
+                    MAX_ATTACHMENT_BYTES
+                )));
+            }
+            std::fs::read(&path)
+                .map_err(|e| ChannelError::Transport(format!("read attachment {path}: {e}")))
+        })
+        .await
+        .map_err(|e| ChannelError::Transport(format!("attachment read task panic: {e}")))?
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,8 +341,11 @@ async fn poll_loop(
                             ChatType::Direct
                         },
                         platform: Some("imessage".into()),
-                        // No attachment paths, reply guids, display names, or group names
-                        // are present in the chat.db row — leave at defaults.
+                        // Local on-disk attachment paths from the chat.db join;
+                        // empty for text-only messages.
+                        attachments: attachments_from_paths(&row.attachment_paths),
+                        // No reply guids, display names, or group names are
+                        // present in the chat.db row — leave at defaults.
                         ..Default::default()
                     };
 
@@ -408,6 +483,55 @@ allowed_handles = ["+15555550100"]
     fn platform_tag_is_imessage() {
         let ch = IMessageChannel::new("test", default_config(), noop_creds());
         assert_eq!(ch.platform(), "imessage");
+    }
+
+    // Media-kind classification by extension (drives enricher routing).
+    #[test]
+    fn media_kind_classifies_by_extension() {
+        assert_eq!(media_kind_for_path("/x/IMG_1.HEIC"), MediaKind::Image);
+        assert_eq!(media_kind_for_path("/x/clip.mov"), MediaKind::Video);
+        assert_eq!(media_kind_for_path("/x/voice.caf"), MediaKind::Audio);
+        assert_eq!(media_kind_for_path("/x/doc.pdf"), MediaKind::Document);
+        assert_eq!(media_kind_for_path("/x/unknown.bin"), MediaKind::Other);
+        assert_eq!(media_kind_for_path("/x/noext"), MediaKind::Other);
+    }
+
+    // attachments_from_paths: local path set, url empty (no network), kind set.
+    #[test]
+    fn attachments_from_paths_builds_local_attachments() {
+        let atts = attachments_from_paths(&["/a/p.png".to_string(), "/a/v.mp4".to_string()]);
+        assert_eq!(atts.len(), 2);
+        assert_eq!(atts[0].path.as_deref(), Some("/a/p.png"));
+        assert!(atts[0].url.is_empty(), "local attachment carries no URL");
+        assert_eq!(atts[0].kind, MediaKind::Image);
+        assert_eq!(atts[1].kind, MediaKind::Video);
+    }
+
+    // fetch_media reads the bytes straight off the local path.
+    #[tokio::test]
+    async fn fetch_media_reads_local_bytes() {
+        let mut dir = std::env::temp_dir();
+        dir.push("wcore_imsg_fetch_media_reads.bin");
+        std::fs::write(&dir, b"IMSGBYTES").unwrap();
+
+        let ch = IMessageChannel::new("t", default_config(), noop_creds());
+        let att = Attachment {
+            path: Some(dir.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let bytes = ch.fetch_media(&att).await.unwrap();
+        assert_eq!(bytes, b"IMSGBYTES");
+
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    // fetch_media rejects an attachment with no resolvable local path.
+    #[tokio::test]
+    async fn fetch_media_rejects_missing_path() {
+        let ch = IMessageChannel::new("t", default_config(), noop_creds());
+        let att = Attachment::default(); // path: None
+        let err = ch.fetch_media(&att).await.unwrap_err();
+        assert!(matches!(err, ChannelError::Rejected(_)));
     }
 
     // 3. Error-mapping: IMessageError variants map to the correct ChannelError.
