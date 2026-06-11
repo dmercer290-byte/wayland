@@ -3,6 +3,7 @@ import {
   Bot,
   Brain,
   Cable,
+  ChevronDown,
   Cpu,
   Globe,
   Image as ImageIcon,
@@ -29,6 +30,7 @@ import { useGlobalKeybind } from '@/renderer/hooks/settings/useGlobalKeybind';
 import { SettingsViewModeProvider } from '@/renderer/components/settings/SettingsModal/settingsViewContext';
 import { isElectronDesktop, resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 import { extensions as extensionsIpc, type IExtensionSettingsTab } from '@/common/adapter/ipcBridge';
+import { Dropdown, Menu } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useExtI18n } from '@/renderer/hooks/system/useExtI18n';
@@ -251,6 +253,11 @@ const SettingsPageWrapper: React.FC<SettingsPageWrapperProps> = ({ children, cla
     return result;
   }, [isDesktop, t, extensionTabs, resolveExtTabName]);
 
+  const activeNavItem = React.useMemo(
+    () => menuItems.find((item) => pathname.includes(`/settings/${item.path}`)),
+    [menuItems, pathname]
+  );
+
   const containerClass = classNames(
     'settings-page-wrapper w-full min-h-full box-border overflow-y-auto',
     isMobile ? 'px-16px py-14px' : 'px-12px md:px-40px py-32px',
@@ -268,25 +275,44 @@ const SettingsPageWrapper: React.FC<SettingsPageWrapperProps> = ({ children, cla
       <ShortcutsOverlay open={shortcutsOpen} onClose={closeShortcuts} />
       <div className={containerClass}>
         {isMobile && (
-          <div className='settings-mobile-top-nav'>
-            {menuItems.map((item) => {
-              const active = pathname.includes(`/settings/${item.path}`);
-              return (
-                <button
-                  key={item.path}
-                  type='button'
-                  className={classNames('settings-mobile-top-nav__item', {
-                    'settings-mobile-top-nav__item--active': active,
-                  })}
-                  onClick={() => {
-                    void navigate(`/settings/${item.path}`, { replace: true });
+          <div className='settings-mobile-top-nav-dropdown'>
+            <Dropdown
+              trigger='click'
+              position='bl'
+              droplist={
+                <Menu
+                  selectedKeys={activeNavItem ? [activeNavItem.path] : []}
+                  onClickMenuItem={(key) => {
+                    void navigate(`/settings/${key}`, { replace: true });
                   }}
                 >
-                  <span className='settings-mobile-top-nav__icon'>{item.icon}</span>
-                  <span className='settings-mobile-top-nav__label'>{item.label}</span>
-                </button>
-              );
-            })}
+                  {menuItems.map((item) => (
+                    <Menu.Item key={item.path}>
+                      <span className='flex items-center gap-8px'>
+                        <span className='flex items-center shrink-0'>{item.icon}</span>
+                        <span className='truncate'>{item.label}</span>
+                      </span>
+                    </Menu.Item>
+                  ))}
+                </Menu>
+              }
+            >
+              <div
+                className='flex items-center gap-8px cursor-pointer w-full box-border'
+                style={{
+                  height: 36,
+                  padding: '0 12px',
+                  borderRadius: 8,
+                  backgroundColor: 'var(--color-fill-2)',
+                  border: '1px solid var(--color-border-1)',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                {activeNavItem && <span className='flex items-center shrink-0'>{activeNavItem.icon}</span>}
+                <span className='font-semibold text-14px truncate flex-1'>{activeNavItem?.label ?? ''}</span>
+                <ChevronDown size={16} className='shrink-0 opacity-60' />
+              </div>
+            </Dropdown>
           </div>
         )}
         <div className={contentClass}>{children}</div>

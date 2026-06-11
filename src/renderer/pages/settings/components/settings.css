@@ -1,5 +1,9 @@
 /* Settings mobile top nav */
 @media (max-width: 767px) {
+  .settings-mobile-top-nav-dropdown {
+    margin-bottom: 12px;
+  }
+
   .settings-mobile-top-nav {
     display: flex;
     gap: 8px;
