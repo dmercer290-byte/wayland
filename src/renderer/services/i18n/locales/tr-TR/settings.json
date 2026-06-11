@@ -2484,5 +2484,7 @@
       "secretStorage": "Secret storage",
       "engineConfig": "Engine config integrity"
     }
-  }
+  },
+  "checkForUpdatesDesc": "Check that you are running the latest version of Wayland.",
+  "checkForUpdatesButton": "Check for updates"
 }

@@ -2672,6 +2672,8 @@ export type I18nKey =
   | 'settings.channelsIndex.wecomTagline'
   | 'settings.channelsIndex.whatsappTagline'
   | 'settings.checkForUpdates'
+  | 'settings.checkForUpdatesButton'
+  | 'settings.checkForUpdatesDesc'
   | 'settings.claudeYoloMode'
   | 'settings.claudeYoloModeDesc'
   | 'settings.clean'
