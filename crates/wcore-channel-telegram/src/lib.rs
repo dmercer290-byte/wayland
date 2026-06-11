@@ -306,15 +306,26 @@ impl Channel for TelegramChannel {
             .map_err(ChannelError::from)
     }
 
-    /// Download inbound media bytes. Telegram's `Attachment.url` is already a
-    /// fully-resolved HTTPS download URL (the bot token is embedded in the
-    /// file path by `getFile` resolution), so this is a plain
-    /// authenticated-by-URL GET.
+    /// Download inbound media bytes. The attachment carries only the opaque
+    /// Telegram `file_id` (in `path`); the token-bearing download URL
+    /// (`{base}/file/bot{token}/{file_path}`) is resolved here on demand and
+    /// kept as an ephemeral local, so the bot token never enters the event
+    /// struct, traces, or logs.
     async fn fetch_media(
         &self,
         attachment: &wcore_channels::Attachment,
     ) -> Result<Vec<u8>, ChannelError> {
-        api::download_bytes(&self.http, &attachment.url)
+        let file_id = attachment.path.as_deref().ok_or_else(|| {
+            ChannelError::Other("telegram attachment missing file_id (path)".to_string())
+        })?;
+        let bot_token = self
+            .bot_token
+            .as_deref()
+            .ok_or_else(|| ChannelError::Auth("bot token not loaded".to_string()))?;
+        let url = api::get_file(&self.http, &self.api_base, bot_token, file_id)
+            .await
+            .map_err(ChannelError::from)?;
+        api::download_bytes(&self.http, &url)
             .await
             .map_err(ChannelError::from)
     }
@@ -761,11 +772,12 @@ parse_mode = "MarkdownV2"
     }
 
     // -----------------------------------------------------------------
-    // 9. Inbound media: file_id is resolved to a real download URL via
-    //    getFile, and the typed Attachment carries it.
+    // 9. Inbound media: the attachment carries only the opaque file_id; the
+    //    token-bearing download URL is resolved lazily by fetch_media (getFile
+    //    + download), so the bot token never enters the event/logs/traces.
     // -----------------------------------------------------------------
     #[tokio::test]
-    async fn inbound_photo_resolves_download_url_via_get_file() {
+    async fn inbound_photo_carries_file_id_and_fetch_media_resolves_lazily() {
         let mut server = mockito::Server::new_async().await;
         // getUpdates returns one message with a photo (two sizes).
         let _m_upd = server
@@ -799,6 +811,17 @@ parse_mode = "MarkdownV2"
             .expect_at_least(1)
             .create_async()
             .await;
+        // The lazy fetch_media download of the resolved file_path returns bytes.
+        let _m_dl = server
+            .mock(
+                "GET",
+                format!("/file/bot{TEST_TOKEN}/photos/file_0.jpg").as_str(),
+            )
+            .with_status(200)
+            .with_body(b"PNGDATA".as_slice())
+            .expect_at_least(1)
+            .create_async()
+            .await;
 
         let creds = InMemoryCreds::with_token("telegram.test.bot_token", TEST_TOKEN);
         let mut ch = TelegramChannel::with_api_base("test", cfg(), creds, server.url());
@@ -822,13 +845,22 @@ parse_mode = "MarkdownV2"
         }
         let msg = got.expect("expected a MessageReceived event with an attachment");
         let att = &msg.attachments[0];
-        assert_eq!(
-            att.url,
-            format!("{}/file/bot{TEST_TOKEN}/photos/file_0.jpg", server.url())
+        // The inbound attachment carries ONLY the opaque file_id — never the
+        // token-bearing download URL (which would leak the token into the
+        // event struct, traces, and logs).
+        assert_eq!(att.path.as_deref(), Some("big_id"));
+        assert!(
+            att.url.is_empty(),
+            "url must not be populated at ingest, got {:?}",
+            att.url
         );
         assert_eq!(att.content_type.as_deref(), Some("image/jpeg"));
-        // The raw file_id is preserved for re-resolution.
-        assert_eq!(att.path.as_deref(), Some("big_id"));
+        // fetch_media resolves the token URL lazily (getFile) and downloads.
+        let bytes = ch
+            .fetch_media(att)
+            .await
+            .expect("fetch_media resolves + downloads");
+        assert_eq!(&bytes, b"PNGDATA");
         ch.stop().await.unwrap();
     }
 

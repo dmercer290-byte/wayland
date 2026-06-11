@@ -10,7 +10,7 @@ use wcore_channels::event::{
     Attachment, ChannelEvent, ChatType, IncomingMessage, MediaKind, MentionKind,
 };
 
-use crate::api::{Update, get_file, get_updates};
+use crate::api::{Update, get_updates};
 
 /// Constructor arguments — flatter than a struct, easier to spawn.
 pub(crate) struct LongPollArgs {
@@ -60,16 +60,7 @@ pub(crate) async fn longpoll_loop(args: LongPollArgs) {
         match updates {
             Ok(updates) => {
                 consecutive_failures = 0;
-                ingest_updates(
-                    updates,
-                    &http,
-                    &api_base,
-                    &bot_token,
-                    &allowed_chat_ids,
-                    &inbox,
-                    &mut offset,
-                )
-                .await;
+                ingest_updates(updates, &allowed_chat_ids, &inbox, &mut offset).await;
             }
             Err(e) => {
                 tracing::warn!(
@@ -151,48 +142,28 @@ fn pending_media(msg: &crate::api::Message) -> Vec<PendingMedia> {
     out
 }
 
-/// Resolve each `PendingMedia` into a typed [`Attachment`]. The download
-/// URL comes from a bounded `getFile` call; on failure we log and fall
-/// back to leaving the raw `file_id` as the URL so the message is never
-/// dropped. The resolved `file_id` is preserved in `path` so downstream
-/// consumers can re-resolve if the URL expires.
-async fn resolve_attachments(
-    pending: Vec<PendingMedia>,
-    http: &wcore_egress::EgressClient,
-    api_base: &str,
-    bot_token: &str,
-) -> Vec<Attachment> {
-    let mut attachments = Vec::with_capacity(pending.len());
-    for m in pending {
-        let url = match get_file(http, api_base, bot_token, &m.file_id).await {
-            Ok(download_url) => download_url,
-            Err(e) => {
-                tracing::warn!(
-                    target: "wcore_channel_telegram::longpoll",
-                    error = %e,
-                    file_id = %m.file_id,
-                    "getFile failed; falling back to raw file_id as url"
-                );
-                m.file_id.clone()
-            }
-        };
-        attachments.push(Attachment {
-            url,
+/// Map each `PendingMedia` to a typed [`Attachment`], carrying only the opaque
+/// Telegram `file_id` in `path`.
+///
+/// The actual download URL embeds the live bot token in its path
+/// (`{base}/file/bot{token}/{file_path}`), so it is deliberately NOT resolved
+/// or stored here — storing it would leak the token into `IncomingMessage`,
+/// traces, and any log sink. [`TelegramChannel::fetch_media`] resolves the URL
+/// on demand (via `getFile`) as an ephemeral local at download time.
+fn resolve_attachments(pending: Vec<PendingMedia>) -> Vec<Attachment> {
+    pending
+        .into_iter()
+        .map(|m| Attachment {
             path: Some(m.file_id),
             content_type: m.content_type,
             kind: m.kind,
             ..Default::default()
-        });
-    }
-    attachments
+        })
+        .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn ingest_updates(
     updates: Vec<Update>,
-    http: &wcore_egress::EgressClient,
-    api_base: &str,
-    bot_token: &str,
     allowed_chat_ids: &HashSet<String>,
     inbox: &Arc<Mutex<VecDeque<ChannelEvent>>>,
     offset: &mut i64,
@@ -248,12 +219,11 @@ async fn ingest_updates(
         };
 
         // ---- Attachments --------------------------------------------
-        // Collect the raw media references, then resolve each file_id to
-        // a real download URL via getFile. Only messages that actually
-        // carry media make these extra calls; each is bounded by the http
-        // client's timeout so a hung getFile can't stall the poll loop.
+        // Carry only the opaque file_id; the token-bearing download URL is
+        // resolved lazily in `fetch_media` so the bot token never lands in
+        // the event struct, traces, or logs.
         let pending = pending_media(&msg);
-        let attachments = resolve_attachments(pending, http, api_base, bot_token).await;
+        let attachments = resolve_attachments(pending);
 
         // ---- Mention detection --------------------------------------
         // A `mention` entity in the text signals an @-mention; the bot
@@ -348,6 +318,29 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].kind, MediaKind::Audio);
         assert_eq!(pending[0].content_type.as_deref(), Some("audio/ogg"));
+    }
+
+    #[test]
+    fn resolve_attachments_carries_only_file_id_never_the_token_url() {
+        // The bot token must never be stored in the attachment (it would leak
+        // into IncomingMessage, traces, and logs). The token-bearing URL is
+        // resolved lazily in fetch_media; here only the opaque file_id is kept.
+        let pending = vec![PendingMedia {
+            file_id: "ABC123".to_string(),
+            kind: MediaKind::Image,
+            content_type: Some("image/jpeg".to_string()),
+        }];
+        let atts = resolve_attachments(pending);
+        assert_eq!(atts.len(), 1);
+        assert_eq!(atts[0].path.as_deref(), Some("ABC123"));
+        assert!(
+            atts[0].url.is_empty(),
+            "url must not carry a token-bearing URL"
+        );
+        assert!(
+            !atts[0].url.contains("bot"),
+            "no bot-token path segment may appear in the attachment url"
+        );
     }
 
     #[test]
