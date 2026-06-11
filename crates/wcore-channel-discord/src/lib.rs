@@ -220,9 +220,15 @@ impl Channel for DiscordChannel {
             .reply_to
             .as_deref()
             .map(|m| rest::MessageReference { message_id: m });
+        // Generate the dedup nonce once and reuse it across the retry loop
+        // inside `rest::send_message` (HIGH-7): a retry after a lost success
+        // re-sends the same nonce, which Discord dedupes instead of posting
+        // a duplicate.
+        let nonce = rest::next_nonce();
         let body = rest::CreateMessageBody {
             content: &msg.text,
             message_reference: reference,
+            nonce: Some(&nonce),
         };
         let result = rest::send_message(
             &self.http,

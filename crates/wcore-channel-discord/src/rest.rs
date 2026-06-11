@@ -41,6 +41,30 @@ pub struct CreateMessageBody<'a> {
     pub content: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message_reference: Option<MessageReference<'a>>,
+    /// Optimistic-send dedup token (≤25 chars). Discord deduplicates
+    /// create-message requests that carry the same `nonce` from the same
+    /// author within a short window, so reusing ONE nonce across the retry
+    /// loop turns a retry-after-a-lost-success into a no-op instead of a
+    /// duplicate post (HIGH-7).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<&'a str>,
+}
+
+/// Generate a process-unique nonce for Discord's optimistic-send dedup.
+/// The global monotonic counter guarantees uniqueness within a process;
+/// the wall-clock millis prefix keeps it distinct across restarts. The
+/// `-` separator makes the `{ms}-{n}` concatenation unambiguous, and the
+/// whole string stays well under Discord's 25-char cap.
+pub(crate) fn next_nonce() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    format!("{ms:x}-{n:x}")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -344,5 +368,62 @@ mod reaction_tests {
             .await
             .expect_err("403 should error");
         assert!(matches!(err, DiscordError::Auth(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn next_nonce_is_unique_and_within_cap() {
+        let a = next_nonce();
+        let b = next_nonce();
+        assert_ne!(a, b, "nonces must be unique per call");
+        assert!(
+            a.len() <= 25 && b.len() <= 25,
+            "nonce must fit Discord's 25-char cap"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_reuses_one_nonce_across_a_retry() {
+        // First attempt 503 (transient → retry), second 200. Both requests
+        // must carry the SAME nonce so Discord dedupes the retry.
+        let mut server = mockito::Server::new_async().await;
+        let nonce = next_nonce();
+        let body_matcher =
+            mockito::Matcher::Regex(format!(r#""nonce":"{}""#, regex_escape(&nonce)));
+        let first = server
+            .mock("POST", "/api/v10/channels/c1/messages")
+            .match_body(body_matcher.clone())
+            .with_status(503)
+            .expect(1)
+            .create_async()
+            .await;
+        let second = server
+            .mock("POST", "/api/v10/channels/c1/messages")
+            .match_body(body_matcher)
+            .with_status(200)
+            .with_body(r#"{"id":"m1","channel_id":"c1"}"#)
+            .expect(1)
+            .create_async()
+            .await;
+
+        let http = wcore_egress::EgressClient::new();
+        let body = CreateMessageBody {
+            content: "hi",
+            message_reference: None,
+            nonce: Some(&nonce),
+        };
+        let msg = send_message(&http, &server.url(), "tok", "c1", &body)
+            .await
+            .expect("retry should succeed on the 200");
+        assert_eq!(msg.id, "m1");
+        // Both mocks asserting proves the identical nonce went out twice.
+        first.assert_async().await;
+        second.assert_async().await;
+    }
+
+    /// Escape the regex metacharacter that can appear in a nonce (`-` is
+    /// literal in a char class but safe outside; the only other is none —
+    /// the nonce is `[0-9a-f-]`). Kept tiny and local.
+    fn regex_escape(s: &str) -> String {
+        s.replace('-', r"\-")
     }
 }
