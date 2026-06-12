@@ -224,6 +224,19 @@ pub struct Edge {
     pub when: Option<EdgeCondition>,
 }
 
+/// Per-node turn/token budget overrides. Either field `None` means "use the
+/// runner's `DEFAULT_MAX_TURNS`/`DEFAULT_MAX_TOKENS` for that dimension". Lives
+/// in [`GraphConfig::node_budgets`] as a side-table (keyed by node id) so the
+/// budget can be authored per workflow node without widening the [`Node`] enum
+/// or touching every `Node::AgentCall` construction/match site.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NodeBudget {
+    /// Max agent turns for this node; `None` → runner default.
+    pub max_turns: Option<u32>,
+    /// Max output tokens for this node; `None` → runner default.
+    pub max_tokens: Option<u32>,
+}
+
 /// A buildable graph spec: nodes by id + directed edges + a single
 /// entry. Per-key state reducer overrides live alongside.
 pub struct GraphConfig {
@@ -231,6 +244,12 @@ pub struct GraphConfig {
     pub edges: Vec<Edge>,
     pub entry: NodeId,
     pub state_reducers: HashMap<String, StateReducer>,
+    /// Per-node turn/token budget overrides, keyed by node id. A node absent
+    /// here (or present with a `None` field) falls back to the runner's
+    /// `DEFAULT_MAX_TURNS`/`DEFAULT_MAX_TOKENS`. The `ExecutionGraph` walker
+    /// ignores this table (it dispatches through the `NodeExecutor` trait, not
+    /// `SubAgentConfig`); only `WorkflowRunner` reads it.
+    pub node_budgets: HashMap<String, NodeBudget>,
 }
 
 impl GraphConfig {
@@ -242,6 +261,7 @@ impl GraphConfig {
             edges: Vec::new(),
             entry: entry.into(),
             state_reducers: HashMap::new(),
+            node_budgets: HashMap::new(),
         }
     }
 
@@ -384,6 +404,10 @@ impl ExecutionGraph {
             edges,
             entry,
             state_reducers,
+            // The walker dispatches via `NodeExecutor`, not `SubAgentConfig`,
+            // so per-node turn/token budgets do not apply here (only
+            // `WorkflowRunner` consumes them).
+            node_budgets: _,
         } = config;
 
         // Validate entry up-front for clean error messaging.

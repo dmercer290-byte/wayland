@@ -68,12 +68,34 @@ use crate::spawner::{AgentSpawner, SpawnExtras, SubAgentConfig, SubAgentResult};
 
 /// Default per-stage turn budget. Workflow stages are single-shot
 /// instructions, so a small budget keeps a stuck stage from burning the
-/// whole run; authors needing more can raise it once per-node overrides
-/// land (currently the graph IR carries no per-node turn budget).
+/// whole run. A node that genuinely needs more raises it per-node via the
+/// `AgentSpec.max_turns` override, carried through `GraphConfig.node_budgets`
+/// and applied by [`node_turn_budget`] / [`node_token_budget`] below.
 const DEFAULT_MAX_TURNS: usize = 8;
 
 /// Default per-stage token budget.
 const DEFAULT_MAX_TOKENS: u32 = 4096;
+
+/// Resolve a node's turn budget: the per-node `AgentSpec.max_turns` override
+/// (lowered into `graph.node_budgets`) when present, else `DEFAULT_MAX_TURNS`.
+fn node_turn_budget(graph: &GraphConfig, node_id: &str) -> usize {
+    graph
+        .node_budgets
+        .get(node_id)
+        .and_then(|b| b.max_turns)
+        .map(|t| t as usize)
+        .unwrap_or(DEFAULT_MAX_TURNS)
+}
+
+/// Resolve a node's token budget: the per-node `AgentSpec.max_tokens` override
+/// when present, else `DEFAULT_MAX_TOKENS`.
+fn node_token_budget(graph: &GraphConfig, node_id: &str) -> u32 {
+    graph
+        .node_budgets
+        .get(node_id)
+        .and_then(|b| b.max_tokens)
+        .unwrap_or(DEFAULT_MAX_TOKENS)
+}
 
 /// Bound on `Loop`/predicate-gated iteration so a malformed predicate can
 /// never spin forever. Mirrors the walker's `max_iters` discipline. Exposed to
@@ -1014,8 +1036,8 @@ impl<'a> WorkflowRunner<'a> {
             .spawn_one(SubAgentConfig {
                 name: id.to_string(),
                 prompt,
-                max_turns: DEFAULT_MAX_TURNS,
-                max_tokens: DEFAULT_MAX_TOKENS,
+                max_turns: node_turn_budget(&plan.graph, id),
+                max_tokens: node_token_budget(&plan.graph, id),
                 system_prompt: None,
             })
             .await
@@ -1055,8 +1077,8 @@ impl<'a> WorkflowRunner<'a> {
                 SubAgentConfig {
                     name: (*id).to_string(),
                     prompt,
-                    max_turns: DEFAULT_MAX_TURNS,
-                    max_tokens: DEFAULT_MAX_TOKENS,
+                    max_turns: node_turn_budget(&plan.graph, id),
+                    max_tokens: node_token_budget(&plan.graph, id),
                     system_prompt: None,
                 },
             ));
@@ -1252,6 +1274,11 @@ impl<'a> WorkflowRunner<'a> {
             });
         }
 
+        // No-barrier pipeline stages are NOT graph nodes (the step lowers to a
+        // single placeholder node), so they have no entry in
+        // `graph.node_budgets`; they run on the defaults. Per-stage overrides
+        // here would need a `PipelineDef`/`PipelineStageDispatch` carry — out of
+        // scope for the per-node (graph-dispatched AgentCall) budget override.
         let dispatch = PipelineStageDispatch {
             schema_defs: &plan.schema_defs,
             max_turns: DEFAULT_MAX_TURNS,
@@ -1365,8 +1392,8 @@ impl<'a> WorkflowRunner<'a> {
                 let cfg = SubAgentConfig {
                     name: agent_name.clone(),
                     prompt,
-                    max_turns: DEFAULT_MAX_TURNS,
-                    max_tokens: DEFAULT_MAX_TOKENS,
+                    max_turns: node_turn_budget(&plan.graph, agent_name),
+                    max_tokens: node_token_budget(&plan.graph, agent_name),
                     system_prompt: None,
                 };
                 let result = self.spawner.spawn_one(cfg).await;
@@ -1572,6 +1599,42 @@ Workflow(
         assert!(!plan.schemas.contains_key("lint"));
         // The named schema body was compiled into the def table.
         assert!(plan.schema_defs.contains_key("findings"));
+    }
+
+    #[test]
+    fn node_budget_resolution_uses_override_then_falls_back_to_defaults() {
+        // `big` overrides both dimensions, `wide` overrides only turns, `plain`
+        // overrides nothing. These are exactly the values the 4 SubAgentConfig
+        // construction sites feed into `max_turns`/`max_tokens`.
+        let src = r#"
+Workflow(
+    meta: (name: "x"),
+    phases: [Phase(title: "p", steps: [
+        Agent((id: "big", prompt: "lots", max_turns: Some(40), max_tokens: Some(16000))),
+        Agent((id: "wide", prompt: "wide", max_turns: Some(20))),
+        Agent((id: "plain", prompt: "default")),
+    ])],
+)
+"#;
+        let plan = WorkflowPlan::parse(src).expect("should parse");
+        let g = &plan.graph;
+
+        // A node that set both: both overrides flow through.
+        assert_eq!(node_turn_budget(g, "big"), 40);
+        assert_eq!(node_token_budget(g, "big"), 16000);
+
+        // A node that set only turns: turns overridden, tokens fall back.
+        assert_eq!(node_turn_budget(g, "wide"), 20);
+        assert_eq!(node_token_budget(g, "wide"), DEFAULT_MAX_TOKENS);
+
+        // A node with no override: both fall back to the runner defaults
+        // (the silent-truncation regression this fix closes).
+        assert_eq!(node_turn_budget(g, "plain"), DEFAULT_MAX_TURNS);
+        assert_eq!(node_token_budget(g, "plain"), DEFAULT_MAX_TOKENS);
+
+        // An id with no node at all also falls back rather than panicking.
+        assert_eq!(node_turn_budget(g, "absent"), DEFAULT_MAX_TURNS);
+        assert_eq!(node_token_budget(g, "absent"), DEFAULT_MAX_TOKENS);
     }
 
     #[test]

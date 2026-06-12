@@ -52,7 +52,9 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
-use super::super::graph::{AggregationStrategy, GraphConfig, InputMapper, StateReducer};
+use super::super::graph::{
+    AggregationStrategy, GraphConfig, InputMapper, NodeBudget, StateReducer,
+};
 use super::error::WorkflowParseError;
 use super::limits;
 use super::meta::WorkflowMeta;
@@ -185,6 +187,15 @@ pub struct AgentSpec {
     /// receives the whole state via [`InputMapper::PassThrough`].
     #[serde(default)]
     pub input: Option<String>,
+    /// Optional per-node turn budget override. When `None` the runner uses its
+    /// `DEFAULT_MAX_TURNS`. Lets a complex node opt out of the global 8-turn cap
+    /// that would otherwise silently truncate it.
+    #[serde(default)]
+    pub max_turns: Option<u32>,
+    /// Optional per-node output-token budget override. When `None` the runner
+    /// uses its `DEFAULT_MAX_TOKENS` (4096).
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
 }
 
 impl AgentSpec {
@@ -262,6 +273,7 @@ pub fn lower(workflow: Workflow) -> Result<(GraphConfig, WorkflowMeta), Workflow
     graph.nodes = builder.nodes;
     graph.edges = builder.edges;
     graph.state_reducers = builder.state_reducers;
+    graph.node_budgets = builder.node_budgets;
 
     Ok((graph, workflow.meta))
 }
@@ -274,6 +286,10 @@ struct Lowering<'a> {
     nodes: Vec<(String, super::super::graph::Node)>,
     edges: Vec<super::super::graph::Edge>,
     state_reducers: HashMap<String, StateReducer>,
+    /// Per-node turn/token budget overrides, keyed by node id. Only nodes whose
+    /// `AgentSpec` set `max_turns`/`max_tokens` get an entry; the runner falls
+    /// back to its defaults for absent (or `None`-field) nodes.
+    node_budgets: HashMap<String, NodeBudget>,
     /// Entry node of the whole graph (first node registered).
     entry: Option<String>,
     /// Terminal node ids of the previously-added step. The next step's
@@ -292,6 +308,7 @@ impl<'a> Lowering<'a> {
             nodes: Vec::new(),
             edges: Vec::new(),
             state_reducers: HashMap::new(),
+            node_budgets: HashMap::new(),
             entry: None,
             prev_terminals: Vec::new(),
             seen_ids: HashSet::new(),
@@ -363,6 +380,18 @@ impl<'a> Lowering<'a> {
 
     fn push_agent(&mut self, spec: &AgentSpec) {
         let id = spec.id.clone();
+        // Record any per-node budget override so the runner can use it instead
+        // of DEFAULT_MAX_TURNS/DEFAULT_MAX_TOKENS. Skip the entry entirely when
+        // neither dimension is set so the side-table stays sparse.
+        if spec.max_turns.is_some() || spec.max_tokens.is_some() {
+            self.node_budgets.insert(
+                id.clone(),
+                NodeBudget {
+                    max_turns: spec.max_turns,
+                    max_tokens: spec.max_tokens,
+                },
+            );
+        }
         // Mirror `GraphConfig::add_agent` exactly (node id == agent name).
         self.nodes.push((
             id.clone(),
@@ -628,6 +657,45 @@ Workflow(
             Some(StateReducer::Collect)
         ));
         assert!(!g.state_reducers.contains_key("output"));
+    }
+
+    #[test]
+    fn per_node_budget_overrides_lower_into_node_budgets() {
+        // `big` sets both overrides, `wide` sets only one, `plain` sets none.
+        let src = r#"
+Workflow(
+    meta: (name: "budgets"),
+    phases: [
+        Phase(title: "p", steps: [
+            Agent((id: "big", prompt: "do a lot", max_turns: Some(40), max_tokens: Some(16000))),
+            Agent((id: "wide", prompt: "wide only", max_turns: Some(20))),
+            Agent((id: "plain", prompt: "default budget")),
+        ]),
+    ],
+)
+"#;
+        let (g, _meta) = parse_workflow(src).expect("should parse");
+
+        // A node that set both dimensions lowers to a NodeBudget carrying both.
+        assert_eq!(
+            g.node_budgets.get("big"),
+            Some(&NodeBudget {
+                max_turns: Some(40),
+                max_tokens: Some(16000),
+            }),
+        );
+        // A node that set only one dimension carries that one; the other is None
+        // so the runner falls back to its default for that dimension.
+        assert_eq!(
+            g.node_budgets.get("wide"),
+            Some(&NodeBudget {
+                max_turns: Some(20),
+                max_tokens: None,
+            }),
+        );
+        // A node with no override has no entry at all — the side-table stays
+        // sparse and the runner uses DEFAULT_MAX_TURNS/DEFAULT_MAX_TOKENS.
+        assert!(!g.node_budgets.contains_key("plain"));
     }
 
     #[test]
