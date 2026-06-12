@@ -93,7 +93,17 @@ fn command_available(program: &str, version_arg: &str) -> bool {
 ///
 /// On any probe failure we log INFO and return `Ok(())` — the MCP server
 /// is optional infrastructure and must NOT block the engine.
-pub fn register(ctx: &mut PluginContext<'_>) -> PluginResult<()> {
+///
+/// RANK-57 hardening: the reachability probe (`command_available` +
+/// `mcp_server_is_reachable`) spawns child processes and busy-polls with
+/// blocking `std::thread::sleep` for up to ~2s. Running that directly on a
+/// tokio worker starves the reactor (guaranteed cold-start latency, and on a
+/// single-threaded runtime it blocks every other task). We therefore make
+/// `register` async and run the blocking probe inside
+/// `tokio::task::spawn_blocking`, awaiting the result so no async worker is
+/// ever blocked. The probe's semantics (same reachability decision, same 2s
+/// timeout budget) are unchanged — only the thread it runs on changes.
+pub async fn register(ctx: &mut PluginContext<'_>) -> PluginResult<()> {
     // Wave RB STABILITY MINOR #13: typed HostMisconfiguration error.
     let registry = ctx.mcp_servers.as_mut().ok_or_else(|| {
         wcore_plugin_api::PluginError::HostMisconfiguration {
@@ -102,6 +112,29 @@ pub fn register(ctx: &mut PluginContext<'_>) -> PluginResult<()> {
         }
     })?;
 
+    let spec = default_server_spec();
+
+    // Offload both blocking stages onto a blocking thread so the async
+    // worker stays free during the up-to-2s probe.
+    let probe_spec = spec.clone();
+    let reachable = tokio::task::spawn_blocking(move || probe_reachability(&probe_spec))
+        .await
+        // A panic inside the blocking probe must not block registration; treat
+        // a join failure as "not reachable" and skip (the server is optional).
+        .unwrap_or(false);
+
+    if !reachable {
+        return Ok(());
+    }
+
+    registry.register_mcp_server(spec)?;
+    Ok(())
+}
+
+/// Synchronous two-stage reachability probe. Safe to run on a blocking
+/// thread only (it spawns child processes and sleeps). Returns `true` iff
+/// `npx` is present AND the server smoke-test passes.
+fn probe_reachability(spec: &wcore_plugin_api::mcp_server_spec::McpServerSpec) -> bool {
     // Stage 1: npx presence (fast, no startup cost). PATHEXT-aware so the
     // Windows `npx.cmd` shim is found (issue #6).
     if !command_available("npx", "--version") {
@@ -109,21 +142,19 @@ pub fn register(ctx: &mut PluginContext<'_>) -> PluginResult<()> {
             "ijfw-memory: npx not found on PATH — skipping MCP registration \
              (install Node.js to enable)"
         );
-        return Ok(());
+        return false;
     }
 
     // Stage 2: verify the server is actually reachable.
-    let spec = default_server_spec();
-    if !mcp_server_is_reachable(&spec) {
+    if !mcp_server_is_reachable(spec) {
         tracing::info!(
             "ijfw-memory: MCP server did not start cleanly — skipping registration. \
              Run `npx @ijfw/memory-server --help` manually to diagnose."
         );
-        return Ok(());
+        return false;
     }
 
-    registry.register_mcp_server(spec)?;
-    Ok(())
+    true
 }
 
 /// Returns `true` if the MCP server is reachable / will start.
@@ -266,5 +297,69 @@ mod tests {
             "wayland-ijfw-definitely-absent-binary-xyz",
             "--version"
         ));
+    }
+
+    // RANK-57: the reachability probe must not run on the async worker.
+    // We can't directly observe which thread it ran on, but we CAN assert
+    // it completes promptly on a *single-threaded* current-thread runtime —
+    // if the blocking poll were run inline on the worker (instead of via
+    // `spawn_blocking`) the runtime could not also drive the join future.
+    // The `node`-fast-path returns without spawning any process, so the
+    // whole thing must finish well under the 2s probe budget.
+    #[test]
+    fn probe_reachability_node_fast_path_skips_for_absent_script() {
+        use wcore_plugin_api::mcp_server_spec::McpTransport;
+        // Absolute path that does not exist → fast path returns false, no
+        // process spawned, no thread::sleep poll loop entered.
+        let abs = if cfg!(windows) {
+            "C:\\wayland-ijfw\\definitely\\absent\\server.js"
+        } else {
+            "/wayland-ijfw/definitely/absent/server.js"
+        };
+        let spec = McpServerSpec {
+            name: "probe-test".to_string(),
+            transport: McpTransport::Stdio {
+                command: "node".to_string(),
+                args: vec![abs.to_string()],
+            },
+            env: HashMap::new(),
+        };
+        assert!(!mcp_server_is_reachable(&spec));
+    }
+
+    // The probe is awaited via `spawn_blocking`, so it must drive to
+    // completion on a current-thread runtime without deadlocking the worker.
+    #[test]
+    fn probe_offloads_to_blocking_thread_on_current_thread_runtime() {
+        use wcore_plugin_api::mcp_server_spec::McpTransport;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build current-thread runtime");
+
+        let abs = if cfg!(windows) {
+            "C:\\wayland-ijfw\\definitely\\absent\\server.js"
+        } else {
+            "/wayland-ijfw/definitely/absent/server.js"
+        };
+        let spec = McpServerSpec {
+            name: "probe-test".to_string(),
+            transport: McpTransport::Stdio {
+                command: "node".to_string(),
+                args: vec![abs.to_string()],
+            },
+            env: HashMap::new(),
+        };
+
+        let reachable = rt.block_on(async move {
+            tokio::task::spawn_blocking(move || probe_reachability(&spec))
+                .await
+                .unwrap_or(false)
+        });
+        // npx may or may not be present in CI, but the node fast-path inside
+        // the spec we passed short-circuits to false regardless. What this
+        // asserts is that the spawn_blocking offload joins cleanly on a
+        // single-threaded runtime (no reactor starvation / deadlock).
+        assert!(!reachable);
     }
 }

@@ -55,7 +55,7 @@ impl Plugin for WaylandIjfw {
         agents::register(ctx)?;
         skills::register(ctx)?;
         rules::register(ctx)?;
-        mcp::register(ctx)?;
+        mcp::register(ctx).await?;
         Ok(())
     }
 }
