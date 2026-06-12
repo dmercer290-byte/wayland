@@ -88,8 +88,10 @@ async fn fetch_token(
 
     let status = resp.status().as_u16();
     if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(MsTeamsError::TokenFetch { status, body });
+        // Do NOT read or surface the response body: the token POST sends
+        // `client_secret`, and Azure AD error bodies can echo request context,
+        // so the secret could reflect into logs via the error's Debug/Display.
+        return Err(MsTeamsError::TokenFetch { status });
     }
 
     resp.json::<TokenResponse>()
@@ -102,4 +104,50 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The non-2xx token-fetch error must never carry the response body: the
+    /// token POST sends `client_secret`, and Azure AD bodies can echo it back.
+    /// The error string (Display) and its Debug form must expose only the
+    /// status, never any secret-bearing body content.
+    #[test]
+    fn token_fetch_error_omits_response_body_keeps_status() {
+        // Simulates an Azure AD error body that echoes the request form,
+        // including the secret. This is the kind of bytes `resp.text()` would
+        // previously have captured into the error.
+        let leaky_body = "error=invalid_client&error_description=client_secret=SHHH+is+invalid";
+
+        // The construction path can no longer accept a body — the variant only
+        // carries a status — which is exactly the property we want to lock in.
+        let err = MsTeamsError::TokenFetch { status: 401 };
+
+        let rendered = err.to_string();
+        let debug = format!("{err:?}");
+
+        // The status must survive for diagnostics.
+        assert!(
+            rendered.contains("401"),
+            "error should include the HTTP status, got: {rendered}"
+        );
+
+        // The secret / form context must never reflect into the error.
+        for needle in ["SHHH", "client_secret"] {
+            assert!(
+                !rendered.contains(needle),
+                "Display error leaked `{needle}`: {rendered}"
+            );
+            assert!(
+                !debug.contains(needle),
+                "Debug error leaked `{needle}`: {debug}"
+            );
+        }
+
+        // Guard against the leaky body slipping in verbatim.
+        assert!(!rendered.contains(leaky_body));
+        assert!(!debug.contains(leaky_body));
+    }
 }

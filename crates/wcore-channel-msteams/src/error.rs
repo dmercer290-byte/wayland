@@ -4,8 +4,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum MsTeamsError {
-    #[error("OAuth2 token fetch failed ({status}): {body}")]
-    TokenFetch { status: u16, body: String },
+    /// OAuth2 token fetch returned a non-2xx status. The raw response body is
+    /// deliberately NOT captured: the token POST carries `client_secret`, and
+    /// some Azure AD error bodies echo request context, so surfacing the body
+    /// (via Debug/Display -> `ChannelError::Other` -> logs) can reflect the
+    /// secret. Only the HTTP status is retained.
+    #[error("OAuth2 token fetch failed (status {status})")]
+    TokenFetch { status: u16 },
     #[error("send failed ({status}): {body}")]
     SendFailed { status: u16, body: String },
     #[error("network: {0}")]
