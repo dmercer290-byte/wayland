@@ -480,6 +480,16 @@ pub struct Capabilities {
     /// `[observability] online_evolution = true` in config.
     #[serde(default, skip_serializing_if = "is_false")]
     pub online_evolution: bool,
+
+    /// Rank 85 — explicit memory-enabled signal. `user_model_backend` is an
+    /// empty string both when memory is disabled and when an older host
+    /// doesn't know the field, so it can't disambiguate the two. This flag
+    /// is emitted (`true`) only when long-term memory is on, giving the host
+    /// an unambiguous bool to key on instead of inferring from the backend
+    /// tag. Forward-additive; omitted when false per the W0 decoder contract
+    /// (absent reads as "off or unknown").
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub memory_enabled: bool,
 }
 
 impl Default for Capabilities {
@@ -505,6 +515,7 @@ impl Default for Capabilities {
             gepa_enabled: false,
             user_model_backend: String::new(),
             online_evolution: false,
+            memory_enabled: false,
         }
     }
 }
@@ -936,6 +947,39 @@ mod tests {
         assert!(!parsed.computer_use);
         assert!(!parsed.plugins);
         assert!(!parsed.gepa_enabled);
+        assert!(!parsed.memory_enabled);
+    }
+
+    #[test]
+    fn capabilities_memory_enabled_emits_when_on_and_omits_when_off() {
+        // Rank 85: memory_enabled gives the host an explicit bool to key on,
+        // disambiguating "memory disabled" from "field unknown". On → present
+        // and true; off → omitted (skip_serializing_if) but decodes to false.
+        let on = Capabilities {
+            memory_enabled: true,
+            ..Default::default()
+        };
+        let on_json = serde_json::to_string(&on).unwrap();
+        assert!(
+            on_json.contains("\"memory_enabled\":true"),
+            "expected memory_enabled key when on: {on_json}"
+        );
+        assert!(
+            serde_json::from_str::<Capabilities>(&on_json)
+                .unwrap()
+                .memory_enabled
+        );
+
+        let off_json = serde_json::to_string(&Capabilities::default()).unwrap();
+        assert!(
+            !off_json.contains("memory_enabled"),
+            "memory_enabled must be omitted when off: {off_json}"
+        );
+        assert!(
+            !serde_json::from_str::<Capabilities>(&off_json)
+                .unwrap()
+                .memory_enabled
+        );
     }
 
     #[test]

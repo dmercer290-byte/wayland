@@ -468,6 +468,11 @@ impl ProtocolSink {
             // empty string (default) → field omitted via skip_serializing_if.
             user_model_backend: self.user_model_backend.get().cloned().unwrap_or_default(),
             online_evolution: advertised.online_evolution,
+            // Rank 85: the backend tag is non-empty iff long-term memory is on
+            // (it is left empty when memory is disabled), so it doubles as the
+            // authoritative memory-enabled signal — surfaced as an explicit
+            // bool the host can key on without inferring from the tag string.
+            memory_enabled: self.user_model_backend.get().is_some_and(|b| !b.is_empty()),
             ..Default::default()
         }
     }
