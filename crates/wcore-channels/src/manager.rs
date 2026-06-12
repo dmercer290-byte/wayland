@@ -346,15 +346,35 @@ impl ChannelManager {
     /// [`WebhookResponse`](crate::webhook::WebhookResponse) is what the host
     /// writes back to the platform. Unknown channel → `Config` error (the
     /// host maps it to a 404). Mirrors [`Self::send_to`] for inbound.
+    ///
+    /// Concurrency (rank 73): the `self.channels` map is only borrowed long
+    /// enough to *clone the slot handle* (`Arc::clone`); that borrow is
+    /// released before the async signature-verify + parse runs, so a webhook
+    /// ingest never pins the `ChannelManager`'s own borrow across the await.
+    /// The per-slot `Mutex` is still held across the connector's
+    /// `ingest_webhook` because the channel is owned inside that mutex (the
+    /// `&mut`-taking lifecycle methods `start`/`stop`/`poll_events`/
+    /// `send_message` require exclusive access to the same instance, so the
+    /// instance cannot also be exposed as a lock-free shared `Arc<dyn Channel>`
+    /// without interior mutability). Fully de-serializing concurrent
+    /// same-channel deliveries (e.g. parallel Slack event batches) would
+    /// require migrating the `Channel` lifecycle methods to `&self` +
+    /// interior mutability — a cross-crate trait change touching every
+    /// connector — and is intentionally NOT done here.
     pub async fn ingest_webhook(
         &self,
         name: &str,
         req: &crate::webhook::WebhookRequest,
     ) -> Result<crate::webhook::WebhookResponse, ChannelError> {
-        let slot = self
-            .channels
-            .get(name)
-            .ok_or_else(|| ChannelError::Config(format!("unknown channel: {name}")))?;
+        // Clone the slot handle out of the map, then drop the map borrow so the
+        // async ingest below holds neither `&self.channels` nor `&self`.
+        let slot = {
+            let slot = self
+                .channels
+                .get(name)
+                .ok_or_else(|| ChannelError::Config(format!("unknown channel: {name}")))?;
+            Arc::clone(slot)
+        };
         let guard = slot.lock().await;
         guard.ingest_webhook(req).await
     }
@@ -778,6 +798,111 @@ mod tests {
             "expected the healthy channel to actually poll + deliver"
         );
         mgr.stop_all().await.unwrap();
+    }
+
+    /// Test-only channel whose `ingest_webhook` rendezvouses on a shared
+    /// barrier before returning. Two such channels sharing one barrier let a
+    /// test prove the manager does NOT serialize concurrent ingests across
+    /// different channels: both calls must reach the barrier for either to
+    /// proceed, so if the manager pinned a borrow/lock across the async ingest
+    /// the pair would deadlock. Returns a response carrying its own name so the
+    /// test can confirm routing landed on the right connector.
+    struct BarrierChannel {
+        name: String,
+        barrier: Arc<tokio::sync::Barrier>,
+    }
+
+    #[async_trait]
+    impl Channel for BarrierChannel {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn platform(&self) -> &str {
+            "barrier"
+        }
+        async fn start(&mut self) -> Result<(), ChannelError> {
+            Ok(())
+        }
+        async fn stop(&mut self) -> Result<(), ChannelError> {
+            Ok(())
+        }
+        async fn poll_events(&mut self) -> Result<Vec<ChannelEvent>, ChannelError> {
+            Ok(Vec::new())
+        }
+        async fn send_message(
+            &mut self,
+            msg: OutgoingMessage,
+        ) -> Result<MessageReceipt, ChannelError> {
+            Ok(MessageReceipt {
+                id: "barrier-out".into(),
+                conversation_id: msg.conversation_id,
+                ts_secs: 0,
+            })
+        }
+        fn config_schema(&self) -> &str {
+            r#"{"name":"string","platform":"barrier"}"#
+        }
+        async fn ingest_webhook(
+            &self,
+            _req: &crate::webhook::WebhookRequest,
+        ) -> Result<crate::webhook::WebhookResponse, ChannelError> {
+            // Block until the sibling channel's ingest also arrives. This only
+            // unblocks if both ingests run concurrently — i.e. the manager
+            // released its map/`self` borrow before awaiting the ingest.
+            self.barrier.wait().await;
+            Ok(crate::webhook::WebhookResponse::challenge(
+                self.name.clone(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_ingest_to_different_channels_does_not_serialize() {
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let mut mgr = ChannelManager::new();
+        mgr.register(Box::new(BarrierChannel {
+            name: "alpha".into(),
+            barrier: Arc::clone(&barrier),
+        }))
+        .await;
+        mgr.register(Box::new(BarrierChannel {
+            name: "beta".into(),
+            barrier: Arc::clone(&barrier),
+        }))
+        .await;
+
+        let mgr = Arc::new(mgr);
+        let req = crate::webhook::WebhookRequest::default();
+
+        let m1 = Arc::clone(&mgr);
+        let req1 = req.clone();
+        let h1 = tokio::spawn(async move { m1.ingest_webhook("alpha", &req1).await });
+        let m2 = Arc::clone(&mgr);
+        let req2 = req.clone();
+        let h2 = tokio::spawn(async move { m2.ingest_webhook("beta", &req2).await });
+
+        // If the manager serialized the two ingests, neither barrier.wait()
+        // would ever see its partner and this would time out.
+        let (r1, r2) = tokio::time::timeout(Duration::from_secs(5), async {
+            (h1.await.unwrap(), h2.await.unwrap())
+        })
+        .await
+        .expect("concurrent ingests must not serialize (deadlocked on barrier)");
+
+        // Routing landed on the correct connector: each response echoes the
+        // channel name the request was addressed to.
+        assert_eq!(r1.expect("alpha ok").body.as_deref(), Some("alpha"));
+        assert_eq!(r2.expect("beta ok").body.as_deref(), Some("beta"));
+    }
+
+    #[tokio::test]
+    async fn ingest_webhook_unknown_channel_errors() {
+        let mgr = ChannelManager::new();
+        let err = mgr
+            .ingest_webhook("missing", &crate::webhook::WebhookRequest::default())
+            .await
+            .expect_err("unknown channel must error");
+        assert!(matches!(err, ChannelError::Config(_)));
     }
 
     #[tokio::test]
