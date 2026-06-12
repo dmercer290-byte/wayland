@@ -43,7 +43,7 @@ use wcore_tools::video_analyze_tool::{
 };
 use wcore_tools::vision_tools::{VisionBackend, VisionOutcome};
 
-use super::build_vision_backend;
+use super::{build_ssrf_safe_tool_client, build_vision_backend};
 
 /// Two-layer outer wall-clock cap for the WHOLE pipeline (closes R-H1).
 /// ffmpeg + N vision calls + 1 synthesis call can take a while; cap at
@@ -57,6 +57,13 @@ const FFMPEG_CALL_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Default frame count when the request does not specify one.
 const DEFAULT_FRAME_COUNT: usize = 8;
+
+/// Hard cap on a downloaded remote video. Matches the channel-connector
+/// media cap (100 MiB) so an attacker-influenced URL cannot stream an
+/// unbounded body into the tempfile and OOM/disk-fill the host. Enforced
+/// by [`wcore_egress::read_body_capped`] (Content-Length pre-check plus
+/// mid-stream abort).
+const REMOTE_VIDEO_MAX_BYTES: usize = 100 * 1024 * 1024;
 
 /// One-time cache for the `ffmpeg -version` probe.
 static FFMPEG_AVAILABLE: OnceCell<bool> = OnceCell::const_new();
@@ -165,6 +172,94 @@ pub fn validate_local_path(raw: &Path) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
+/// Download a remote video URL into a tempfile, SSRF-safe, and return the
+/// open [`NamedTempFile`] handle (whose `Drop` deletes the file).
+///
+/// Security (the whole point of this function):
+///   * **HTTPS only.** Any non-`https` scheme (`http://`, `file://`, …) is
+///     refused before any network or filesystem access.
+///   * **SSRF pre-flight.** [`wcore_tools::url_safety::is_safe_url`] resolves
+///     the host and refuses private / loopback / link-local / cloud-metadata
+///     targets (169.254.0.0/16, 127/8, 10/8, …). Fails closed: a host that
+///     does not resolve, or resolves only to blocked IPs, is refused.
+///   * **Redirect + DNS-rebind safe.** The download uses the same
+///     [`build_ssrf_safe_tool_client`] the WebFetch backend uses, which
+///     re-validates **every** redirect hop via `is_safe_url` and pins
+///     `SsrfSafeResolver` so reqwest only dials validated public IPs at
+///     connect time (closing the check→connect rebind window the bare
+///     `is_safe_url` pre-flight alone would leave open).
+///   * **Bounded body.** [`wcore_egress::read_body_capped`] enforces
+///     [`REMOTE_VIDEO_MAX_BYTES`] via a Content-Length pre-check plus a
+///     mid-stream abort, so a lying / chunked response cannot OOM or
+///     disk-fill the host.
+///
+/// The tempfile is created under `~/.wayland/videos/` — one of the three
+/// prefixes [`validate_local_path`] whitelists — so the returned path passes
+/// the prefix check when handed back to the local analysis path. (Using the
+/// OS default temp dir would fail that check on macOS, where `$TMPDIR` lives
+/// under `/var/folders/…`, not `/tmp`.)
+async fn download_remote_video(url: &str) -> Result<tempfile::NamedTempFile, VideoAnalysisError> {
+    // HTTPS only — reject http://, file://, data:, anything non-TLS.
+    let scheme_ok = url
+        .split_once("://")
+        .map(|(scheme, _)| scheme.eq_ignore_ascii_case("https"))
+        .unwrap_or(false);
+    if !scheme_ok {
+        return Err(VideoAnalysisError::Other(format!(
+            "refused remote video: only https:// URLs are allowed, got: {url}"
+        )));
+    }
+
+    // SSRF pre-flight. Fails closed on private/loopback/link-local/metadata
+    // hosts and on hosts that don't resolve to any public address.
+    if !wcore_tools::url_safety::is_safe_url(url) {
+        return Err(VideoAnalysisError::Other(format!(
+            "refused remote video: URL resolves to a private or blocked address: {url}"
+        )));
+    }
+
+    // Download via the SSRF-safe client (per-redirect re-validation +
+    // SsrfSafeResolver DNS pinning), with a hard-capped streamed body.
+    let client = build_ssrf_safe_tool_client();
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| VideoAnalysisError::Other(format!("remote video download failed: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(VideoAnalysisError::Other(format!(
+            "remote video download returned HTTP {}",
+            resp.status().as_u16()
+        )));
+    }
+    let bytes = wcore_egress::read_body_capped(resp, REMOTE_VIDEO_MAX_BYTES)
+        .await
+        .map_err(|e| VideoAnalysisError::Other(format!("remote video body read: {e}")))?;
+
+    // Write into `~/.wayland/videos/` — one of the three prefixes
+    // `validate_local_path` whitelists, and cross-platform (no hardcoded
+    // `/tmp`). The tempfile's random name still defeats the predictable-
+    // path symlink-TOCTOU surface, and its `Drop` deletes the file.
+    let videos_dir = dirs::home_dir()
+        .map(|h| h.join(".wayland").join("videos"))
+        .ok_or_else(|| {
+            VideoAnalysisError::Other("could not resolve home dir for video tempfile".to_string())
+        })?;
+    std::fs::create_dir_all(&videos_dir).map_err(|e| {
+        VideoAnalysisError::Other(format!("could not create video staging dir: {e}"))
+    })?;
+    let mut tmp = tempfile::Builder::new()
+        .prefix("wayland-vid-")
+        .suffix(".mp4")
+        .tempfile_in(&videos_dir)
+        .map_err(|e| VideoAnalysisError::Other(format!("could not create video tempfile: {e}")))?;
+    std::io::Write::write_all(tmp.as_file_mut(), &bytes)
+        .map_err(|e| VideoAnalysisError::Other(format!("could not write video tempfile: {e}")))?;
+    std::io::Write::flush(tmp.as_file_mut())
+        .map_err(|e| VideoAnalysisError::Other(format!("could not flush video tempfile: {e}")))?;
+    Ok(tmp)
+}
+
 /// Backend that orchestrates ffmpeg frame extraction + vision-backend
 /// aggregation. Holds an `Arc<dyn VisionBackend>` so the same wired
 /// backend (Anthropic / OpenAI / Gemini per env) is used end-to-end.
@@ -198,21 +293,21 @@ impl FfmpegFrameVideoBackend {
         &self,
         req: VideoAnalysisRequest,
     ) -> Result<VideoAnalysisResponse, VideoAnalysisError> {
-        // Resolve the on-disk path. v0.9.0 W1 B3 keeps the URL-download
-        // path deferred (the tool layer's resolver already proves the
-        // URL is HTTPS + non-SSRF; remote videos still take the
-        // BackendNotConfigured-style "remote not yet wired" path until
-        // the dedicated downloader lands).
+        // Resolve the on-disk path. A `RemoteUrl` is downloaded — SSRF-safe
+        // — into a tempfile, then validated and analysed via the exact same
+        // local-file code path. `_remote_guard` keeps the `NamedTempFile`
+        // alive (its `Drop` deletes the file) for the whole pipeline; it is
+        // `None` for a `LocalFile` source.
+        let mut _remote_guard: Option<tempfile::NamedTempFile> = None;
         let local = match &req.source {
             VideoSource::LocalFile(p) => {
                 validate_local_path(p).map_err(VideoAnalysisError::Other)?
             }
-            VideoSource::RemoteUrl(_) => {
-                return Err(VideoAnalysisError::Other(
-                    "remote URL video analysis not yet wired in v0.9.0 (use a local file under \
-                     /tmp/, ~/Downloads/, or ~/.wayland/videos/)"
-                        .to_string(),
-                ));
+            VideoSource::RemoteUrl(url) => {
+                let tmp = download_remote_video(url).await?;
+                let path = validate_local_path(tmp.path()).map_err(VideoAnalysisError::Other)?;
+                _remote_guard = Some(tmp);
+                path
             }
         };
 
@@ -823,28 +918,30 @@ mod tests {
 
     // -- SSRF redirect (Track B preamble §1) ----------------------------
 
-    #[tokio::test]
-    async fn video_refuses_ssrf_redirect_to_metadata_service() {
-        // The video backend currently rejects HTTPS URL sources entirely
-        // (RemoteUrl variant returns "remote not yet wired"). Any future
-        // wiring MUST go through `build_ssrf_safe_tool_client`. Until
-        // then we assert the placeholder behaviour: a RemoteUrl request
-        // — including one that would target the AWS metadata service —
-        // is refused at the backend boundary without making a network
-        // call. This protects the agent today; the regression test
-        // re-fires when the URL path is wired in v0.9.x.
-        struct PanicBackend;
-        #[async_trait]
-        impl VisionBackend for PanicBackend {
-            async fn analyze(
-                &self,
-                _mime: &'static str,
-                _bytes: &[u8],
-                _prompt: &str,
-            ) -> VisionOutcome {
-                panic!("vision should not be called when source is RemoteUrl");
-            }
+    // A vision backend that panics if ever called. Used by the SSRF /
+    // scheme-rejection tests to PROVE the refusal happens at the URL gate,
+    // before any frame extraction or vision dispatch — i.e. no network
+    // fetch and no ffmpeg call occur on a refused URL.
+    struct PanicBackend;
+    #[async_trait]
+    impl VisionBackend for PanicBackend {
+        async fn analyze(
+            &self,
+            _mime: &'static str,
+            _bytes: &[u8],
+            _prompt: &str,
+        ) -> VisionOutcome {
+            panic!("vision should not be called when the remote URL is refused");
         }
+    }
+
+    #[tokio::test]
+    async fn video_refuses_ssrf_url_to_metadata_service() {
+        // The RemoteUrl path is now wired through an SSRF-safe download.
+        // A URL pointing at the AWS link-local metadata service
+        // (169.254.169.254) MUST be refused by `is_safe_url` at the URL
+        // gate — no network fetch, no ffmpeg, no vision call. The
+        // PanicBackend proves the vision path is never reached.
         let backend = FfmpegFrameVideoBackend::new(Arc::new(PanicBackend));
         let req = VideoAnalysisRequest {
             source: VideoSource::RemoteUrl("https://169.254.169.254/latest/meta-data".into()),
@@ -855,9 +952,70 @@ mod tests {
         let err = backend.analyze(req).await.unwrap_err();
         match err {
             VideoAnalysisError::Other(m) => {
-                assert!(m.contains("remote URL") || m.contains("not yet wired"));
+                assert!(
+                    m.contains("private or blocked address"),
+                    "expected SSRF refusal, got: {m}"
+                );
             }
-            other => panic!("expected Other for unwired remote URL, got: {other:?}"),
+            other => panic!("expected Other for SSRF URL, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn video_refuses_non_https_remote_url() {
+        // Plain-http (and any non-TLS scheme) is refused before SSRF
+        // resolution or any fetch — defends against downgrade and against
+        // `file://` smuggling. PanicBackend proves no vision dispatch.
+        let backend = FfmpegFrameVideoBackend::new(Arc::new(PanicBackend));
+        for url in [
+            "http://example.com/video.mp4",
+            "file:///etc/passwd",
+            "ftp://example.com/v.mp4",
+        ] {
+            let req = VideoAnalysisRequest {
+                source: VideoSource::RemoteUrl(url.into()),
+                mime_type: "video/mp4",
+                user_prompt: "?".into(),
+                model: None,
+            };
+            let err = backend.analyze(req).await.unwrap_err();
+            match err {
+                VideoAnalysisError::Other(m) => {
+                    assert!(
+                        m.contains("only https") && m.contains(url),
+                        "expected https-only refusal for {url}, got: {m}"
+                    );
+                }
+                other => panic!("expected Other for non-https {url}, got: {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn video_refuses_loopback_and_private_remote_urls() {
+        // Round out the SSRF gate: loopback and RFC-1918 hosts are refused
+        // by `is_safe_url` exactly like the metadata service. No fetch, no
+        // ffmpeg, no vision (PanicBackend).
+        let backend = FfmpegFrameVideoBackend::new(Arc::new(PanicBackend));
+        for url in [
+            "https://127.0.0.1/video.mp4",
+            "https://10.0.0.5/internal.mp4",
+            "https://[::1]/v.mp4",
+        ] {
+            let req = VideoAnalysisRequest {
+                source: VideoSource::RemoteUrl(url.into()),
+                mime_type: "video/mp4",
+                user_prompt: "?".into(),
+                model: None,
+            };
+            let err = backend.analyze(req).await.unwrap_err();
+            match err {
+                VideoAnalysisError::Other(m) => assert!(
+                    m.contains("private or blocked address"),
+                    "expected SSRF refusal for {url}, got: {m}"
+                ),
+                other => panic!("expected Other for private {url}, got: {other:?}"),
+            }
         }
     }
 }
