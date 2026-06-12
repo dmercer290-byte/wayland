@@ -195,10 +195,23 @@ async fn render_diff(base: Option<String>, root: &Path) -> String {
         Some(b) => format!("@diff {b}"),
         None => "@diff (working tree)".to_string(),
     };
+    // The base ref comes from composer text (and a prompt-injected agent can
+    // author that text). Even in argv mode — where no shell interprets the
+    // token — git itself parses a leading `-` as an OPTION, not a revision:
+    // `@diff --output=/etc/x` would smuggle `git diff --output=…`, an
+    // arbitrary-file-write. Reject any `-`-prefixed base (a valid git ref
+    // never starts with `-`, so nothing legitimate is lost) and terminate
+    // option parsing with `--` so no following token can be read as a flag.
     let mut args: Vec<&str> = vec!["diff", "--no-color"];
     if let Some(b) = &base {
+        if b.starts_with('-') {
+            return format!(
+                "▌ {label} — refusing a base ref that starts with '-' (looks like a flag, not a revision)"
+            );
+        }
         args.push(b);
     }
+    args.push("--");
     let mut cmd = shell_command_argv("git", &args);
     cmd.current_dir(root);
     match cmd.output().await {
@@ -315,6 +328,27 @@ mod tests {
         assert!(
             out.contains("+two"),
             "working-tree diff must be inlined: {out}"
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_base_starting_with_dash_is_refused_not_smuggled_to_git() {
+        // `@diff --output=<path>` must NOT reach git, where it would be parsed
+        // as a flag and write the diff to an attacker-chosen file (argv mode
+        // stops the shell, but git itself still parses leading-`-` as options).
+        // The base is rejected with an explicit note and the sentinel file is
+        // never created.
+        let tmp = TempDir::new().unwrap();
+        let sentinel = tmp.path().join("pwned.txt");
+        let prompt = format!("diff @diff --output={}", sentinel.display());
+        let out = resolve_message(&prompt, tmp.path()).await;
+        assert!(
+            out.contains("refusing a base ref that starts with '-'"),
+            "flag-shaped base must be refused: {out}"
+        );
+        assert!(
+            !sentinel.exists(),
+            "git must never have run — the sentinel file must not exist"
         );
     }
 }
