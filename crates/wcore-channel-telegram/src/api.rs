@@ -42,6 +42,17 @@ pub struct Update {
     /// sender identity falls back to the channel chat).
     #[serde(default)]
     pub channel_post: Option<Message>,
+    /// An edited version of a message we may have already seen. We request
+    /// `edited_message` in `allowed_updates`, so without modeling it the
+    /// user's correction is silently dropped. Surfaced inbound (the edited
+    /// `Message` carries `edit_date`) so the agent sees the fix rather than
+    /// the stale original.
+    #[serde(default)]
+    pub edited_message: Option<Message>,
+    /// Edited channel post — the broadcast-channel analogue of
+    /// `edited_message`.
+    #[serde(default)]
+    pub edited_channel_post: Option<Message>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,6 +60,12 @@ pub struct Message {
     pub message_id: i64,
     #[serde(default)]
     pub date: i64,
+    /// Edit timestamp — present only when this `Message` arrived via
+    /// `edited_message` / `edited_channel_post`. Used as the inbound
+    /// `ts_secs` so a correction is timestamped at the edit, not the
+    /// original send.
+    #[serde(default)]
+    pub edit_date: Option<i64>,
     pub chat: Chat,
     #[serde(default)]
     pub from: Option<User>,

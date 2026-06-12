@@ -243,8 +243,17 @@ async fn ingest_updates(
 
         // A bot in a broadcast channel receives posts in `channel_post`, not
         // `message` — treat either as the inbound message so channel posts are
-        // not silently dropped.
-        let Some(msg) = u.message.or(u.channel_post) else {
+        // not silently dropped. An `edited_message` / `edited_channel_post`
+        // is surfaced too (it carries `edit_date`): we request edits in
+        // `allowed_updates`, so dropping them here would lose the user's
+        // correction. The edit re-dispatches as inbound with the corrected
+        // text rather than the stale original.
+        let Some(msg) = u
+            .message
+            .or(u.channel_post)
+            .or(u.edited_message)
+            .or(u.edited_channel_post)
+        else {
             continue;
         };
         let chat_id_str = msg.chat.id.to_string();
@@ -333,7 +342,8 @@ async fn ingest_updates(
                 conversation_id: chat_id_str,
                 author,
                 text,
-                ts_secs: msg.date,
+                // An edit timestamps at edit_date; a fresh message at date.
+                ts_secs: msg.edit_date.unwrap_or(msg.date),
                 attachments,
                 // Sender identity
                 sender_id,
@@ -513,6 +523,37 @@ mod tests {
                 // No `from` → sender falls back to the channel chat identity.
                 assert_eq!(msg.sender_id, "-1001234");
                 assert_eq!(msg.author, "News");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn edited_message_update_surfaces_the_correction() {
+        // We request `edited_message` in allowed_updates, so an edit must
+        // reach the agent rather than being silently dropped. The corrected
+        // text is surfaced and the inbound timestamp reflects edit_date, not
+        // the original send.
+        let update: Update = serde_json::from_str(
+            r#"{"update_id":50,"edited_message":{"message_id":9,"date":1700000000,"edit_date":1700000900,"chat":{"id":555,"type":"private"},"from":{"id":1,"username":"alice"},"text":"corrected text"}}"#,
+        )
+        .expect("valid Update JSON");
+        let inbox = Arc::new(Mutex::new(VecDeque::new()));
+        let mut offset = 0;
+        ingest_updates(vec![update], &HashSet::new(), &inbox, &mut offset).await;
+
+        assert_eq!(offset, 51, "offset must advance past the edit");
+        let guard = inbox.lock().await;
+        let event = guard
+            .front()
+            .expect("the edit must be ingested, not dropped");
+        match event {
+            ChannelEvent::MessageReceived { msg } => {
+                assert_eq!(msg.text, "corrected text");
+                assert_eq!(msg.conversation_id, "555");
+                // Timestamped at the edit, not the original send.
+                assert_eq!(msg.ts_secs, 1700000900);
+                assert_eq!(msg.author, "alice");
             }
             other => panic!("unexpected event: {other:?}"),
         }
