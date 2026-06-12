@@ -1446,12 +1446,24 @@ impl Router {
         // `protocol_bridge::apply_event`). No turn is in flight at submit
         // time, so the trim's `in_flight_turn_idx` guard lets it run.
         app.session.trim_history();
+        // Stage the most recent shell-tool output so an `@output` reference in
+        // this prompt resolves to it (the bridge consumes it on submit). The
+        // newest Bash tool card that has produced output, scanning back across
+        // the visible session; `None` if there is none yet.
+        let last_output = app
+            .session
+            .tool_cards
+            .iter()
+            .rev()
+            .find(|c| c.tool_name == "Bash" && c.output.is_some())
+            .and_then(|c| c.output.clone());
         if let Some(engine) = self.engine.as_mut() {
             // A submit while a turn is running is dropped by `submit`
             // itself (it gates on `is_busy`); the composer surface also
             // shows the working affordance so the user sees the state.
             self.msg_seq += 1;
             let msg_id = format!("tui-{}", self.msg_seq);
+            engine.set_pending_at_ref_output(last_output);
             engine.submit(text, msg_id);
         } else {
             // No engine (test / no-engine path): echo a system notice so

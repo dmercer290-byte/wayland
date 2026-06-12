@@ -182,6 +182,60 @@ impl WebFetchTool {
             backend_configured: true,
         }
     }
+
+    /// Run the full validated fetch pipeline and return the backend outcome.
+    ///
+    /// This is the **single shared validation path**: scheme check →
+    /// [`is_safe_url`] (SSRF / private-network guard) → [`check_website_access`]
+    /// (operator blocklist, fail-closed) → timeout clamp → backend fetch (whose
+    /// client is itself SSRF-safe: validated-IP DNS resolver + per-redirect
+    /// re-validation). Both the [`Tool::execute`] entry and any non-tool caller
+    /// (e.g. the CLI `@url` resolver) go through this, so the security checks
+    /// are defined exactly once and cannot drift into a second weaker path.
+    ///
+    /// `Err` carries a human-readable rejection reason (no `WebFetch:` prefix)
+    /// for an invalid or blocked URL.
+    pub async fn fetch_validated(
+        &self,
+        url: &str,
+        readable: bool,
+        timeout_ms: u32,
+    ) -> Result<FetchOutcome, String> {
+        let url = url.trim();
+        if url.is_empty() {
+            return Err("`url` is empty".to_string());
+        }
+        if url.len() > WEB_FETCH_MAX_URL_BYTES {
+            return Err(format!(
+                "URL too long ({} bytes, limit {})",
+                url.len(),
+                WEB_FETCH_MAX_URL_BYTES
+            ));
+        }
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err("only http:// and https:// URLs are supported".to_string());
+        }
+        if !is_safe_url(url) {
+            return Err("blocked - URL targets a private or internal network address".to_string());
+        }
+        match check_website_access(url, None) {
+            Ok(Some(block)) => return Err(block.message),
+            Ok(None) => {}
+            // tools-io-18: fail CLOSED on policy-evaluation error — a blocklist
+            // we cannot evaluate must block, not bypass.
+            Err(e) => {
+                tracing::warn!(target: "wcore_tools::web_fetch", "website_policy error: {e}");
+                return Err("blocked - website access policy could not be evaluated".to_string());
+            }
+        }
+        let timeout_ms = timeout_ms.clamp(1_000, WEB_FETCH_MAX_TIMEOUT_MS);
+        let req = FetchRequest {
+            url: url.to_string(),
+            timeout_ms,
+            readable,
+        };
+        Ok(self.backend.fetch(&req).await)
+    }
 }
 
 fn err_result(message: impl Into<String>) -> ToolResult {
@@ -248,43 +302,9 @@ impl Tool for WebFetchTool {
 
     async fn execute(&self, input: Value) -> ToolResult {
         let url = match input.get("url").and_then(Value::as_str) {
-            Some(s) => s.trim().to_string(),
+            Some(s) => s.to_string(),
             None => return err_result("WebFetch: missing required `url` field"),
         };
-        if url.is_empty() {
-            return err_result("WebFetch: `url` is empty");
-        }
-        if url.len() > WEB_FETCH_MAX_URL_BYTES {
-            return err_result(format!(
-                "WebFetch: URL too long ({} bytes, limit {})",
-                url.len(),
-                WEB_FETCH_MAX_URL_BYTES
-            ));
-        }
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            return err_result("WebFetch: only http:// and https:// URLs are supported");
-        }
-
-        if !is_safe_url(&url) {
-            return err_result(
-                "WebFetch: blocked - URL targets a private or internal network address",
-            );
-        }
-        match check_website_access(&url, None) {
-            Ok(Some(block)) => return err_result(format!("WebFetch: {}", block.message)),
-            Ok(None) => {}
-            // tools-io-18: fail CLOSED on policy-evaluation error. Previously
-            // this warned and continued, so a malformed/unreadable operator
-            // blocklist silently disabled the website-policy gate and let the
-            // fetch through. A blocklist we cannot evaluate must block, not
-            // bypass.
-            Err(e) => {
-                tracing::warn!(target: "wcore_tools::web_fetch", "website_policy error: {e}");
-                return err_result(
-                    "WebFetch: blocked - website access policy could not be evaluated",
-                );
-            }
-        }
 
         let readable = input
             .get("readable")
@@ -295,16 +315,15 @@ impl Tool for WebFetchTool {
             .get("timeout_ms")
             .and_then(Value::as_u64)
             .map(|v| v.min(u64::from(WEB_FETCH_MAX_TIMEOUT_MS)) as u32)
-            .unwrap_or(WEB_FETCH_DEFAULT_TIMEOUT_MS)
-            .max(1_000);
+            .unwrap_or(WEB_FETCH_DEFAULT_TIMEOUT_MS);
 
-        let req = FetchRequest {
-            url: url.clone(),
-            timeout_ms,
-            readable,
+        // One validated path (scheme + SSRF + website-policy + clamp + fetch).
+        let outcome = match self.fetch_validated(&url, readable, timeout_ms).await {
+            Ok(o) => o,
+            Err(msg) => return err_result(format!("WebFetch: {msg}")),
         };
 
-        match self.backend.fetch(&req).await {
+        match outcome {
             FetchOutcome::Ok {
                 status,
                 content_type,

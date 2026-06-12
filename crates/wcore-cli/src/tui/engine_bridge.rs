@@ -740,6 +740,10 @@ pub struct TuiEngine {
     /// from config in `run_tui_mode`. `None` until [`Self::set_session_store`]
     /// runs; `/resume` then reports no history.
     session_store: Option<(PathBuf, usize)>,
+    /// The most recent shell-tool output, staged by `send_message` just
+    /// before a submit so the spawned turn task can resolve an `@output`
+    /// reference. Consumed (`take`n) per submit; `None` between turns.
+    pending_at_ref_output: Option<String>,
 }
 
 impl TuiEngine {
@@ -772,6 +776,7 @@ impl TuiEngine {
             inventory: EngineInventory::default(),
             repo_root: PathBuf::from("."),
             session_store: None,
+            pending_at_ref_output: None,
         }
     }
 
@@ -798,6 +803,14 @@ impl TuiEngine {
     /// `/resume` listing reads. Called once in `run_tui_mode` from config.
     pub fn set_session_store(&mut self, directory: PathBuf, max_sessions: usize) {
         self.session_store = Some((directory, max_sessions));
+    }
+
+    /// Stage the most recent shell-tool output for the next submit, so an
+    /// `@output` reference in that prompt resolves to it. `send_message`
+    /// computes this from the live transcript (the last Bash tool card) right
+    /// before calling [`Self::submit`], which consumes it.
+    pub fn set_pending_at_ref_output(&mut self, output: Option<String>) {
+        self.pending_at_ref_output = output;
     }
 
     /// List saved sessions newest-first for `/resume`. A fast synchronous
@@ -873,8 +886,9 @@ impl TuiEngine {
         let engine = self.engine.clone();
         let tx = self.tx.clone();
         let turn_cancel = self.turn_cancel.clone();
-        // Captured for send-time `@session` resolution inside the task.
+        // Captured for send-time `@session` / `@output` resolution in the task.
         let session_store = self.session_store.clone();
+        let last_output = self.pending_at_ref_output.take();
         let handle = tokio::spawn(async move {
             // A terminal-event guard. If the body below `panic!`s — or is
             // dropped by `JoinHandle::abort()` — before a terminal event
@@ -896,6 +910,7 @@ impl TuiEngine {
             let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             let send_ctx = crate::tui::commands::at_refs::SendCtx {
                 session_store: session_store.clone(),
+                last_output,
             };
             let prompt =
                 crate::tui::commands::at_refs::resolve_message_with(&prompt, &root, &send_ctx)
