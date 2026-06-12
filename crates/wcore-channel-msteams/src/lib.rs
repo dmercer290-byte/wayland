@@ -343,6 +343,53 @@ impl Channel for MsTeamsChannel {
         })
     }
 
+    /// Send a Bot Framework `typing` activity so the user sees the bot is
+    /// composing. Uses the same conversation endpoint + Connector token as
+    /// [`send_message`](Self::send_message); a typing activity carries no body.
+    ///
+    /// (`react` is intentionally left at the trait default: the Bot Framework
+    /// Connector REST API exposes no reaction-send endpoint — Teams reactions
+    /// are a client/Graph concern, not a connector capability. `fetch_media`
+    /// likewise stays default until inbound attachment parsing lands, since the
+    /// connector surfaces no attachments to fetch yet.)
+    async fn send_typing(&self, conversation_id: &str) -> Result<(), ChannelError> {
+        let (app_id, app_password) = match (&self.app_id, &self.app_password) {
+            (Some(id), Some(pw)) => (id.clone(), pw.clone()),
+            _ => return Err(ChannelError::NotStarted),
+        };
+
+        let (service_url, conv_id) = parse_chat_id(conversation_id, &self.config.service_url);
+
+        let token = self
+            .token_cache
+            .get_token(&self.http, &app_id, &app_password, &self.token_url)
+            .await
+            .map_err(|e| ChannelError::Auth(format!("token: {e}")))?;
+
+        let url = format!(
+            "{service_url}v3/conversations/{}/activities",
+            urlencoding_encode(&conv_id),
+        );
+
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "type": "typing" }))
+            .send()
+            .await
+            .map_err(|e| ChannelError::Transport(e.to_string()))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ChannelError::Rejected(format!(
+                "Teams typing failed ({status}): {body}"
+            )));
+        }
+        Ok(())
+    }
+
     fn config_schema(&self) -> &str {
         include_str!("schemas/msteams.json")
     }
@@ -601,6 +648,56 @@ service_url = "https://smba.trafficmanager.net/emea/"
         token_mock.assert_async().await;
         send_mock.assert_async().await;
         ch.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_typing_posts_typing_activity() {
+        let mut server = mockito::Server::new_async().await;
+
+        let token_mock = server
+            .mock("POST", "/token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"access_token":"test_bearer","expires_in":3600,"token_type":"Bearer"}"#)
+            .create_async()
+            .await;
+
+        // The typing activity must POST to the activities endpoint with a body
+        // declaring type=typing (and no text).
+        let typing_mock = server
+            .mock(
+                "POST",
+                mockito::Matcher::Regex(r"/v3/conversations/[^/]+/activities".to_string()),
+            )
+            .match_body(mockito::Matcher::Regex(
+                r#""type"\s*:\s*"typing""#.to_string(),
+            ))
+            .with_status(200)
+            .with_body(r#"{"id":"typing-1"}"#)
+            .create_async()
+            .await;
+
+        let creds = MemCreds::with(&[
+            ("msteams.test.app_id", "app-id-value"),
+            ("msteams.test.app_password", "app-secret-value"),
+        ]);
+        let mut ch =
+            MsTeamsChannel::with_token_url("test", cfg(), creds, format!("{}/token", server.url()));
+        ch.start().await.unwrap();
+
+        let chat_id = format!("{}|19:conversation_abc", server.url());
+        ch.send_typing(&chat_id).await.unwrap();
+
+        token_mock.assert_async().await;
+        typing_mock.assert_async().await;
+        ch.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn send_typing_before_start_errors_not_started() {
+        let ch = MsTeamsChannel::new("test", cfg(), MemCreds::empty());
+        let err = ch.send_typing("19:abc").await.unwrap_err();
+        assert!(matches!(err, ChannelError::NotStarted));
     }
 
     // 9. ingest_webhook before start() refuses with NotStarted (the JWT
