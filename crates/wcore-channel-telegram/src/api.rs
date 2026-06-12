@@ -107,6 +107,12 @@ pub struct Message {
     /// Text entities (mentions, bot_commands, …).
     #[serde(default)]
     pub entities: Option<Vec<MessageEntity>>,
+    /// Album grouping key. Telegram delivers a multi-photo/video album as N
+    /// separate messages sharing this id (in the same getUpdates batch); we
+    /// coalesce them into one inbound message so an album is one agent turn,
+    /// not N.
+    #[serde(default)]
+    pub media_group_id: Option<String>,
 }
 
 /// Telegram `PhotoSize` — we only need the `file_id` as a reference URL.

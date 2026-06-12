@@ -236,6 +236,13 @@ async fn ingest_updates(
         return;
     }
     let mut events = Vec::with_capacity(updates.len());
+    // Album coalescing: Telegram delivers a multi-item album as N messages
+    // sharing one `media_group_id` (consecutively, in the same batch). We hold
+    // the `(group_id, event index)` of the album in flight so each follow-on
+    // item merges its attachment into the first item's event instead of firing
+    // its own turn. (A split across two getUpdates batches would still split —
+    // a debounce buffer would be needed for that rarer case.)
+    let mut last_album: Option<(String, usize)> = None;
     for u in updates {
         // Advance offset past every Update we see, even ones we drop —
         // otherwise we'd loop on the same filtered-out message forever.
@@ -258,6 +265,28 @@ async fn ingest_updates(
         };
         let chat_id_str = msg.chat.id.to_string();
         if !allowed_chat_ids.is_empty() && !allowed_chat_ids.contains(&chat_id_str) {
+            continue;
+        }
+
+        // ---- Attachments --------------------------------------------
+        // Carry only the opaque file_id; the token-bearing download URL is
+        // resolved lazily in `fetch_media` so the bot token never lands in
+        // the event struct, traces, or logs. Computed early so an album
+        // follow-on item can merge into the in-flight album event below.
+        let pending = pending_media(&msg);
+        let attachments = resolve_attachments(pending);
+
+        // ---- Album coalescing ---------------------------------------
+        // A follow-on album item (same media_group_id as the event in flight)
+        // contributes only its attachment; the album's text/caption rides on
+        // the first item. Merge and skip building a separate event/turn.
+        let group_id = msg.media_group_id.clone();
+        if let Some(gid) = &group_id
+            && let Some((last_gid, idx)) = &last_album
+            && last_gid == gid
+            && let Some(ChannelEvent::MessageReceived { msg: first }) = events.get_mut(*idx)
+        {
+            first.attachments.extend(attachments);
             continue;
         }
 
@@ -303,13 +332,6 @@ async fn ingest_updates(
             // Unrecognised future type — treat as Group (multi-party)
             _ => ChatType::Group,
         };
-
-        // ---- Attachments --------------------------------------------
-        // Carry only the opaque file_id; the token-bearing download URL is
-        // resolved lazily in `fetch_media` so the bot token never lands in
-        // the event struct, traces, or logs.
-        let pending = pending_media(&msg);
-        let attachments = resolve_attachments(pending);
 
         // ---- Mention detection --------------------------------------
         // A `mention` entity in the text signals an @-mention; the bot
@@ -369,6 +391,11 @@ async fn ingest_updates(
                 reply_to_text,
             },
         });
+
+        // Record this as the album in flight (so subsequent same-group items
+        // merge into it) — or clear it for a non-album message, so only a
+        // contiguous run of same-group items coalesces.
+        last_album = group_id.map(|gid| (gid, events.len() - 1));
     }
     if !events.is_empty() {
         let mut guard = inbox.lock().await;
@@ -523,6 +550,36 @@ mod tests {
                 // No `from` → sender falls back to the channel chat identity.
                 assert_eq!(msg.sender_id, "-1001234");
                 assert_eq!(msg.author, "News");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_album_coalesces_into_one_event_with_all_attachments() {
+        // Three photos sharing a media_group_id arrive as three messages in one
+        // getUpdates batch — they must surface as ONE inbound message carrying
+        // three attachments, not three separate agent turns.
+        let raw = [
+            r#"{"update_id":1,"message":{"message_id":10,"date":1,"chat":{"id":7,"type":"private"},"from":{"id":1,"username":"u"},"media_group_id":"alb1","caption":"three pics","photo":[{"file_id":"p1"}]}}"#,
+            r#"{"update_id":2,"message":{"message_id":11,"date":1,"chat":{"id":7,"type":"private"},"from":{"id":1,"username":"u"},"media_group_id":"alb1","photo":[{"file_id":"p2"}]}}"#,
+            r#"{"update_id":3,"message":{"message_id":12,"date":1,"chat":{"id":7,"type":"private"},"from":{"id":1,"username":"u"},"media_group_id":"alb1","photo":[{"file_id":"p3"}]}}"#,
+        ];
+        let updates: Vec<Update> = raw
+            .iter()
+            .map(|r| serde_json::from_str(r).expect("valid Update JSON"))
+            .collect();
+        let inbox = Arc::new(Mutex::new(VecDeque::new()));
+        let mut offset = 0;
+        ingest_updates(updates, &HashSet::new(), &inbox, &mut offset).await;
+
+        assert_eq!(offset, 4, "offset must advance past all three album items");
+        let guard = inbox.lock().await;
+        assert_eq!(guard.len(), 1, "an album must coalesce into ONE event");
+        match guard.front().expect("one event") {
+            ChannelEvent::MessageReceived { msg } => {
+                assert_eq!(msg.text, "three pics", "caption rides on the first item");
+                assert_eq!(msg.attachments.len(), 3, "all three photos are merged");
             }
             other => panic!("unexpected event: {other:?}"),
         }
