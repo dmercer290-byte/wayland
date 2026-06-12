@@ -96,6 +96,13 @@ pub struct AgentSpawner {
     /// behaviour expected by older tests; production callers attach the
     /// engine's bus via `with_bus(...)`.
     bus: Option<Arc<AgentBus>>,
+    /// Parent cancellation token. Every spawned child engine is bound to a
+    /// `child_token()` of this, so a host cancel (Esc) propagates into running
+    /// sub-agents and they stop at the next turn boundary instead of burning
+    /// LLM calls to completion. Defaults to a detached, never-cancelled token
+    /// for legacy callers; production attaches the engine's token via
+    /// `with_cancel(...)`.
+    cancel: tokio_util::sync::CancellationToken,
 }
 
 impl AgentSpawner {
@@ -104,7 +111,16 @@ impl AgentSpawner {
             provider,
             base_config: config,
             bus: None,
+            cancel: tokio_util::sync::CancellationToken::new(),
         }
+    }
+
+    /// Bind the spawner to the parent engine's cancellation token so a host
+    /// cancel propagates into every spawned sub-agent. Production bootstrap
+    /// attaches the engine's `cancel_token()` here, alongside `with_bus(...)`.
+    pub fn with_cancel(mut self, cancel: tokio_util::sync::CancellationToken) -> Self {
+        self.cancel = cancel;
+        self
     }
 
     /// v0.8.0 Task J — attach an `AgentBus` so every `spawn_one` /
@@ -135,6 +151,8 @@ impl AgentSpawner {
         let output: Arc<dyn OutputSink> = Arc::new(NullSink);
         let mut engine =
             AgentEngine::new_with_provider(self.provider.clone(), config, tools, output);
+        // Bind the child to the parent cancel token so a host cancel stops it.
+        engine.set_cancel_token(self.cancel.child_token());
 
         // v0.8.0 Task J — publish Spawned + FirstMessage before
         // entering the engine, then Completed/Errored on the way out.
@@ -377,6 +395,8 @@ impl AgentSpawner {
         let terminal_output = Arc::clone(&output);
         let mut engine =
             AgentEngine::new_with_provider(self.provider.clone(), config, tools, output);
+        // Bind the child to the parent cancel token so a host cancel stops it.
+        engine.set_cancel_token(self.cancel.child_token());
 
         // v0.8.0 Task J — Spawned + FirstMessage before the turn,
         // Completed/Errored after. `extras.parent_call_id` (set by
@@ -465,6 +485,7 @@ impl AgentSpawner {
             provider: self.provider.clone(),
             base_config: self.base_config.clone(),
             bus: self.bus.clone(),
+            cancel: self.cancel.clone(),
         }
     }
 
@@ -538,6 +559,8 @@ impl Spawner for AgentSpawner {
         let output: Arc<dyn OutputSink> = Arc::new(NullSink);
         let mut engine =
             AgentEngine::new_with_provider(self.provider.clone(), config, tools, output);
+        // Bind the child to the parent cancel token so a host cancel stops it.
+        engine.set_cancel_token(self.cancel.child_token());
         engine.set_initial_reasoning_effort(overrides.effort.clone());
 
         // v0.8.0 Task J — fork path publishes lifecycle too. Forks
@@ -878,6 +901,27 @@ mod posture_inheritance_tests {
         assert!(
             !child.observability.workflow_live_mode,
             "workflow-spawned child must have the live confirm gate forced off"
+        );
+    }
+
+    /// Rank 7 — a host cancel must propagate into spawned sub-agents. With the
+    /// parent token already fired, the child engine observes `is_cancelled()`
+    /// at its first turn boundary and returns WITHOUT reaching the provider
+    /// (`NeverProvider::stream` errors with "never called" if hit). The absence
+    /// of that error proves the child inherited the parent's cancel token.
+    #[tokio::test]
+    async fn cancelled_parent_short_circuits_spawned_child() {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        cancel.cancel();
+        let spawner =
+            AgentSpawner::new(Arc::new(NeverProvider), Config::default()).with_cancel(cancel);
+
+        let result = spawner.spawn_one(sub_config()).await;
+
+        assert!(
+            !result.text.contains("never called"),
+            "a cancelled parent must short-circuit the child before the provider; got: {}",
+            result.text
         );
     }
 }

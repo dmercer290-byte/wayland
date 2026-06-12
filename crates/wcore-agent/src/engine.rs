@@ -4092,7 +4092,11 @@ impl AgentEngine {
         let spawner = crate::spawner::AgentSpawner::new(
             std::sync::Arc::clone(&self.provider),
             self.config.clone(),
-        );
+        )
+        // Bind sub-agents to the engine's cancel token so a host cancel stops
+        // the whole workflow rather than letting 20+ sub-agents run to
+        // completion and burn LLM calls.
+        .with_cancel(self.cancel_token.clone());
 
         // (b) Synthesise the plan on a DETACHED task. The synthesis sub-agent
         // runs its own `engine.run`, which the compiler cannot prove never
