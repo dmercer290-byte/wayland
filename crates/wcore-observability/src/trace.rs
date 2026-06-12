@@ -104,6 +104,26 @@ impl ToolCallTrace {
         self.compaction_bytes = Some((raw_bytes, compacted_bytes));
     }
 
+    /// Mark this tool call as having been cancelled — i.e. the result was
+    /// produced because a cancellation path won (host cancel token / abort),
+    /// not because the tool ran to completion. The authoritative cancel signal
+    /// lives in `wcore-agent`; this additive setter lets the emission site
+    /// thread that state through to the trace before it is emitted. Lets hosts
+    /// distinguish a cancelled tool call from a normal one (the default).
+    pub fn with_cancelled(mut self, cancelled: bool) -> Self {
+        self.cancelled = cancelled;
+        self
+    }
+
+    /// Mark this tool call's output as partial — i.e. captured from a forced or
+    /// early streaming drain rather than a full read. Like [`Self::with_cancelled`],
+    /// the authoritative signal originates in `wcore-agent`; this additive
+    /// setter carries it onto the trace at the emission site.
+    pub fn with_partial(mut self, partial: bool) -> Self {
+        self.partial = partial;
+        self
+    }
+
     /// Attach a `result_snippet`, truncating to `RESULT_SNIPPET_MAX` bytes
     /// at a UTF-8 char boundary. Never splits a multi-byte char.
     ///
@@ -567,6 +587,38 @@ mod tests {
         t.cancelled = true;
         let v = serde_json::to_value(&t).unwrap();
         assert_eq!(v["cancelled"], true);
+    }
+
+    #[test]
+    fn cancelled_partial_builders_round_trip_through_serde() {
+        // The builders carry the real cancel/partial state (sourced from
+        // wcore-agent) onto the trace, and a cancelled+partial trace must
+        // survive a serde round-trip with both flags set — proving hosts can
+        // distinguish a cancelled/partial call from a normal one.
+        let t = ToolCallTrace::new("c1".into(), "Bash".into(), json!({}))
+            .with_cancelled(true)
+            .with_partial(true);
+        assert!(t.cancelled);
+        assert!(t.partial);
+
+        let wire = serde_json::to_string(&t).unwrap();
+        assert!(wire.contains("\"cancelled\":true"));
+        assert!(wire.contains("\"partial\":true"));
+        let back: ToolCallTrace = serde_json::from_str(&wire).unwrap();
+        assert!(back.cancelled, "cancelled flag must round-trip");
+        assert!(back.partial, "partial flag must round-trip");
+
+        // Passing `false` keeps the default and stays elided from the wire, so
+        // existing trace consumers see no schema drift.
+        let normal = ToolCallTrace::new("c2".into(), "Read".into(), json!({}))
+            .with_cancelled(false)
+            .with_partial(false);
+        let v = serde_json::to_value(&normal).unwrap();
+        assert!(
+            v.get("cancelled").is_none(),
+            "default-false must be omitted"
+        );
+        assert!(v.get("partial").is_none(), "default-false must be omitted");
     }
 
     // ---- T2-A0: result_snippet ----
