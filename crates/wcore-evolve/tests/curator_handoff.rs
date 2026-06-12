@@ -41,6 +41,7 @@ fn make_scored_candidate() -> ScoredCandidate {
             predicted: Verdict::Good,
         },
         child_index: 3,
+        generation: 4,
     }
 }
 
@@ -66,6 +67,25 @@ async fn winner_routes_to_curator_not_to_disk() {
     assert_eq!(last.parent_id, "skill-refactor-imports");
     assert_eq!(last.child_index, 3);
     assert!((last.score - 0.75).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn promote_stamps_candidate_generation_into_lineage() {
+    // Rank 55 regression: generation must reflect the candidate's real
+    // generation index, not the previously hardcoded 0.
+    let curator = Arc::new(MockCurator::default());
+    let handoff = Handoff::new(curator.clone());
+    let mut winner = make_scored_candidate();
+    winner.generation = 7;
+    handoff.promote(&winner, "p", "r").await.expect("ok");
+    let last = curator
+        .last_lineage
+        .lock()
+        .expect("lock")
+        .as_ref()
+        .cloned()
+        .expect("lineage recorded");
+    assert_eq!(last.generation, 7);
 }
 
 #[tokio::test]

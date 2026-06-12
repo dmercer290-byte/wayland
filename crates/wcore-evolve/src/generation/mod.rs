@@ -90,6 +90,9 @@ pub struct ScoredCandidate {
     pub mutation: Mutation,
     pub score: ScoreOutcome,
     pub child_index: u32,
+    /// Generation index this candidate was produced in. Carried so the
+    /// curator hand-off can stamp accurate `Lineage.generation`.
+    pub generation: u32,
 }
 
 pub struct GenerationResult {
@@ -207,6 +210,7 @@ impl Generation {
                     mutation,
                     score,
                     child_index,
+                    generation: generation_index,
                 })
             };
 

@@ -55,11 +55,7 @@ impl Handoff {
     ) -> Result<Decision, EvolveError> {
         let lineage = Lineage {
             run_id: run_id.to_string(),
-            generation: 0, // Generation index lives on the ScoredCandidate's
-            // enclosing context; this hand-off API is per-winner so we
-            // accept the caller-supplied run_id and parent_id and stamp
-            // generation = 0 (the curator looks up the full lineage from
-            // the trace event stream if it cares).
+            generation: w.generation,
             child_index: w.child_index,
             parent_id: parent_id.to_string(),
             mutation_kind: format!("{:?}", w.mutation.kind),
