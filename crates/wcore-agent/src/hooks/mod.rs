@@ -48,6 +48,23 @@ const SESSION_START_DISPATCH_TIMEOUT: Duration = Duration::from_secs(3);
 /// turn. On timeout the hook contributes nothing and the turn proceeds.
 const PRE_PROMPT_DISPATCH_TIMEOUT: Duration = Duration::from_millis(800);
 
+/// Per-turn ceiling on a single `TurnStart` plugin-hook dispatch. Same bound as
+/// PrePrompt: it fires once per agent turn. On timeout the hook contributes
+/// nothing and the turn proceeds.
+const TURN_START_DISPATCH_TIMEOUT: Duration = Duration::from_millis(800);
+
+/// Per-turn ceiling on a single `TurnEnd` plugin-hook dispatch. Same bound as
+/// TurnStart: it fires once per agent turn. On timeout the hook contributes
+/// nothing and the turn proceeds.
+const TURN_END_DISPATCH_TIMEOUT: Duration = Duration::from_millis(800);
+
+/// Per-tool-call ceiling on a single `PostToolUse` plugin-hook dispatch.
+/// Tighter than the per-turn phases because it can fire several times within a
+/// single turn (once per tool call): a slow backend must never compound latency
+/// across a tool-heavy turn. On timeout the hook contributes nothing and the
+/// tool call completes.
+const POST_TOOL_USE_DISPATCH_TIMEOUT: Duration = Duration::from_millis(500);
+
 /// Host-provided bridge that resolves a registered plugin-hook NAME to a real
 /// backend (e.g. an MCP tool on the plugin's server) and returns its textual
 /// contribution, or `None` if it has nothing to add.
@@ -149,12 +166,21 @@ impl HookEngine {
     /// contributes nothing and the turn proceeds. The agent never blocks on a
     /// plugin hook.
     ///
-    /// Phase boundary (current): only `SessionStart` and `PrePrompt` dispatch a
-    /// contribution into context (this method is called from `run_session_start`
-    /// and `run_pre_prompt`). `PostToolUse`, `SessionEnd`, and `PreCompact` are
-    /// registered and fired LOG-ONLY — their context-injection is future work and
-    /// is deliberately NOT wired here. So a plugin that registers all five phases
-    /// only has its SessionStart + PrePrompt hooks reach the model today.
+    /// Phase boundary (current): `SessionStart`, `PrePrompt`, `TurnStart`,
+    /// `TurnEnd`, and `PostToolUse` dispatch a contribution into context — the
+    /// engine consumes each (PrePrompt/TurnStart via `apply_pre_turn_outcome`,
+    /// TurnEnd via `apply_turn_end_outcome`, PostToolUse bubbled up through
+    /// `ToolCallOutcome.hook_outcomes`). `SessionEnd` and `PreCompact` remain
+    /// LOG-ONLY and are deliberately NOT wired here:
+    /// - `SessionEnd` — the session is terminating, so an injected User block or
+    ///   `switch_model` has no next turn to land on; it would be orphaned.
+    /// - `PreCompact` — there is no defined compaction-hint semantics or
+    ///   consumption point in `run_compaction` yet, so dispatching would be dead
+    ///   infrastructure (see the `TODO(C1)` on `run_pre_compact`).
+    ///
+    /// So a plugin registering all seven phases has SessionStart + PrePrompt +
+    /// TurnStart + TurnEnd + PostToolUse reach the model; SessionEnd + PreCompact
+    /// stay log-only.
     async fn dispatch_into(&self, outcome: &mut HookOutcome, phase: HookPhase, timeout: Duration) {
         let Some(dispatcher) = &self.dispatcher else {
             return;
@@ -306,6 +332,16 @@ impl HookEngine {
             "post_tool_use",
             &format!("for tool \"{tool_name}\""),
         ));
+        // If a host dispatcher is wired, invoke each PostToolUse plugin hook and
+        // fold its contribution into the outcome as an untrusted User-role block.
+        // No-op (log-only) when no dispatcher is set. This outcome bubbles up via
+        // `ToolCallOutcome.hook_outcomes` and is consumed by `apply_turn_end_outcome`.
+        self.dispatch_into(
+            &mut outcome,
+            HookPhase::PostToolUse,
+            POST_TOOL_USE_DISPATCH_TIMEOUT,
+        )
+        .await;
         let shell_lines = self
             .shell
             .run_post_tool_use(tool_name, tool_input, tool_output)
@@ -406,6 +442,16 @@ impl HookEngine {
             "on_turn_start",
             &format!("(turn {turn})"),
         ));
+        // If a host dispatcher is wired, invoke each TurnStart plugin hook and
+        // fold its contribution into the outcome as an untrusted User-role block.
+        // No-op (log-only) when no dispatcher is set. The engine consumes these
+        // via `apply_pre_turn_outcome`.
+        self.dispatch_into(
+            &mut outcome,
+            HookPhase::TurnStart,
+            TURN_START_DISPATCH_TIMEOUT,
+        )
+        .await;
         outcome
     }
 
@@ -438,6 +484,12 @@ impl HookEngine {
             "on_turn_end",
             &format!("(turn {turn})"),
         ));
+        // If a host dispatcher is wired, invoke each TurnEnd plugin hook and fold
+        // its contribution into the outcome as an untrusted User-role block.
+        // No-op (log-only) when no dispatcher is set. The engine consumes these
+        // via `apply_turn_end_outcome`.
+        self.dispatch_into(&mut outcome, HookPhase::TurnEnd, TURN_END_DISPATCH_TIMEOUT)
+            .await;
         outcome
     }
 
@@ -760,5 +812,116 @@ mod c1_dispatch_proof {
         let outcome = engine.run_pre_prompt().await;
         assert!(outcome.injected_messages.is_empty());
         assert_eq!(outcome.hook_trace.len(), 1, "log-only fire still happens");
+    }
+
+    fn engine_with_hook(plugin: &str, phase: HookPhase, name: &str) -> HookEngine {
+        let mut engine = HookEngine::new(HooksConfig::default());
+        engine.register_plugin_hook(PluginHook {
+            plugin: plugin.to_string(),
+            phase,
+            name: name.to_string(),
+        });
+        engine
+    }
+
+    // TurnStart now dispatches: a contribution reaches the outcome as a
+    // User-role <plugin-context trust="untrusted"> block (consumed by the engine
+    // via `apply_pre_turn_outcome`). Was previously log-only.
+    #[tokio::test]
+    async fn turn_start_contribution_is_an_untrusted_user_block() {
+        let mut engine = engine_with_hook("wayland-ijfw", HookPhase::TurnStart, "ijfw_turn_start");
+        engine.set_dispatcher(Arc::new(StubDispatcher {
+            text: Some("TURN-START-MARKER".to_string()),
+            delay: Duration::ZERO,
+        }));
+        let outcome = engine
+            .on_turn_start(
+                1,
+                &TurnContext {
+                    turn: 1,
+                    model: "test".into(),
+                    message_count: 0,
+                },
+            )
+            .await;
+        let text = sole_text(&outcome);
+        assert!(
+            text.contains("trust=\"untrusted\""),
+            "missing untrusted envelope: {text}"
+        );
+        assert!(
+            text.contains("source=\"wayland-ijfw:ijfw_turn_start\""),
+            "missing provenance: {text}"
+        );
+        assert!(
+            text.contains("TURN-START-MARKER"),
+            "missing contribution body: {text}"
+        );
+    }
+
+    // TurnEnd now dispatches: a contribution reaches the outcome as a User-role
+    // <plugin-context trust="untrusted"> block (consumed by the engine via
+    // `apply_turn_end_outcome`). Was previously log-only.
+    #[tokio::test]
+    async fn turn_end_contribution_is_an_untrusted_user_block() {
+        let mut engine = engine_with_hook("wayland-ijfw", HookPhase::TurnEnd, "ijfw_turn_end");
+        engine.set_dispatcher(Arc::new(StubDispatcher {
+            text: Some("TURN-END-MARKER".to_string()),
+            delay: Duration::ZERO,
+        }));
+        let outcome = engine
+            .on_turn_end(
+                1,
+                &TurnResult {
+                    turn: 1,
+                    tool_call_count: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            )
+            .await;
+        let text = sole_text(&outcome);
+        assert!(
+            text.contains("trust=\"untrusted\""),
+            "missing untrusted envelope: {text}"
+        );
+        assert!(
+            text.contains("source=\"wayland-ijfw:ijfw_turn_end\""),
+            "missing provenance: {text}"
+        );
+        assert!(
+            text.contains("TURN-END-MARKER"),
+            "missing contribution body: {text}"
+        );
+    }
+
+    // PostToolUse now dispatches: a contribution reaches the outcome as a
+    // User-role <plugin-context trust="untrusted"> block. This outcome bubbles
+    // up via `ToolCallOutcome.hook_outcomes` and is consumed by
+    // `apply_turn_end_outcome`. Was previously log-only.
+    #[tokio::test]
+    async fn post_tool_use_contribution_is_an_untrusted_user_block() {
+        let mut engine =
+            engine_with_hook("wayland-ijfw", HookPhase::PostToolUse, "ijfw_observation");
+        engine.set_dispatcher(Arc::new(StubDispatcher {
+            text: Some("POST-TOOL-MARKER".to_string()),
+            delay: Duration::ZERO,
+        }));
+        let outcome = engine
+            .run_post_tool_use("write", "call-1", &Value::Null, "ok", false)
+            .await;
+        let text = sole_text(&outcome);
+        assert!(
+            text.contains("trust=\"untrusted\""),
+            "missing untrusted envelope: {text}"
+        );
+        assert!(
+            text.contains("source=\"wayland-ijfw:ijfw_observation\""),
+            "missing provenance: {text}"
+        );
+        assert!(
+            text.contains("POST-TOOL-MARKER"),
+            "missing contribution body: {text}"
+        );
     }
 }
