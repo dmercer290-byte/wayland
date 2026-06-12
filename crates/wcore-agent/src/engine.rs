@@ -371,6 +371,41 @@ mod forgeflow_final_state_tests {
         assert!(AgentEngine::render_workflow_final_state(&serde_json::json!([1, 2, 3])).is_empty());
         assert!(AgentEngine::render_workflow_final_state(&serde_json::Value::Null).is_empty());
     }
+
+    #[test]
+    fn errored_stage_ids_names_failed_stages_so_missing_over_key_is_not_silent_success() {
+        use crate::orchestration::workflow::runner::StageResult;
+
+        let stage = |id: &str, is_error: bool| StageResult {
+            node_id: id.to_string(),
+            text: "ran".to_string(),
+            is_error,
+            turns: 0,
+        };
+
+        // A clean run reports no errored stages → surfaces as a real success.
+        let clean = vec![stage("split", false), stage("review", false)];
+        assert!(
+            AgentEngine::errored_stage_ids(&clean).is_empty(),
+            "clean run must not report errored stages"
+        );
+
+        // The bug: a no-barrier pipeline whose `over:` key is missing records an
+        // `is_error` StageResult yet `run_no_barrier_pipeline` returns `Ok(())`.
+        // The post-check must catch that stage so the workflow does NOT report a
+        // silent partial success, and the diagnostic must NAME the failing stage.
+        let partial = vec![
+            stage("seed", false),
+            stage("fan_pipeline", true), // missing `over:` key
+            stage("collect", false),
+        ];
+        let errored = AgentEngine::errored_stage_ids(&partial);
+        assert_eq!(
+            errored,
+            vec!["fan_pipeline".to_string()],
+            "errored stage id not surfaced — workflow would report silent success"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4272,7 +4307,16 @@ impl AgentEngine {
                 // run result so the caller can render the per-stage summary.
                 match tokio::spawn(run_workflow_owned(spawner, plan, initial_state)).await {
                     Ok((plan, run)) => {
-                        let is_error = run.is_err();
+                        // A hard `Err` OR an `Ok` run that still carries a failed
+                        // stage (silent partial success — e.g. a no-barrier
+                        // pipeline over a missing `over:` key) must both close the
+                        // card as an error, matching the run-summary text.
+                        let is_error = match &run {
+                            Err(_) => true,
+                            Ok(result) => {
+                                !Self::errored_stage_ids(&result.stage_results).is_empty()
+                            }
+                        };
                         let result = self.surface_workflow_result(&plan, run, turn);
                         // Close the `Workflow` tool card. The gate emitted a
                         // `ToolRequest` for `call_id` (the proposal card) but the
@@ -4356,7 +4400,23 @@ impl AgentEngine {
     ) -> AgentResult {
         let text = match run {
             Ok(result) => {
-                let mut out = format!("Workflow `{}` completed.\n", plan.meta.name);
+                // A successful `run()` can still carry per-stage failures: a
+                // no-barrier `Pipeline` whose `over:` key is missing/wrong-typed
+                // records an `is_error` StageResult yet returns `Ok(())` (it has
+                // no hard resource bound to trip). Reporting "completed" there is
+                // a silent partial success — name the failing stages and report
+                // failure instead. See `Self::errored_stage_ids`.
+                let errored = Self::errored_stage_ids(&result.stage_results);
+                let headline = if errored.is_empty() {
+                    format!("Workflow `{}` completed.\n", plan.meta.name)
+                } else {
+                    format!(
+                        "Workflow `{}` failed: stage(s) reported an error: {}.\n",
+                        plan.meta.name,
+                        errored.join(", ")
+                    )
+                };
+                let mut out = headline;
                 for stage in &result.stage_results {
                     let status = if stage.is_error { "error" } else { "ok" };
                     out.push_str(&format!(
@@ -4387,6 +4447,22 @@ impl AgentEngine {
             usage: self.total_usage.clone(),
             turns: turn + 1,
         }
+    }
+
+    /// Collect the node ids of every stage that reported an error, in order.
+    /// A non-empty result means the run produced a silent partial success — an
+    /// `Ok(WorkflowRunResult)` whose stages still failed (e.g. a no-barrier
+    /// pipeline fanning over a missing `over:` key, which records an
+    /// `is_error` StageResult but does not return `Err`). Pure over the slice so
+    /// the failure-detection is unit-testable.
+    fn errored_stage_ids(
+        stage_results: &[crate::orchestration::workflow::runner::StageResult],
+    ) -> Vec<String> {
+        stage_results
+            .iter()
+            .filter(|s| s.is_error)
+            .map(|s| s.node_id.clone())
+            .collect()
     }
 
     /// GAP-3 helper: render the meaningful keys of a completed workflow's
