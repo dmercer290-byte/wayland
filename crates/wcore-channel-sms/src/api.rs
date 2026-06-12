@@ -18,6 +18,76 @@ pub(crate) const SEND_BASE_BACKOFF_MS: u64 = 250;
 /// can't park us indefinitely.
 pub(crate) const SEND_MAX_BACKOFF_MS: u64 = 30_000;
 
+/// Host allowlist for inbound MMS media fetches. Twilio serves `MediaUrl{N}`
+/// from `api.twilio.com` and 30x-redirects to a signed CDN URL; only the
+/// initial host is validated (the redirect target is chosen by Twilio and
+/// followed under the EgressClient's own SSRF policy).
+pub(crate) const MEDIA_HOSTS: &[&str] = &["api.twilio.com"];
+
+/// Cap on a single inbound media fetch. MMS media is small; bound it so an
+/// oversized/malicious resource can't exhaust memory.
+pub(crate) const MAX_MEDIA_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Download one inbound MMS media resource from Twilio.
+///
+/// The URL arrives on a signature-verified webhook, but we still fail closed on
+/// the host (allowlist) *before* attaching Basic auth, so a forged/unexpected
+/// URL can't become an SSRF or credential-leak primitive (mirrors the
+/// Discord/Slack media path). Bounded by [`MAX_MEDIA_BYTES`].
+pub(crate) async fn download_media(
+    http: &wcore_egress::EgressClient,
+    url: &str,
+    account_sid: &str,
+    auth_token: &str,
+    allowed_hosts: &[&str],
+) -> Result<Vec<u8>, SmsError> {
+    if !wcore_egress::host_in_allowlist(url, allowed_hosts) {
+        return Err(SmsError::Api(format!(
+            "refusing to fetch media from non-allowlisted host: {url}"
+        )));
+    }
+
+    let resp = http
+        .get(url)
+        .basic_auth(account_sid, Some(auth_token))
+        .send()
+        .await
+        .map_err(|e| SmsError::Http(format!("media fetch: {e}")))?;
+
+    let status = resp.status();
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return Err(SmsError::Auth(format!(
+            "media fetch HTTP {}",
+            status.as_u16()
+        )));
+    }
+    if !status.is_success() {
+        return Err(SmsError::Api(format!(
+            "media fetch HTTP {}",
+            status.as_u16()
+        )));
+    }
+
+    if let Some(len) = resp.content_length()
+        && len > MAX_MEDIA_BYTES
+    {
+        return Err(SmsError::Api(format!(
+            "media exceeds {MAX_MEDIA_BYTES} byte cap ({len})"
+        )));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| SmsError::Http(format!("media body: {e}")))?;
+    if bytes.len() as u64 > MAX_MEDIA_BYTES {
+        return Err(SmsError::Api(format!(
+            "media exceeds {MAX_MEDIA_BYTES} byte cap"
+        )));
+    }
+    Ok(bytes.to_vec())
+}
+
 /// One Twilio `Messages.json` response. We only model the fields this
 /// adapter consumes; unknown fields are tolerated so future API additions
 /// don't break us.
@@ -143,4 +213,62 @@ async fn sleep_backoff(attempt: u32, retry_after: Option<Duration>) {
         .saturating_mul(1u64 << shift)
         .min(SEND_MAX_BACKOFF_MS);
     tokio::time::sleep(Duration::from_millis(base)).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SID: &str = "ACtest1234567890";
+    const TOKEN: &str = "test-auth-token";
+
+    #[tokio::test]
+    async fn download_media_fetches_with_basic_auth() {
+        let mut server = mockito::Server::new_async().await;
+        use base64::Engine;
+        let expected = base64::engine::general_purpose::STANDARD.encode(format!("{SID}:{TOKEN}"));
+        let mock = server
+            .mock("GET", "/Media/ME123")
+            .match_header("authorization", format!("Basic {expected}").as_str())
+            .with_status(200)
+            .with_body(b"JPEGBYTES")
+            .create_async()
+            .await;
+
+        let url = format!("{}/Media/ME123", server.url());
+        // The mock host is 127.0.0.1; production uses MEDIA_HOSTS.
+        let host = reqwest::Url::parse(&url)
+            .unwrap()
+            .host_str()
+            .unwrap()
+            .to_string();
+        let bytes = download_media(
+            &wcore_egress::EgressClient::new(),
+            &url,
+            SID,
+            TOKEN,
+            &[host.as_str()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(bytes, b"JPEGBYTES");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn download_media_rejects_non_allowlisted_host() {
+        // A URL whose host is not allowlisted must fail closed BEFORE any
+        // request (no Basic auth attached), so SSRF/credential-leak is blocked.
+        let err = download_media(
+            &wcore_egress::EgressClient::new(),
+            "http://169.254.169.254/latest/meta-data/",
+            SID,
+            TOKEN,
+            MEDIA_HOSTS,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, SmsError::Api(_)));
+    }
 }

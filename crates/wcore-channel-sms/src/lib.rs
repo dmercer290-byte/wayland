@@ -286,6 +286,38 @@ impl Channel for SmsChannel {
             Err(e) => Err(ChannelError::Rejected(e.to_string())),
         }
     }
+
+    /// Download an inbound MMS media attachment from Twilio. The attachment's
+    /// `url` is a Twilio `MediaUrl`; we GET it with the account's Basic auth,
+    /// fail-closed on the host allowlist first (see [`api::download_media`]).
+    async fn fetch_media(
+        &self,
+        attachment: &wcore_channels::event::Attachment,
+    ) -> Result<Vec<u8>, ChannelError> {
+        if attachment.url.is_empty() {
+            return Err(ChannelError::Rejected(
+                "SMS attachment has no media URL".to_string(),
+            ));
+        }
+        let account_sid = self
+            .account_sid
+            .as_deref()
+            .ok_or_else(|| ChannelError::Auth("account SID not loaded".to_string()))?;
+        let auth_token = self
+            .auth_token
+            .as_deref()
+            .ok_or_else(|| ChannelError::Auth("auth token not loaded".to_string()))?;
+
+        api::download_media(
+            &self.http,
+            &attachment.url,
+            account_sid,
+            auth_token,
+            api::MEDIA_HOSTS,
+        )
+        .await
+        .map_err(ChannelError::from)
+    }
 }
 
 #[cfg(test)]
