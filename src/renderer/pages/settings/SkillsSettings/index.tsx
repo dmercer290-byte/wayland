@@ -51,12 +51,17 @@ const SkillsSettings: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
-    const [list, s] = await Promise.all([
+    const [list, s, pinned] = await Promise.all([
       ipcBridge.skills.list.invoke({ type: 'skill' }),
       ipcBridge.skills.stats.invoke(),
+      ipcBridge.skills.getPinned.invoke(),
     ]);
     setEntries(list);
     setStats(s);
+    // Hydrate the pin stars from persisted prefs. Without this the stars reset
+    // to unchecked on every mount while the stats count still reflects the real
+    // pinned total - the desync reported in #72.
+    setPinnedNames(new Set(pinned));
   }, []);
 
   useEffect(() => {
@@ -82,7 +87,9 @@ const SkillsSettings: React.FC = () => {
     // Text search
     if (query.trim()) {
       const q = query.toLowerCase();
-      result = result.filter((e) => e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q));
+      result = result.filter(
+        (e) => (e.name ?? '').toLowerCase().includes(q) || (e.description ?? '').toLowerCase().includes(q)
+      );
     }
 
     // Source filter (empty = show all)

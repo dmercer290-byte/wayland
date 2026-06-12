@@ -436,6 +436,8 @@ export const skills = {
   >('skills.update-body'),
   /** Pin or unpin a skill by name. */
   setPinned: buildProvider<void, { name: string; pinned: boolean }>('skills.set-pinned'),
+  /** Names of the currently pinned skills, used to hydrate the pin stars on load. */
+  getPinned: buildProvider<string[], void>('skills.get-pinned'),
   /**
    * Add a skill to a single conversation from the chat composer. The skill's
    * body is injected once on that conversation's next turn (persisted in

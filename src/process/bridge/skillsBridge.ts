@@ -128,6 +128,11 @@ export function initSkillsBridge(): void {
     });
   });
 
+  ipcBridge.skills.getPinned.provider(async () => {
+    const prefs = await ProcessConfig.get('skills.preferences');
+    return prefs?.pinned ?? [];
+  });
+
   ipcBridge.skills.addToConversation.provider(async ({ conversationId, name }) => {
     const lib = SkillLibrary.getInstance();
     const entry = await lib.get(name);
