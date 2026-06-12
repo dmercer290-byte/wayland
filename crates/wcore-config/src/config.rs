@@ -337,10 +337,9 @@ impl Default for MemoryConfig {
             // real MemoryManager so GEPA, SkillRouter seeds, SkillDrafter, and
             // user-model write-back all work out of the box. Opt out via
             // `memory.enabled = false` in wcore.toml, or via the
-            // `--no-memory` CLI flag.
-            // TODO(W3-B-follow-on): wire --no-memory CLI flag in wcore-cli
-            // (that flag should set self.config.memory.enabled = false before
-            //  Config is handed to AgentBootstrap::build).
+            // `--no-memory` CLI flag (wired in wcore-cli's `main`, which sets
+            // `config.memory.enabled = false` before `Config` is handed to
+            // `AgentBootstrap`).
             enabled: true,
             dream_cycle_throttle_secs: default_dream_throttle_secs(),
             decay_interval_secs: default_decay_interval_secs(),

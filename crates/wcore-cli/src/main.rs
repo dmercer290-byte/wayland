@@ -182,6 +182,19 @@ fn make_plugin_provider_router() -> PluginProviderRouter {
     )
 }
 
+/// Rank 47: apply the `--no-memory` flag to a resolved [`Config`].
+///
+/// One-directional, mirroring `--online-evolution`: when `no_memory` is set
+/// the run becomes stateless (`memory.enabled = false`); when it is unset the
+/// config's own `memory.enabled` (file/default-driven) is left untouched, so
+/// the flag can only turn memory off, never on. Called from `main` after the
+/// config is fully resolved and before it reaches `AgentBootstrap`.
+fn apply_no_memory_flag(config: &mut Config, no_memory: bool) {
+    if no_memory {
+        config.memory.enabled = false;
+    }
+}
+
 #[derive(Parser)]
 #[command(
     name = "wayland-core",
@@ -375,6 +388,16 @@ struct Cli {
     /// Equivalent to `[observability] online_evolution = true` in config.
     #[arg(long)]
     online_evolution: bool,
+
+    /// Run a stateless session: disable long-term memory for this run.
+    /// Sets `memory.enabled = false` before the engine boots, so no
+    /// MemoryManager is created — GEPA, SkillRouter seeds, SkillDrafter,
+    /// and user-model write-back are all inert. Equivalent to
+    /// `[memory] enabled = false` in wcore.toml, but scoped to this
+    /// invocation only. Merge is one-directional: the flag can only turn
+    /// memory off, never on.
+    #[arg(long)]
+    no_memory: bool,
 
     /// Initial prompt (if omitted, enters interactive REPL mode)
     #[arg(trailing_var_arg = true)]
@@ -1173,6 +1196,10 @@ async fn run() -> anyhow::Result<ExitCode> {
     if cli.online_evolution {
         config.observability.online_evolution = true;
     }
+    // Rank 47: --no-memory forces a stateless run by disabling long-term
+    // memory before `config` reaches `AgentBootstrap`. OR-based like
+    // --online-evolution: the flag can only turn memory off, never on.
+    apply_no_memory_flag(&mut config, cli.no_memory);
 
     // B2 — install the process-global egress policy now that `config` is fully
     // resolved (base_url/provider/`[security]` are finalized above; the mutations
@@ -2872,5 +2899,42 @@ mod tests {
             }
             other => panic!("expected McpReady, got {other:?}"),
         }
+    }
+
+    /// Rank 47 regression: `--no-memory` must parse and flip
+    /// `config.memory.enabled` to `false`, giving users an accessible way to
+    /// run a stateless session. Pre-fix the flag did not exist (only a TODO
+    /// in wcore-config), so there was no CLI path to disable memory per-run.
+    #[test]
+    fn test_no_memory_flag_disables_memory() {
+        let cli = Cli::parse_from(["wayland-core", "--no-memory", "hello"]);
+        assert!(cli.no_memory, "--no-memory must parse to true");
+
+        let mut config = Config::default();
+        assert!(
+            config.memory.enabled,
+            "default config must have memory enabled"
+        );
+        apply_no_memory_flag(&mut config, cli.no_memory);
+        assert!(
+            !config.memory.enabled,
+            "--no-memory must set memory.enabled = false"
+        );
+    }
+
+    /// Rank 47: absence of `--no-memory` is one-directional — it must leave an
+    /// already-enabled config untouched (the flag can only turn memory off,
+    /// never on).
+    #[test]
+    fn test_no_memory_flag_absent_preserves_enabled() {
+        let cli = Cli::parse_from(["wayland-core", "hello"]);
+        assert!(!cli.no_memory, "flag defaults to false when omitted");
+
+        let mut config = Config::default();
+        apply_no_memory_flag(&mut config, cli.no_memory);
+        assert!(
+            config.memory.enabled,
+            "without --no-memory the config's memory.enabled must survive"
+        );
     }
 }
