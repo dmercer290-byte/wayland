@@ -44,11 +44,19 @@
 //! Resource limits ENFORCED by the Windows kernel via Job Objects — backend
 //! returns `ResourceLimitEnforcement::Enforced`.
 //!
-//! Filesystem allowlists (`fs_read_allow`/`fs_write_allow`) are NOT yet wired
-//! to AppContainer ACLs in v0.6.3; AppContainer SIDs default to denying access
-//! to user-profile paths, so omitting explicit grants is the safe default.
-//! Wire-up to `SetNamedSecurityInfoW(GRANT, AppContainer SID)` is queued for
-//! v0.7.0 (tracked alongside the WFP DNS gate for `NetworkPolicy::AllowHosts`).
+//! Filesystem allowlists (`fs_read_allow`/`fs_write_allow`) ARE wired to
+//! AppContainer DACLs (R61). AppContainer SIDs deny access to user-profile
+//! paths by default, so before `CreateProcess` the backend adds an
+//! ACCESS_ALLOWED ACE for the AppContainer package SID to each allowlisted
+//! path's existing DACL (read+execute for `fs_read_allow`, +write for
+//! `fs_write_allow`) via `GetNamedSecurityInfoW` → `SetEntriesInAclW` →
+//! `SetNamedSecurityInfoW` — merging into, never replacing, the path's DACL.
+//! The grant is REVOKED when the spawn finishes (success/timeout/error) by a
+//! RAII `DaclGrantGuard`. Only a hard crash between grant and revoke can leak
+//! an ACE, and it would grant a per-PID AppContainer profile SID that is dead
+//! once the process exits. Paths must be absolute and local — UNC/device paths
+//! are rejected so a remote share's DACL is never touched. (`NetworkPolicy::
+//! AllowHosts` WFP DNS gating remains queued separately.)
 
 #[cfg(windows)]
 mod windows_impl {
@@ -68,21 +76,32 @@ mod windows_impl {
         CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
         WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
+    use windows_sys::Win32::Security::Authorization::{
+        EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW, REVOKE_ACCESS, SE_FILE_OBJECT,
+        SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN,
+    };
     use windows_sys::Win32::Security::Isolation::{
         CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
     };
     use windows_sys::Win32::Security::{
-        AllocateAndInitializeSid, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE, FreeSid,
-        GetLengthSid, GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation,
-        SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, SID_IDENTIFIER_AUTHORITY,
-        SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE,
-        TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel,
+        ACL, AllocateAndInitializeSid, CreateRestrictedToken, DACL_SECURITY_INFORMATION,
+        DISABLE_MAX_PRIVILEGE, FreeSid, GetLengthSid, GetSidSubAuthority, GetSidSubAuthorityCount,
+        GetTokenInformation, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+        SID_IDENTIFIER_AUTHORITY, SetTokenInformation, TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY,
+        TOKEN_DUPLICATE, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel,
     };
 
     /// `SE_GROUP_INTEGRITY` from `winnt.h`. Not re-exported by windows-sys
     /// (versions ≤ 0.59); defined locally per the Windows SDK header.
     const SE_GROUP_INTEGRITY: u32 = 0x0000_0020;
-    use windows_sys::Win32::Storage::FileSystem::ReadFile;
+    /// `SUB_CONTAINERS_AND_OBJECTS_INHERIT` (`accctrl.h`) — not re-exported by
+    /// windows-sys 0.59. `CONTAINER_INHERIT_ACE (0x2) | OBJECT_INHERIT_ACE (0x1)`:
+    /// the ACE propagates to child directories and files.
+    const SUB_CONTAINERS_AND_OBJECTS_INHERIT: u32 = 0x3;
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, ReadFile,
+    };
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_ACTIVE_PROCESS,
         JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
@@ -778,6 +797,40 @@ mod windows_impl {
             // is still running under the same SID.
             let _sid_guard = SidGuard { sid: sid_ptr };
 
+            // ---- 1b. Filesystem ACL grants (R61) ----
+            //
+            // Add the AppContainer SID to the DACL of each allowlisted path so
+            // the sandboxed child can actually reach the files the manifest
+            // grants. `_dacl_guard` is declared AFTER `_sid_guard`, so it drops
+            // first (reverse declaration order) and revokes while the SID is
+            // still valid. Grants happen BEFORE CreateProcess so the child sees
+            // them at image-load time.
+            let _dacl_guard =
+                if manifest.fs_read_allow.is_empty() && manifest.fs_write_allow.is_empty() {
+                    None
+                } else {
+                    let read_paths =
+                        grant_appcontainer_dacl(&manifest.fs_read_allow, sid_ptr, ACL_READ_MASK)?;
+                    // If the write grants fail, the read grants we already applied
+                    // must be rolled back before we bail.
+                    let write_paths = match grant_appcontainer_dacl(
+                        &manifest.fs_write_allow,
+                        sid_ptr,
+                        ACL_WRITE_MASK,
+                    ) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            revoke_appcontainer_dacl(&read_paths, sid_ptr);
+                            return Err(e);
+                        }
+                    };
+                    Some(DaclGrantGuard {
+                        read_paths,
+                        write_paths,
+                        sid: sid_ptr,
+                    })
+                };
+
             // ---- 2. Restricted token ----
             //
             // SidsToDisable: explicitly mark BUILTIN\Administrators,
@@ -1363,6 +1416,192 @@ mod windows_impl {
         }
     }
 
+    // ===== Filesystem ACL grants (R61) ============================================
+    //
+    // AppContainer SIDs deny access to user-profile paths by default, so a
+    // manifest's `fs_read_allow`/`fs_write_allow` only take effect if we add an
+    // ACCESS_ALLOWED ACE for the AppContainer package SID to each path's DACL.
+    // We MERGE the ACE into the path's existing DACL (never replace it) and
+    // REVOKE it once the child has exited — see `DaclGrantGuard`.
+
+    /// Generic read+execute, granted to `fs_read_allow` paths.
+    const ACL_READ_MASK: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+    /// Generic read+write+execute, granted to `fs_write_allow` paths.
+    const ACL_WRITE_MASK: u32 = FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE;
+
+    /// RAII for an ACL produced by `SetEntriesInAclW` / a security descriptor
+    /// from `GetNamedSecurityInfoW`. Both are `LocalAlloc`-backed and MUST be
+    /// released with `LocalFree` — not the Rust allocator, not `FreeSid`.
+    struct LocalFreeGuard(*mut core::ffi::c_void);
+    impl Drop for LocalFreeGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if !self.0.is_null() {
+                    LocalFree(self.0 as _);
+                }
+            }
+        }
+    }
+
+    /// A path is eligible for an ACL grant only if it is absolute AND local —
+    /// relative paths are ambiguous, and UNC / `\\?\` / `\\.\` paths could name
+    /// a network share whose DACL we must never touch.
+    fn acl_path_is_safe(path: &std::path::Path) -> bool {
+        path.is_absolute() && !is_unc_or_device_path(&path.to_string_lossy())
+    }
+
+    /// Build one `EXPLICIT_ACCESS_W` for the AppContainer `sid` with `mask`
+    /// permissions and `mode` (`GRANT_ACCESS` / `REVOKE_ACCESS`), inheritable to
+    /// child files and directories.
+    unsafe fn explicit_access_for_sid(
+        sid: *mut core::ffi::c_void,
+        mask: u32,
+        mode: i32,
+    ) -> EXPLICIT_ACCESS_W {
+        let mut ea: EXPLICIT_ACCESS_W = unsafe { mem::zeroed() };
+        ea.grfAccessPermissions = mask;
+        ea.grfAccessMode = mode;
+        ea.grfInheritance = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
+        ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+        ea.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+        ea.Trustee.ptstrName = sid as _;
+        ea
+    }
+
+    /// Apply one `EXPLICIT_ACCESS_W` (grant or revoke) to `path`'s DACL by
+    /// reading the current DACL, merging the entry, and writing it back. Pure
+    /// FFI mechanics shared by grant and revoke.
+    unsafe fn apply_explicit_access(path: &std::path::Path, ea: &EXPLICIT_ACCESS_W) -> Result<()> {
+        let mut path_w: Vec<u16> = widen_os(path.as_os_str());
+
+        // 1. Read the existing DACL (so we merge, never replace).
+        let mut old_dacl: *mut ACL = ptr::null_mut();
+        let mut sd: *mut core::ffi::c_void = ptr::null_mut();
+        let get_rc = unsafe {
+            GetNamedSecurityInfoW(
+                path_w.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut old_dacl,
+                ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if get_rc != 0 {
+            return Err(SandboxError::ExecFailed(format!(
+                "GetNamedSecurityInfoW for {}: {:#x}",
+                path.display(),
+                get_rc
+            )));
+        }
+        let _sd_guard = LocalFreeGuard(sd);
+
+        // 2. Merge our entry into the existing DACL.
+        let mut new_dacl: *mut ACL = ptr::null_mut();
+        let set_rc = unsafe { SetEntriesInAclW(1, ea, old_dacl, &mut new_dacl) };
+        if set_rc != 0 {
+            return Err(SandboxError::ExecFailed(format!(
+                "SetEntriesInAclW for {}: {:#x}",
+                path.display(),
+                set_rc
+            )));
+        }
+        let _acl_guard = LocalFreeGuard(new_dacl as _);
+
+        // 3. Write the merged DACL back to the object.
+        let put_rc = unsafe {
+            SetNamedSecurityInfoW(
+                path_w.as_mut_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                new_dacl,
+                ptr::null(),
+            )
+        };
+        if put_rc != 0 {
+            return Err(SandboxError::ExecFailed(format!(
+                "SetNamedSecurityInfoW for {}: {:#x}",
+                path.display(),
+                put_rc
+            )));
+        }
+        Ok(())
+    }
+
+    /// Grant `sid` an ACE (`mask`) on the DACL of each path. Returns the paths
+    /// actually granted, so the caller revokes exactly those. On the first hard
+    /// failure, revokes what was already granted and returns the error — never
+    /// leaves a partial grant behind on the error path.
+    unsafe fn grant_appcontainer_dacl(
+        paths: &[std::path::PathBuf],
+        sid: *mut core::ffi::c_void,
+        mask: u32,
+    ) -> Result<Vec<std::path::PathBuf>> {
+        let mut granted: Vec<std::path::PathBuf> = Vec::new();
+        for path in paths {
+            if !acl_path_is_safe(path) {
+                unsafe { revoke_appcontainer_dacl(&granted, sid) };
+                return Err(SandboxError::ExecFailed(format!(
+                    "fs allowlist path must be absolute and local (no UNC/device): {}",
+                    path.display()
+                )));
+            }
+            let ea = unsafe { explicit_access_for_sid(sid, mask, GRANT_ACCESS) };
+            if let Err(e) = unsafe { apply_explicit_access(path, &ea) } {
+                unsafe { revoke_appcontainer_dacl(&granted, sid) };
+                return Err(e);
+            }
+            tracing::debug!(
+                target: "wcore_sandbox",
+                path = %path.display(),
+                "granted AppContainer DACL access"
+            );
+            granted.push(path.clone());
+        }
+        Ok(granted)
+    }
+
+    /// Remove the AppContainer `sid`'s ACE from each path's DACL. Best-effort:
+    /// a revoke failure is logged but never returned, so it cannot mask the
+    /// real execution result. `REVOKE_ACCESS` removes ALL ACEs for the trustee.
+    unsafe fn revoke_appcontainer_dacl(paths: &[std::path::PathBuf], sid: *mut core::ffi::c_void) {
+        for path in paths {
+            let ea = unsafe { explicit_access_for_sid(sid, 0, REVOKE_ACCESS) };
+            if let Err(e) = unsafe { apply_explicit_access(path, &ea) } {
+                tracing::warn!(
+                    target: "wcore_sandbox",
+                    path = %path.display(),
+                    error = %e,
+                    "failed to revoke AppContainer DACL grant; ACE may persist on host until profile is removed"
+                );
+            }
+        }
+    }
+
+    /// RAII: revokes the DACL grants when the spawn finishes (success, timeout,
+    /// or error). Declared AFTER `SidGuard` at the call site so it drops FIRST,
+    /// while the SID pointer is still valid. The only way a grant outlives the
+    /// process is a hard crash/kill between grant and this drop — and the SID
+    /// belongs to a per-PID profile (`WCoreSandbox-<pid>`), so a leaked ACE
+    /// grants a dead profile, not a live principal.
+    struct DaclGrantGuard {
+        read_paths: Vec<std::path::PathBuf>,
+        write_paths: Vec<std::path::PathBuf>,
+        sid: *mut core::ffi::c_void,
+    }
+    impl Drop for DaclGrantGuard {
+        fn drop(&mut self) {
+            unsafe {
+                revoke_appcontainer_dacl(&self.read_paths, self.sid);
+                revoke_appcontainer_dacl(&self.write_paths, self.sid);
+            }
+        }
+    }
+
     /// RAII: delete the proc-thread attribute list.
     struct AttrListGuard {
         list: LPPROC_THREAD_ATTRIBUTE_LIST,
@@ -1388,6 +1627,35 @@ mod windows_impl {
             assert_eq!(quote_arg("cmd.exe"), "cmd.exe");
             assert_eq!(quote_arg("/c"), "/c");
             assert_eq!(quote_arg("hello"), "hello");
+        }
+
+        // ---------- acl_path_is_safe (R61 filesystem grants) ----------
+
+        #[test]
+        fn acl_path_is_safe_accepts_absolute_local() {
+            assert!(acl_path_is_safe(std::path::Path::new(
+                r"C:\Users\Public\work"
+            )));
+            assert!(acl_path_is_safe(std::path::Path::new(r"D:\data\file.txt")));
+        }
+
+        #[test]
+        fn acl_path_is_safe_rejects_relative() {
+            assert!(!acl_path_is_safe(std::path::Path::new(r"work\file.txt")));
+            assert!(!acl_path_is_safe(std::path::Path::new("file.txt")));
+        }
+
+        #[test]
+        fn acl_path_is_safe_rejects_unc_and_device() {
+            // UNC/device paths are absolute but must never have their DACL
+            // touched (could be a remote share).
+            assert!(!acl_path_is_safe(std::path::Path::new(
+                r"\\server\share\file"
+            )));
+            assert!(!acl_path_is_safe(std::path::Path::new(r"\\?\C:\x")));
+            assert!(!acl_path_is_safe(std::path::Path::new(
+                r"\\.\PhysicalDrive0"
+            )));
         }
 
         #[test]
