@@ -24,12 +24,16 @@ use crate::confirm::ToolConfirmer;
 use crate::orchestration::ExecutionControl;
 use crate::orchestration::StreamingContext;
 use crate::orchestration::ToolCallOutcome;
-use crate::orchestration::graph::{ExecutionGraph, GraphContext, GraphError, NodeExecutor};
+use crate::orchestration::graph::{
+    ExecutionGraph, GraphConfig, GraphContext, GraphError, NodeExecutor,
+};
 use crate::orchestration::intent::IntentClassifier;
 use crate::orchestration::node_executor::{
     AgentExecutorConfig, AgentNodeExecutor, ApprovalChannel, TurnCell,
 };
-use crate::orchestration::template_routing::{TemplateDecisionSource, select_graph_config};
+use crate::orchestration::template_routing::{
+    TemplateDecisionSource, decision_is_unwired_template, select_graph_config,
+};
 use crate::output::OutputSink;
 use crate::plan::prompt as plan_prompt;
 use crate::plan::state::PlanState;
@@ -3881,7 +3885,35 @@ impl AgentEngine {
                     "template_routing: non-classifier orchestration template selected"
                 );
             }
-            let graph_config = template_decision.config;
+            // Phase 0 (rank 5) honesty coercion. Non-Direct orchestration
+            // templates are structurally hollow under the per-turn
+            // `AgentNodeExecutor` (first-dispatch-wins makes every node past
+            // the first an inert carrier), so Consensus / SelfCritique /
+            // Hierarchical — and Adaptive when it projects to one of them —
+            // already collapse to a Direct-equivalent result while walking a
+            // fake multi-node graph and emitting misleading per-node traces.
+            // The default-wired `TemplateRouter` (bootstrap F-024) Thompson-
+            // samples all five arms every turn, so the majority of turns hit
+            // this path today. Rather than walk the inert graph (or pretend
+            // to do multi-agent), run an honest single-node Direct turn. This
+            // is behaviour-preserving — the net tool/answer result is already
+            // Direct — but removes the fake-orchestration spans. The silent
+            // classifier heuristic is never coerced, so its (real) Sequential
+            // / Parallel shapes are untouched. ForgeFlows-Live Phase 3
+            // repoints these decisions at the real `WorkflowRunner` spawner
+            // and retires this coercion. (See
+            // `.planning/2026-06-13-FORGEFLOWS-LIVE-DESIGN.md`.)
+            let graph_config = if decision_is_unwired_template(&template_decision) {
+                tracing::debug!(
+                    template = ?template_decision.template,
+                    source = ?template_decision.source,
+                    "rank5: non-Direct per-turn template is not wired to a real \
+                     multi-agent backend; executing an honest Direct turn"
+                );
+                GraphConfig::direct("main", serde_json::json!({}))
+            } else {
+                template_decision.config
+            };
             // AUDIT A2 — the graph context's cancel token is a child of
             // the engine's session-root token (was a fresh orphan that
             // nothing could ever fire). A host cancel now propagates

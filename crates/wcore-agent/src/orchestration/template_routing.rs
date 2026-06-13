@@ -226,6 +226,30 @@ pub fn select_graph_config(
     }
 }
 
+/// Phase 0 (rank 5) honesty gate: a [`TemplateDecision`] is "unwired" when
+/// an **explicit** override or a wired router selected a **non-Direct**
+/// orchestration shape.
+///
+/// Those templates (Consensus / SelfCritique / Hierarchical, and Adaptive
+/// when it projects to one of them) are structurally hollow under the
+/// per-turn `AgentNodeExecutor`: its first-dispatch-wins latch makes every
+/// node past the first an inert carrier, so the graph silently collapses
+/// to Direct. The engine coerces an unwired decision to an honest Direct
+/// turn (rather than walking the fake multi-node graph and emitting
+/// misleading per-node traces). ForgeFlows-Live Phase 3 repoints these to
+/// the real `WorkflowRunner` spawner and retires this coercion.
+///
+/// The test is deliberately **shape-based**, not variant-based: it keys on
+/// `!config.is_direct()` so an `@@template=adaptive` override that projects
+/// down to Direct passes, while one that projects to a hollow shape is
+/// caught — something a `Template`-variant match on the (pre-projection)
+/// requested value cannot do. The silent classifier heuristic
+/// (`source == Classifier`) is never treated as unwired, so ordinary turns
+/// are byte-for-byte unchanged.
+pub fn decision_is_unwired_template(decision: &TemplateDecision) -> bool {
+    decision.source != TemplateDecisionSource::Classifier && !decision.config.is_direct()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,6 +355,71 @@ mod tests {
         );
         assert_eq!(d.source, TemplateDecisionSource::Override);
         assert_eq!(d.template, Some(Template::Hierarchical));
+    }
+
+    // --- Phase 0 (rank 5) honesty gate: `decision_is_unwired_template` ---
+
+    // Every explicitly-requested non-Direct named template is flagged
+    // unwired (the per-turn walker collapses them to Direct silently).
+    #[test]
+    fn explicit_multi_agent_overrides_are_unwired() {
+        for name in ["consensus", "self_critique", "hierarchical"] {
+            let d = select_graph_config(&format!("@@template={name} do the thing"), None, None);
+            assert_eq!(d.source, TemplateDecisionSource::Override);
+            assert!(
+                decision_is_unwired_template(&d),
+                "@@template={name} must be flagged unwired"
+            );
+        }
+    }
+
+    // An explicit Direct override is wired (it really runs) → not flagged.
+    #[test]
+    fn explicit_direct_override_is_wired() {
+        let d = select_graph_config("@@template=direct just answer", None, None);
+        assert_eq!(d.template, Some(Template::Direct));
+        assert!(!decision_is_unwired_template(&d));
+    }
+
+    // Shape-based, not variant-based: an Adaptive override that projects
+    // DOWN to a hollow shape is caught; one that projects to Direct passes.
+    // A `Template`-variant match on the requested value (always
+    // `Some(Adaptive)` here) could not make this distinction.
+    #[test]
+    fn adaptive_override_gated_by_projected_shape_not_requested_variant() {
+        let hollow = select_graph_config("@@template=adaptive compare X and Y", None, None);
+        assert_eq!(hollow.template, Some(Template::Adaptive));
+        assert!(
+            decision_is_unwired_template(&hollow),
+            "adaptive→consensus projection must be flagged unwired"
+        );
+
+        let direct = select_graph_config("@@template=adaptive fix a typo in README", None, None);
+        assert_eq!(direct.template, Some(Template::Adaptive));
+        assert!(
+            !decision_is_unwired_template(&direct),
+            "adaptive→direct projection must pass"
+        );
+    }
+
+    // The silent classifier heuristic is NEVER gated, regardless of the
+    // shape it picks — ordinary turns must stay byte-for-byte unchanged.
+    #[test]
+    fn classifier_decisions_are_never_unwired() {
+        // Real classifier path (plain task → Direct).
+        let plain = select_graph_config("fix typo in README line 12", None, None);
+        assert_eq!(plain.source, TemplateDecisionSource::Classifier);
+        assert!(!decision_is_unwired_template(&plain));
+
+        // Even a synthesized classifier decision carrying a non-Direct
+        // shape must pass — the gate keys on `source`, not just shape.
+        let synthetic = TemplateDecision {
+            config: GraphConfig::multi_agent_consensus(vec!["a", "b"], "judge"),
+            source: TemplateDecisionSource::Classifier,
+            template: None,
+        };
+        assert!(!synthetic.config.is_direct());
+        assert!(!decision_is_unwired_template(&synthetic));
     }
 
     // Bonus: every Template variant maps to a constructable GraphConfig.
