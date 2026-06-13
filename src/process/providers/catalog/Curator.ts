@@ -137,6 +137,18 @@ const KNOWN_LEGACY_IDS = new Set<string>([
   'gemini-1.0-pro',
   'gemini-1.5-pro-',
   'gemini-1.5-flash-',
+  // ── xAI (Grok) ──────────────────────────────────────────────────────────
+  // Grok 1.x / 2.x are deactivated (grok-2 no longer accepted by the API),
+  // superseded by Grok 4.x - 4.3 is the flagship and grok-4.20-reasoning the
+  // top reasoning model. grok-3.x is NOT listed: it still routes to current
+  // weights, so the recency window retires it on its own.
+  'grok-1',
+  'grok-1-',
+  'grok-2',
+  'grok-2-',
+  'grok-2v',
+  'grok-beta',
+  'grok-vision-beta',
 ]);
 
 /** True when `id` matches any exact-or-prefix entry in `KNOWN_LEGACY_IDS`. */

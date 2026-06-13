@@ -67,7 +67,7 @@ const TEST_MODEL: Partial<Record<ProviderId, string>> = {
   openrouter: 'openai/gpt-4o-mini',
   mistral: 'mistral-small-latest',
   deepseek: 'deepseek-chat',
-  xai: 'grok-2',
+  xai: 'grok-3-mini',
   together: 'meta-llama/Llama-3.2-3B-Instruct-Turbo',
   fireworks: 'accounts/fireworks/models/llama-v3p1-8b-instruct',
   cerebras: 'llama3.1-8b',
