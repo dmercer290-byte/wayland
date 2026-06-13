@@ -11,6 +11,7 @@ import {
   useMcpServerCRUD,
 } from '@renderer/hooks/mcp';
 import { openExternalUrl } from '@renderer/utils/platform';
+import { mcpService } from '@/common/adapter/ipcBridge';
 import type { IMcpServer, IMcpServerTransport } from '@/common/config/storage';
 import { useMcpLibrary } from './hooks/useMcpLibrary';
 import { SetupGuide } from './components/SetupGuide';
@@ -55,13 +56,23 @@ function entryToServerData(
   }
 
   // Prefer remote (hosted MCP) if both are present - no local spawn required.
+  // For an api-key hosted server the user's token is sent as a Bearer
+  // Authorization header (McpProtocol forwards transport.headers for
+  // streamable-http/sse). Static catalog headers are merged first so an entry
+  // can still pin extra headers. A user-entered Authorization wins.
+  const remoteHeaders: Record<string, string> =
+    remote?.headers && remote.headers.length > 0
+      ? Object.fromEntries(remote.headers.map((h) => [h.name, h.value]))
+      : {};
+  if (remote && entry['x-wayland'].auth?.method === 'api-key') {
+    const token = Object.values(envValues).find((v) => typeof v === 'string' && v.trim().length > 0);
+    if (token) remoteHeaders.Authorization = `Bearer ${token.trim()}`;
+  }
   const transport: IMcpServerTransport = remote
     ? {
         type: normalizeRemoteType(remote.type),
         url: remote.url,
-        ...(remote.headers && remote.headers.length > 0
-          ? { headers: Object.fromEntries(remote.headers.map((h) => [h.name, h.value])) }
-          : {}),
+        ...(Object.keys(remoteHeaders).length > 0 ? { headers: remoteHeaders } : {}),
       }
     : pkg!.runtimeHint === 'native'
       ? {
@@ -81,8 +92,15 @@ function entryToServerData(
           env: envValues,
         };
 
+  // The catalog id is reverse-DNS with a slash (com.vendor/name), but an MCP
+  // server name written into a CLI agent's config must match
+  // /^[A-Za-z0-9_.-]+$/ (validateMcpServer). Sanitize to the safe form (same
+  // convention as the entry filename) so the agent-sync step doesn't reject it.
+  // libraryEntryId keeps the canonical slug for install/dedup matching.
+  const safeName = entry.name.replace(/[^A-Za-z0-9_.-]/g, '-');
+
   return {
-    name: entry.name,
+    name: safeName,
     description: entry.description,
     enabled: false,
     transport,
@@ -184,7 +202,58 @@ export function DetailPage() {
     message.success(t('mcpLibrary.install.oauthSuccess', 'Connected to {{name}}.', { name: entry.title }));
   };
 
+  /**
+   * api-key save+connect: persist the installed server with the user's token
+   * (now embedded as a Bearer header by entryToServerData), run a REAL
+   * connection test that reaches the server and lists tools, and only enable
+   * the server when that test passes. This replaces the prior decorative token
+   * field whose value went nowhere and the false-positive "connected" banner.
+   */
+  const saveAndConnectApiKey = async () => {
+    const hasToken = Object.values(env).some((v) => typeof v === 'string' && v.trim().length > 0);
+    if (!hasToken) {
+      message.warning(t('mcpLibrary.install.tokenRequired', 'Enter your token first.'));
+      return;
+    }
+    setInstalling(true);
+    try {
+      const server = await crud.handleAddMcpServer(entryToServerData(entry, env));
+      if (!server) {
+        message.error(t('mcpLibrary.install.errorFailed', 'Install failed: {{error}}', { error: 'unknown' }));
+        return;
+      }
+      const res = await mcpService.testMcpConnection.invoke(server);
+      const ok = res.success && res.data?.success === true;
+      if (!ok) {
+        const err = res.data?.error || res.msg || 'connection failed';
+        message.error(t('mcpLibrary.install.connectFailed', 'Could not connect: {{error}}', { error: err }));
+        if (server.enabled) await crud.handleToggleMcpServer(server.id, false).catch(() => {});
+        return;
+      }
+      if (!server.enabled) await crud.handleToggleMcpServer(server.id, true);
+      message.success(
+        t('mcpLibrary.install.connected', 'Connected to {{name}} ({{count}} tools).', {
+          name: entry.title,
+          count: res.data?.tools?.length ?? 0,
+        }),
+      );
+    } catch (err) {
+      message.error(
+        t('mcpLibrary.install.connectFailed', 'Could not connect: {{error}}', {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } finally {
+      setInstalling(false);
+    }
+  };
+
   const onPrimary = async (action: string) => {
+    // api-key hosted MCP: persist token + test + enable on success.
+    if (action === 'api-key-save') {
+      await saveAndConnectApiKey();
+      return;
+    }
     // Install first (or reuse the existing server if already installed), then
     // trigger OAuth for entries whose setup guide emits an 'oauth-flow' action.
     if (action !== 'oauth-flow') return;
@@ -256,11 +325,26 @@ export function DetailPage() {
     );
   };
 
-  const installLabel = installed
-    ? t('mcpLibrary.install.installed', 'Installed')
-    : installing
-      ? t('mcpLibrary.install.installing', 'Installing…')
-      : t('mcpLibrary.install.button', 'Install');
+  // "Connected and ready" must reflect a real connection, not just an install.
+  // OAuth + api-key both require an affirmative, tested enable; only keyless
+  // ('none') servers are ready on install alone.
+  const isOauth = w.auth.method === 'oauth2-byo';
+  const isApiKey = w.auth.method === 'api-key';
+  const isReady =
+    installed &&
+    (isOauth
+      ? installedServer?.enabled === true && oauthStatus[installedServer.id]?.needsLogin !== true
+      : isApiKey
+        ? installedServer?.enabled === true
+        : true);
+
+  const installLabel = installing
+    ? t('mcpLibrary.install.installing', 'Installing…')
+    : isReady
+      ? t('mcpLibrary.install.connected', 'Connected')
+      : installed
+        ? t('mcpLibrary.install.installed', 'Installed')
+        : t('mcpLibrary.install.button', 'Install');
 
   const oauthInFlight = installedServer ? !!loggingIn[installedServer.id] : false;
 
@@ -279,11 +363,6 @@ export function DetailPage() {
     }
     return done;
   }, [guide, installedServer, oauthStatus]);
-
-  // After install + (for OAuth entries) successful auth, surface a clear
-  // "you're done" banner so the user knows the setup is complete.
-  const isOauth = w.auth.method === 'oauth2-byo';
-  const isReady = installed && (!isOauth || (installedServer?.enabled === true && oauthStatus[installedServer.id]?.needsLogin !== true));
 
   return (
     <div className="mcp-detail-page">
@@ -327,7 +406,7 @@ export function DetailPage() {
         </div>
         <div className="mcp-detail-actions">
           <button
-            className="mcp-btn-primary"
+            className={`mcp-btn-primary${isReady ? ' is-connected' : ''}`}
             onClick={() => void install()}
             disabled={installed || installing || oauthInFlight}
           >

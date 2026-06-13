@@ -471,6 +471,15 @@
   border-color: var(--mcp-tier-core-border);
   cursor: default;
 }
+/* Connected + tested: green to match the "connected and ready" banner. Higher
+   specificity than [disabled] so it wins on an installed (disabled) button. */
+.mcp-btn-primary.is-connected,
+.mcp-btn-primary.is-connected[disabled] {
+  background: rgba(46, 213, 115, 0.12);
+  color: rgb(70, 217, 124);
+  border-color: rgba(46, 213, 115, 0.45);
+  cursor: default;
+}
 
 /* Tabs on DetailPage */
 .mcp-tabs {
