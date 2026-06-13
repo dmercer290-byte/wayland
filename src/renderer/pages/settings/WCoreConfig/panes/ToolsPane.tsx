@@ -30,20 +30,28 @@ type ToolDef = {
 };
 
 type ToolCategory = {
-  id: 'file' | 'web' | 'media' | 'dev' | 'prod' | 'agent';
+  id: 'file' | 'web' | 'media' | 'data' | 'cloud' | 'prod' | 'agent' | 'system';
   labelKey: string;
   labelDefault: string;
   tools: readonly ToolDef[];
 };
 
 /**
- * REPRESENTATIVE engine tool catalogue. The embedded engine does not expose its
- * built-in tool list to the Desktop process programmatically, so this grouped
- * list mirrors the engine's ~46 documented built-in tools (and the approved
- * mockup-v3). The enable/disable STATE is real, read from / written to
- * `config.toml [tools].allow_list`; only the catalogue of available tool NAMES
- * is static. An empty/absent `allow_list` means "all tools on" (engine default),
- * so the UI seeds every tool on until the user revokes one.
+ * AUTHORITATIVE engine tool catalogue, mirroring the Wayland Core v0.11.0
+ * built-in registry assembled in `wcore-agent/src/bootstrap.rs`. Every `id`
+ * here is the EXACT canonical tool name the engine registers (the string a
+ * tool returns from `fn name()`), so the allow_list read/write round-trips
+ * correctly: an enabled tool renders ON and toggling writes the right name.
+ *
+ * The enable/disable STATE is real, read from / written to
+ * `config.toml [tools].allow_list`. An empty/absent `allow_list` means
+ * "all tools on" (engine default), so the UI seeds every tool on until the
+ * user revokes one.
+ *
+ * `needsKey` reflects the engine's conditional registration: tools the engine
+ * gates on an env var / credential (and hides via `is_available()` when it's
+ * absent) carry a chip. CLI tools (aws_cli/gcloud/kubectl) shell out to a
+ * locally-configured CLI rather than an engine key, so they carry no chip.
  */
 const CATEGORIES: readonly ToolCategory[] = [
   {
@@ -51,35 +59,35 @@ const CATEGORIES: readonly ToolCategory[] = [
     labelKey: 'settings.wcoreConfig.tools.catFile',
     labelDefault: 'File & Code',
     tools: [
-      { id: 'read', descKey: 'settings.wcoreConfig.tools.descRead', descDefault: 'Read any file in the workspace' },
-      { id: 'write', descKey: 'settings.wcoreConfig.tools.descWrite', descDefault: 'Create or overwrite files' },
-      { id: 'edit', descKey: 'settings.wcoreConfig.tools.descEdit', descDefault: 'Surgical string-replace edits' },
-      { id: 'glob', descKey: 'settings.wcoreConfig.tools.descGlob', descDefault: 'Find files by pattern' },
-      { id: 'grep', descKey: 'settings.wcoreConfig.tools.descGrep', descDefault: 'Search file contents by regex' },
-      { id: 'bash', descKey: 'settings.wcoreConfig.tools.descBash', descDefault: 'Run shell commands in the sandbox' },
+      { id: 'Read', descKey: 'settings.wcoreConfig.tools.descRead', descDefault: 'Read any file in the workspace' },
+      { id: 'Write', descKey: 'settings.wcoreConfig.tools.descWrite', descDefault: 'Create or overwrite files' },
+      { id: 'Edit', descKey: 'settings.wcoreConfig.tools.descEdit', descDefault: 'Surgical string-replace edits' },
+      { id: 'Glob', descKey: 'settings.wcoreConfig.tools.descGlob', descDefault: 'Find files by pattern' },
+      { id: 'Grep', descKey: 'settings.wcoreConfig.tools.descGrep', descDefault: 'Search file contents by regex' },
+      { id: 'Bash', descKey: 'settings.wcoreConfig.tools.descBash', descDefault: 'Run shell commands in the sandbox' },
       {
-        id: 'script',
-        descKey: 'settings.wcoreConfig.tools.descScript',
-        descDefault: 'Execute multi-line scripts (python/node)',
+        id: 'RepoMap',
+        descKey: 'settings.wcoreConfig.tools.descRepoMap',
+        descDefault: 'Map the repository structure & symbols',
       },
     ],
   },
   {
     id: 'web',
     labelKey: 'settings.wcoreConfig.tools.catWeb',
-    labelDefault: 'Web',
+    labelDefault: 'Web & Search',
     tools: [
       {
-        id: 'web_search',
-        descKey: 'settings.wcoreConfig.tools.descWebSearch',
-        descDefault: 'Search the web · free default, add a key for high volume',
+        id: 'web',
+        descKey: 'settings.wcoreConfig.tools.descWeb',
+        descDefault: 'Search, extract, or crawl the web · free DuckDuckGo default',
         needsKey: 'key',
         keySatisfied: true,
       },
       {
-        id: 'web_fetch',
+        id: 'WebFetch',
         descKey: 'settings.wcoreConfig.tools.descWebFetch',
-        descDefault: 'Fetch & read a URL as clean markdown',
+        descDefault: 'Fetch a URL & read it as clean markdown',
       },
     ],
   },
@@ -94,44 +102,83 @@ const CATEGORIES: readonly ToolCategory[] = [
         descDefault: 'Describe & reason over images',
       },
       {
-        id: 'image_gen',
+        id: 'image_inspect',
+        descKey: 'settings.wcoreConfig.tools.descImageInspect',
+        descDefault: 'Inspect image dimensions & metadata',
+      },
+      {
+        id: 'image_generate',
         descKey: 'settings.wcoreConfig.tools.descImageGen',
-        descDefault: 'Generate images from a prompt',
+        descDefault: 'Generate images from a text prompt',
         needsKey: 'key',
       },
       {
-        id: 'transcribe',
+        id: 'transcribe_audio',
         descKey: 'settings.wcoreConfig.tools.descTranscribe',
-        descDefault: 'Speech & audio to text (Whisper)',
+        descDefault: 'Transcribe speech to text (Whisper)',
         needsKey: 'key',
       },
-      { id: 'tts', descKey: 'settings.wcoreConfig.tools.descTts', descDefault: 'Text to speech · Piper (local)' },
-      { id: 'pdf', descKey: 'settings.wcoreConfig.tools.descPdf', descDefault: 'Extract text & tables from PDFs' },
-      { id: 'video', descKey: 'settings.wcoreConfig.tools.descVideo', descDefault: 'Sample & analyze video frames' },
+      {
+        id: 'text_to_speech',
+        descKey: 'settings.wcoreConfig.tools.descTts',
+        descDefault: 'Synthesize speech audio from text',
+        needsKey: 'key',
+      },
+      {
+        id: 'video_analyze',
+        descKey: 'settings.wcoreConfig.tools.descVideo',
+        descDefault: 'Sample & analyze video frames',
+        needsKey: 'key',
+      },
+      { id: 'pdf_extract', descKey: 'settings.wcoreConfig.tools.descPdf', descDefault: 'Extract text from PDFs' },
     ],
   },
   {
-    id: 'dev',
-    labelKey: 'settings.wcoreConfig.tools.catDev',
-    labelDefault: 'Dev',
+    id: 'data',
+    labelKey: 'settings.wcoreConfig.tools.catData',
+    labelDefault: 'Data & Files',
     tools: [
-      { id: 'git', descKey: 'settings.wcoreConfig.tools.descGit', descDefault: 'Stage, commit, branch, diff' },
-      { id: 'github', descKey: 'settings.wcoreConfig.tools.descGithub', descDefault: 'PRs, issues, releases' },
+      { id: 'Jsonl', descKey: 'settings.wcoreConfig.tools.descJsonl', descDefault: 'Stream & query large JSON Lines' },
       {
-        id: 'gitlab',
+        id: 'sql_query',
+        descKey: 'settings.wcoreConfig.tools.descSqlQuery',
+        descDefault: 'Run SQL against a local SQLite file',
+      },
+      {
+        id: 'postgres_schema',
+        descKey: 'settings.wcoreConfig.tools.descPostgres',
+        descDefault: 'Inspect a Postgres schema',
+        needsKey: 'key',
+      },
+      {
+        id: 'markdown_table',
+        descKey: 'settings.wcoreConfig.tools.descMarkdownTable',
+        descDefault: 'Format & align markdown tables',
+      },
+      { id: 'Archive', descKey: 'settings.wcoreConfig.tools.descArchive', descDefault: 'Inspect & extract archives' },
+      {
+        id: 'email_parse',
+        descKey: 'settings.wcoreConfig.tools.descEmailParse',
+        descDefault: 'Parse raw email into headers & body',
+      },
+    ],
+  },
+  {
+    id: 'cloud',
+    labelKey: 'settings.wcoreConfig.tools.catCloud',
+    labelDefault: 'Dev & Cloud',
+    tools: [
+      { id: 'Git', descKey: 'settings.wcoreConfig.tools.descGit', descDefault: 'Stage, commit, branch, diff' },
+      { id: 'github_api', descKey: 'settings.wcoreConfig.tools.descGithub', descDefault: 'GitHub PRs, issues, releases' },
+      {
+        id: 'gitlab_api',
         descKey: 'settings.wcoreConfig.tools.descGitlab',
-        descDefault: 'Merge requests & pipelines',
+        descDefault: 'GitLab merge requests & pipelines',
         needsKey: 'key',
       },
       { id: 'kubectl', descKey: 'settings.wcoreConfig.tools.descKubectl', descDefault: 'Inspect & manage Kubernetes' },
-      { id: 'aws', descKey: 'settings.wcoreConfig.tools.descAws', descDefault: 'AWS CLI operations' },
+      { id: 'aws_cli', descKey: 'settings.wcoreConfig.tools.descAws', descDefault: 'AWS CLI operations' },
       { id: 'gcloud', descKey: 'settings.wcoreConfig.tools.descGcloud', descDefault: 'Google Cloud CLI operations' },
-      {
-        id: 'postgres',
-        descKey: 'settings.wcoreConfig.tools.descPostgres',
-        descDefault: 'Run SQL against your database',
-        needsKey: 'key',
-      },
     ],
   },
   {
@@ -140,28 +187,22 @@ const CATEGORIES: readonly ToolCategory[] = [
     labelDefault: 'Productivity',
     tools: [
       {
-        id: 'notion',
+        id: 'notion_api',
         descKey: 'settings.wcoreConfig.tools.descNotion',
         descDefault: 'Read & write Notion pages',
         needsKey: 'key',
       },
-      { id: 'linear', descKey: 'settings.wcoreConfig.tools.descLinear', descDefault: 'Create & update Linear issues' },
       {
-        id: 'discord',
-        descKey: 'settings.wcoreConfig.tools.descDiscord',
-        descDefault: 'Send messages to channels',
+        id: 'linear_api',
+        descKey: 'settings.wcoreConfig.tools.descLinear',
+        descDefault: 'Create & update Linear issues',
         needsKey: 'key',
       },
       {
-        id: 'spotify',
-        descKey: 'settings.wcoreConfig.tools.descSpotify',
-        descDefault: 'Control playback & playlists',
-        needsKey: 'auth',
-      },
-      {
-        id: 'google_meet',
-        descKey: 'settings.wcoreConfig.tools.descMeet',
-        descDefault: 'Schedule & join meetings',
+        id: 'discord_server',
+        descKey: 'settings.wcoreConfig.tools.descDiscord',
+        descDefault: 'Manage a Discord server & channels',
+        needsKey: 'key',
       },
       {
         id: 'homeassistant',
@@ -169,26 +210,97 @@ const CATEGORIES: readonly ToolCategory[] = [
         descDefault: 'Control smart-home devices',
         needsKey: 'key',
       },
-      { id: 'cron', descKey: 'settings.wcoreConfig.tools.descCron', descDefault: 'Schedule recurring agent runs' },
+      {
+        id: 'send_message',
+        descKey: 'settings.wcoreConfig.tools.descSendMessage',
+        descDefault: 'Send messages to a connected channel',
+      },
+      {
+        id: 'cronjob',
+        descKey: 'settings.wcoreConfig.tools.descCron',
+        descDefault: 'Schedule recurring agent runs',
+      },
     ],
   },
   {
     id: 'agent',
     labelKey: 'settings.wcoreConfig.tools.catAgent',
-    labelDefault: 'Agent',
+    labelDefault: 'Agent & Planning',
     tools: [
       {
-        id: 'delegate',
+        id: 'Spawn',
+        descKey: 'settings.wcoreConfig.tools.descSpawn',
+        descDefault: 'Spawn named sub-agents for parallel work',
+      },
+      {
+        id: 'Delegate',
         descKey: 'settings.wcoreConfig.tools.descDelegate',
-        descDefault: 'Spawn sub-agents for parallel work',
+        descDefault: 'Delegate a focused single task or batch',
+      },
+      {
+        id: 'Workflow',
+        descKey: 'settings.wcoreConfig.tools.descWorkflow',
+        descDefault: 'Run a multi-stage dynamic workflow',
       },
       { id: 'todo', descKey: 'settings.wcoreConfig.tools.descTodo', descDefault: 'Track multi-step task progress' },
+      {
+        id: 'clarify',
+        descKey: 'settings.wcoreConfig.tools.descClarify',
+        descDefault: 'Ask the user a clarifying question',
+      },
+      {
+        id: 'AskUserQuestion',
+        descKey: 'settings.wcoreConfig.tools.descAskUser',
+        descDefault: 'Ask the user a structured multi-choice question',
+      },
+      {
+        id: 'EnterPlanMode',
+        descKey: 'settings.wcoreConfig.tools.descEnterPlan',
+        descDefault: 'Enter read-only plan mode',
+      },
+      {
+        id: 'ExitPlanMode',
+        descKey: 'settings.wcoreConfig.tools.descExitPlan',
+        descDefault: 'Exit plan mode & begin executing',
+      },
+    ],
+  },
+  {
+    id: 'system',
+    labelKey: 'settings.wcoreConfig.tools.catSystem',
+    labelDefault: 'Wayland & Memory',
+    tools: [
+      {
+        id: 'ToolSearch',
+        descKey: 'settings.wcoreConfig.tools.descToolSearch',
+        descDefault: 'Search the tool catalogue by intent',
+      },
+      { id: 'Skill', descKey: 'settings.wcoreConfig.tools.descSkill', descDefault: 'Run an installed skill' },
       {
         id: 'session_search',
         descKey: 'settings.wcoreConfig.tools.descSessionSearch',
         descDefault: 'Search past sessions & transcripts',
       },
-      { id: 'memory', descKey: 'settings.wcoreConfig.tools.descMemory', descDefault: 'Read & write long-term memory' },
+      {
+        id: 'record_episode',
+        descKey: 'settings.wcoreConfig.tools.descRecordEpisode',
+        descDefault: 'Store a durable memory episode',
+      },
+      {
+        id: 'assert_fact',
+        descKey: 'settings.wcoreConfig.tools.descAssertFact',
+        descDefault: 'Store a durable fact in memory',
+      },
+      {
+        id: 'wayland_status',
+        descKey: 'settings.wcoreConfig.tools.descWaylandStatus',
+        descDefault: 'Read live session status & token usage',
+      },
+      {
+        id: 'wayland_telemetry_query',
+        descKey: 'settings.wcoreConfig.tools.descWaylandTelemetry',
+        descDefault: 'Query per-tool call counts & telemetry',
+      },
     ],
   },
 ];
