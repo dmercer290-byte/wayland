@@ -67,6 +67,55 @@
   max-width: 640px;
 }
 
+/* Sibling tabs: Browse | Installed (always one click apart) */
+.mcp-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--mcp-border);
+}
+.mcp-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--mcp-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.mcp-tab:hover {
+  color: var(--mcp-text-primary);
+}
+.mcp-tab.is-active {
+  color: var(--mcp-text-primary);
+  border-bottom-color: var(--mcp-brand);
+}
+.mcp-tab-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--mcp-bg-3);
+  color: var(--mcp-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mcp-tab.is-active .mcp-tab-count {
+  background: var(--mcp-brand-soft);
+  color: var(--mcp-brand);
+}
+
 /* Filter bar */
 .mcp-filter-bar {
   display: flex;

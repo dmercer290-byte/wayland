@@ -420,7 +420,7 @@
     {
       "id": "com.raindrop/raindrop-mcp",
       "name": "Raindrop",
-      "shortDescription": "Bookmarks, collections, and tags - Raindrop.io's official hosted MCP with OAuth.",
+      "shortDescription": "Bookmarks, collections, and tags - Raindrop.io's official hosted MCP. Connect with a test token.",
       "iconUrl": "icons/raindrop.svg",
       "tier": "worker",
       "categories": [

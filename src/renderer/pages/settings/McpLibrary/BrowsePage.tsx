@@ -14,6 +14,7 @@ import AddMcpServerModal from '@renderer/pages/settings/components/AddMcpServerM
 import { RecommendedGrid } from './components/RecommendedGrid';
 import { CategorySection } from './components/CategorySection';
 import { TierFilter } from './components/TierFilter';
+import { McpLibraryTabs } from './components/McpLibraryTabs';
 import type { Tier, CatalogIndexEntry } from './types';
 
 export function BrowsePage() {
@@ -127,9 +128,11 @@ export function BrowsePage() {
           </p>
         </div>
         <button className="mcp-btn-primary" onClick={() => setShowAddModal(true)}>
-          {t('mcpLibrary.installed.addCustom', '+ Add custom MCP')}
+          {t('mcpLibrary.installed.addCustom', '+ Add MCP')}
         </button>
       </header>
+
+      <McpLibraryTabs active="browse" installedCount={mcpServers.length} />
 
       <div className="mcp-filter-bar">
         <input

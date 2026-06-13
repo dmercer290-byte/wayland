@@ -15,6 +15,7 @@ import type { IMcpServer } from '@/common/config/storage';
 import AddMcpServerModal from '@renderer/pages/settings/components/AddMcpServerModal';
 import { useMcpLibrary } from './hooks/useMcpLibrary';
 import { ServerRow, type UIStatus } from './components/ServerRow';
+import { McpLibraryTabs } from './components/McpLibraryTabs';
 
 // 4-state UI status derivation per RECON.md §5.
 // error short-circuits first, then warn (needsLogin), then running (enabled + connected),
@@ -218,9 +219,11 @@ export function InstalledPage() {
       <header className='mcp-page-head'>
         <h2>{t('mcpLibrary.installed.title', 'MCP Library - Installed')}</h2>
         <button className='mcp-btn-primary' onClick={() => setShowAddModal(true)}>
-          {t('mcpLibrary.installed.addCustom', '+ Add custom MCP')}
+          {t('mcpLibrary.installed.addCustom', '+ Add MCP')}
         </button>
       </header>
+
+      <McpLibraryTabs active='installed' installedCount={mcpServers.length} />
 
       <div className='mcp-status-strip'>
         <div className='mcp-status-cell mcp-status-running'>

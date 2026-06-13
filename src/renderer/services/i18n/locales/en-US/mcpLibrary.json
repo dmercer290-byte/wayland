@@ -13,7 +13,7 @@
   },
   "installed": {
     "title": "MCP Library - Installed",
-    "addCustom": "+ Add custom MCP",
+    "addCustom": "+ Add MCP",
     "browseLibrary": "+ Browse library",
     "customEmpty": "No custom MCPs.",
     "customNoDetail": "Custom servers don't have a detail page yet.",
@@ -53,5 +53,10 @@
     "clientSecretLabel": "Client secret",
     "clientSecretPlaceholder": "Paste the client_secret",
     "saveFailed": "Failed to save credentials: {{error}}"
+  },
+  "tabs": {
+    "browse": "Browse",
+    "installed": "Installed",
+    "aria": "MCP Library sections"
   }
 }

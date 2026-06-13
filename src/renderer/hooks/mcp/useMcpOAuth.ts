@@ -34,8 +34,14 @@ export const useMcpOAuth = () => {
 
   // Check OAuth status
   const checkOAuthStatus = useCallback(async (server: IMcpServer) => {
-    // Only check HTTP/SSE servers
-    if (server.transport.type !== 'http' && server.transport.type !== 'sse') {
+    // Only check remote servers. streamable_http is what every hosted catalog
+    // remote normalizes to, so it MUST be included or those servers never
+    // surface a needs-login state.
+    if (
+      server.transport.type !== 'http' &&
+      server.transport.type !== 'sse' &&
+      server.transport.type !== 'streamable_http'
+    ) {
       return;
     }
 
@@ -203,7 +209,10 @@ export const useMcpOAuth = () => {
   // Batch-check OAuth status for multiple servers
   const checkMultipleServers = useCallback(
     async (servers: IMcpServer[]) => {
-      const httpServers = servers.filter((s) => s.transport.type === 'http' || s.transport.type === 'sse');
+      const httpServers = servers.filter(
+        (s) =>
+          s.transport.type === 'http' || s.transport.type === 'sse' || s.transport.type === 'streamable_http'
+      );
 
       await Promise.all(httpServers.map((server) => checkOAuthStatus(server)));
     },
