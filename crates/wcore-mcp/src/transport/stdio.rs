@@ -987,13 +987,43 @@ mod tests {
 
         transport.close().await.expect("close ok");
 
-        // After close, the grandchild must be reaped. Poll briefly because the
-        // OS may take a moment to tear the group down.
+        // After close, the grandchild must be REAPED — i.e. killed by the
+        // process-group teardown. "Killed" means either fully gone (ESRCH) or a
+        // `<defunct>` zombie: in a reaper-less container (e.g. CI with no init at
+        // PID 1) the orphaned grandchild is SIGKILL'd but has no parent to reap
+        // its exit status, so it lingers as a zombie and `kill(pid, 0)` still
+        // returns 0. A zombie proves the rank-24 fix worked; only a still-RUNNING
+        // orphan is a failure. Poll briefly because group teardown isn't instant.
+        //
+        // Liveness probe that treats a zombie as reaped. SAFETY: signal 0 sends
+        // no signal; -1/ESRCH means the pid is gone.
+        let killed_or_zombie = |pid: i32| -> bool {
+            if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+                return true; // ESRCH — fully gone.
+            }
+            #[cfg(target_os = "linux")]
+            {
+                // /proc/<pid>/stat: "pid (comm) STATE ...". The state char sits
+                // just after the final ')' of the (possibly paren-containing)
+                // comm field. 'Z' == zombie == killed-but-unreaped.
+                match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                    Ok(stat) => stat
+                        .rsplit_once(')')
+                        .map(|(_, rest)| rest.trim_start().starts_with('Z'))
+                        .unwrap_or(false),
+                    // Entry vanished between the kill probe and the read — gone.
+                    Err(_) => true,
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                false // Non-Linux runners have a reaper; ESRCH is the real signal.
+            }
+        };
+
         let mut reaped = false;
         for _ in 0..100 {
-            // SAFETY: signal 0 liveness probe; -1/ESRCH means the pid is gone.
-            let rc = unsafe { libc::kill(gpid as libc::pid_t, 0) };
-            if rc != 0 {
+            if killed_or_zombie(gpid) {
                 reaped = true;
                 break;
             }
@@ -1001,7 +1031,7 @@ mod tests {
         }
         assert!(
             reaped,
-            "grandchild pid {gpid} still alive after close — process group not reaped"
+            "grandchild pid {gpid} still running after close — process group not reaped"
         );
     }
 
