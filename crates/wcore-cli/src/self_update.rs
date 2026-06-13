@@ -441,7 +441,10 @@ mod tests {
 
     #[test]
     fn target_triple_known_hosts() {
-        assert_eq!(target_triple_for("macos", "aarch64"), "aarch64-apple-darwin");
+        assert_eq!(
+            target_triple_for("macos", "aarch64"),
+            "aarch64-apple-darwin"
+        );
         assert_eq!(target_triple_for("macos", "x86_64"), "x86_64-apple-darwin");
         assert_eq!(
             target_triple_for("linux", "x86_64"),
