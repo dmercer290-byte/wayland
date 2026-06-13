@@ -65,7 +65,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use wcore_config::config::{Config, ProviderType};
+use wcore_config::config::{AzureAuthMode, Config, ProviderType};
 use wcore_config::debug::DebugConfig;
 use wcore_types::llm::{LlmEvent, LlmRequest};
 
@@ -396,13 +396,35 @@ pub fn create_native_provider(config: &Config) -> Arc<dyn LlmProvider> {
         // connect error (honest failure over a wrong-host request).
         ProviderType::AzureOpenAI => {
             let resource = azure_resource_from_base_url(&config.base_url);
-            Arc::new(azure_openai::AzureOpenAIProvider::with_defaults(
-                &config.api_key,
-                &resource,
-                &config.model, // Azure deployment name == configured model
-                compat,
-                debug,
-            ))
+            // R77: honor the configured Azure auth mode. `aad-bearer` swaps the
+            // `api-key` header for an Entra-ID bearer token; the token itself
+            // comes from AZURE_AD_TOKEN (the crate owns no acquisition/refresh —
+            // the caller supplies the closure). Defaults to api-key auth.
+            // `azure_auth_mode` is Copy, so this read does not move `compat`.
+            match compat.azure_auth_mode.unwrap_or_default() {
+                AzureAuthMode::AadBearer => {
+                    let token_source: azure_openai::AzureTokenSource = Arc::new(|| {
+                        std::env::var("AZURE_AD_TOKEN").map_err(|_| ProviderError::MissingApiKey)
+                    });
+                    Arc::new(azure_openai::AzureOpenAIProvider::with_auth(
+                        azure_openai::AzureAuth::AadBearer(token_source),
+                        &resource,
+                        &config.model, // Azure deployment name == configured model
+                        azure_openai::AZURE_OPENAI_DEFAULT_API_VERSION,
+                        compat,
+                        debug,
+                    ))
+                }
+                AzureAuthMode::ApiKey => {
+                    Arc::new(azure_openai::AzureOpenAIProvider::with_defaults(
+                        &config.api_key,
+                        &resource,
+                        &config.model, // Azure deployment name == configured model
+                        compat,
+                        debug,
+                    ))
+                }
+            }
         }
     }
 }

@@ -129,6 +129,15 @@ pub struct ProviderCompat {
     /// The `gpt-5*` family is rejected at `/v1/chat/completions` upstream, so
     /// the default `None` already does the right thing for native OpenAI.
     pub uses_responses_api: Option<bool>,
+
+    /// Azure OpenAI authentication mode (R77). Only consulted for the
+    /// `AzureOpenAI` provider at bootstrap. `None`/`api-key` sends the Azure
+    /// `api-key` header from the configured key; `aad-bearer` switches to an
+    /// Entra-ID / OAuth bearer token sourced from the `AZURE_AD_TOKEN`
+    /// environment variable (the crate owns no token acquisition/refresh).
+    /// Set via `[compat] azure_auth_mode = "aad-bearer"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub azure_auth_mode: Option<crate::config::AzureAuthMode>,
 }
 
 impl ProviderCompat {
@@ -490,6 +499,7 @@ impl ProviderCompat {
             input_optimization: user.input_optimization.or(defaults.input_optimization),
             compact_bash: user.compact_bash.or(defaults.compact_bash),
             uses_responses_api: user.uses_responses_api.or(defaults.uses_responses_api),
+            azure_auth_mode: user.azure_auth_mode.or(defaults.azure_auth_mode),
         }
     }
 
@@ -848,6 +858,36 @@ strip_patterns = ["__REASONING__"]
             Some(vec!["__REASONING__".to_string()])
         );
         assert!(compat.clean_orphan_tool_calls.is_none());
+    }
+
+    /// R77: `azure_auth_mode` is now a real, honored config field (previously
+    /// the `AzureAuthMode` enum existed but was wired into no struct, so a
+    /// user's `auth_mode` setting was silently ignored).
+    #[test]
+    fn azure_auth_mode_deserializes_and_merges() {
+        use crate::config::AzureAuthMode;
+
+        // kebab-case TOML value parses to the enum.
+        let compat: ProviderCompat = toml::from_str("azure_auth_mode = \"aad-bearer\"").unwrap();
+        assert_eq!(compat.azure_auth_mode, Some(AzureAuthMode::AadBearer));
+
+        // Absent => None (resolves to the api-key default at bootstrap).
+        let bare: ProviderCompat = toml::from_str("max_tokens_field = \"x\"").unwrap();
+        assert_eq!(bare.azure_auth_mode, None);
+
+        // merge: an explicit user override wins over the preset default.
+        let defaults = ProviderCompat {
+            azure_auth_mode: Some(AzureAuthMode::ApiKey),
+            ..Default::default()
+        };
+        let user = ProviderCompat {
+            azure_auth_mode: Some(AzureAuthMode::AadBearer),
+            ..Default::default()
+        };
+        assert_eq!(
+            ProviderCompat::merge(defaults, user).azure_auth_mode,
+            Some(AzureAuthMode::AadBearer)
+        );
     }
 }
 
