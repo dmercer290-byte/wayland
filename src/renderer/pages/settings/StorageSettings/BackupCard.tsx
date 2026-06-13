@@ -1,9 +1,10 @@
-import { Button, Checkbox, Input } from '@arco-design/web-react';
+import { Checkbox, Input } from '@arco-design/web-react';
 import { Archive } from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, PreferenceRow } from '@renderer/components/settings/shared';
 import { storage } from '@/common/adapter/ipcBridge';
+import DesktopActionButton from './DesktopActionButton';
 
 const BackupCard: React.FC = () => {
   const { t } = useTranslation();
@@ -44,12 +45,12 @@ const BackupCard: React.FC = () => {
       )}
 
       <div className='flex gap-8px mt-4px'>
-        <Button type='primary' size='small' loading={exporting} onClick={handleExport}>
+        <DesktopActionButton type='primary' size='small' loading={exporting} onClick={handleExport}>
           {t('settings.storagePage.exportAll')}
-        </Button>
-        <Button size='small' loading={importing} onClick={handleImport}>
+        </DesktopActionButton>
+        <DesktopActionButton size='small' loading={importing} onClick={handleImport}>
           {t('settings.storagePage.restore')}
-        </Button>
+        </DesktopActionButton>
       </div>
     </Card>
   );

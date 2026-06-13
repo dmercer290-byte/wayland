@@ -2058,6 +2058,7 @@
     "logsDir": "Logs",
     "open": "Open",
     "clear": "Clear",
+    "desktopOnly": "Available in the desktop app",
     "clearConfirmTitle": "Clear directory?",
     "clearConfirmBody": "This permanently removes the files inside. Wayland will rebuild them as needed.",
     "backupTitle": "Backup & restore",

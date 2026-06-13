@@ -1,9 +1,9 @@
-import { Button } from '@arco-design/web-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, PreferenceRow, ConfirmDialog } from '@renderer/components/settings/shared';
 import { storage } from '@/common/adapter/ipcBridge';
 import { FolderOpen } from 'lucide-react';
+import DesktopActionButton from './DesktopActionButton';
 
 type DirKind = 'workspace' | 'cache' | 'logs';
 type ClearableKind = 'cache' | 'logs';
@@ -24,30 +24,30 @@ const DirectoriesCard: React.FC = () => {
     <>
       <Card title={t('settings.storagePage.directoriesTitle')} titleIcon={FolderOpen}>
         <PreferenceRow label={t('settings.storagePage.workspace')}>
-          <Button size='small' onClick={() => openDir('workspace')}>
+          <DesktopActionButton size='small' onClick={() => openDir('workspace')}>
             {t('settings.storagePage.open')}
-          </Button>
+          </DesktopActionButton>
         </PreferenceRow>
 
         <PreferenceRow label={t('settings.storagePage.cacheDir')}>
           <div className='flex gap-8px'>
-            <Button size='small' onClick={() => openDir('cache')}>
+            <DesktopActionButton size='small' onClick={() => openDir('cache')}>
               {t('settings.storagePage.open')}
-            </Button>
-            <Button size='small' status='danger' onClick={() => setClearTarget('cache')}>
+            </DesktopActionButton>
+            <DesktopActionButton size='small' status='danger' onClick={() => setClearTarget('cache')}>
               {t('settings.storagePage.clear')}
-            </Button>
+            </DesktopActionButton>
           </div>
         </PreferenceRow>
 
         <PreferenceRow label={t('settings.storagePage.logsDir')}>
           <div className='flex gap-8px'>
-            <Button size='small' onClick={() => openDir('logs')}>
+            <DesktopActionButton size='small' onClick={() => openDir('logs')}>
               {t('settings.storagePage.open')}
-            </Button>
-            <Button size='small' status='danger' onClick={() => setClearTarget('logs')}>
+            </DesktopActionButton>
+            <DesktopActionButton size='small' status='danger' onClick={() => setClearTarget('logs')}>
               {t('settings.storagePage.clear')}
-            </Button>
+            </DesktopActionButton>
           </div>
         </PreferenceRow>
       </Card>
