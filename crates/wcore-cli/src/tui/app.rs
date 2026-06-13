@@ -922,13 +922,17 @@ pub enum SubAgentStatus {
 /// ForgeFlows-Live Phase 2 — a running workflow grouped from the
 /// `"workflow:<node_id>"` `parent_call_id` prefix the child agents relay
 /// (shipped in Phase 1). This is the drill-in unit of the Workflows tab:
-/// one `WorkflowView` lists the nodes a workflow ran. MVP groups every
-/// `"workflow:"`-prefixed sub-agent event under a single workflow (`key`
-/// is always `"workflow"`); a richer per-run key can split concurrent
-/// workflows later without changing this shape.
+/// one `WorkflowView` lists the nodes a workflow ran. Keyed by the run's
+/// `workflow_id` (one view per run); node events carry only the
+/// `"workflow:"` prefix (no id) and attach to the current — i.e. last
+/// unfinished — run. Sequential runs in one session each get their own
+/// view; a node arriving before its `WorkflowStarted` lands on a "pending"
+/// view that the started event then adopts.
 #[derive(Debug, Clone, Default)]
 pub struct WorkflowView {
-    /// Grouping key — the `"workflow"` prefix group the nodes share.
+    /// Grouping key — the run's `workflow_id`, or the pending sentinel
+    /// (`PENDING_WORKFLOW_KEY`) for a view created by a node event that
+    /// arrived before its `WorkflowStarted`.
     pub key: String,
     /// Display name; set from the `WorkflowStarted` event when one arrives,
     /// otherwise defaults to `"Workflow"`.

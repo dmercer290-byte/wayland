@@ -587,18 +587,45 @@ fn apply_event_inner(app: &mut App, event: ProtocolEvent) {
         }
 
         // ── Workflows (ForgeFlows-Live lifecycle) ────────────────────
-        ProtocolEvent::WorkflowStarted { name, .. } => {
-            // Find-or-create the single MVP workflow group by the SAME key
-            // the `"workflow:<node_id>"` sub-agent fold uses, so a
-            // WorkflowStarted that lands before OR after the first node
-            // event correlates onto one `WorkflowView`. Set the display name
-            // from the event, replacing the default "Workflow".
-            let idx = ensure_workflow_group(app);
-            app.workflows[idx].name = name;
+        ProtocolEvent::WorkflowStarted {
+            workflow_id, name, ..
+        } => {
+            // One view per run, keyed by `workflow_id`. ADOPT the last view if
+            // it is unfinished AND either still pending (a node arrived first,
+            // order-tolerance) OR already this run's id; otherwise PUSH a new
+            // view so each sequential run gets its own (fixes the merge bug
+            // where a second run reused the first's view).
+            let adopt = app.workflows.last().is_some_and(|w| {
+                w.finished.is_none() && (w.key == PENDING_WORKFLOW_KEY || w.key == workflow_id)
+            });
+            if adopt {
+                let view = app.workflows.last_mut().expect("adopt implies non-empty");
+                view.key = workflow_id;
+                view.name = name;
+                view.finished = None;
+            } else {
+                app.workflows.push(WorkflowView {
+                    key: workflow_id,
+                    name,
+                    nodes: Vec::new(),
+                    finished: None,
+                });
+            }
         }
-        ProtocolEvent::WorkflowFinished { succeeded, .. } => {
-            let idx = ensure_workflow_group(app);
-            app.workflows[idx].finished = Some(succeeded);
+        ProtocolEvent::WorkflowFinished {
+            workflow_id,
+            succeeded,
+        } => {
+            // Resolve the run by its `workflow_id`; fall back to the last
+            // unfinished view if the started event was never seen.
+            let idx = app
+                .workflows
+                .iter()
+                .position(|w| w.key == workflow_id)
+                .or_else(|| app.workflows.iter().rposition(|w| w.finished.is_none()));
+            if let Some(idx) = idx {
+                app.workflows[idx].finished = Some(succeeded);
+            }
         }
 
         // ── Config / context / session ───────────────────────────────
@@ -1623,28 +1650,33 @@ fn push_feed_line(view: &mut SubAgentView, text: &str) {
     }
 }
 
-/// ForgeFlows-Live — find-or-create the single MVP workflow group, returning
-/// its index in `app.workflows`. Both the `"workflow:<node_id>"` sub-agent
-/// fold and the `WorkflowStarted`/`WorkflowFinished` lifecycle arms share
-/// this so a group created by either path correlates onto one
-/// `WorkflowView`, regardless of which event arrives first. A natural
-/// per-run key can split concurrent workflows later without changing the
-/// call sites.
-fn ensure_workflow_group(app: &mut App) -> usize {
-    // MVP grouping key: a single workflow group.
-    const GROUP_KEY: &str = "workflow";
-    match app.workflows.iter().position(|w| w.key == GROUP_KEY) {
-        Some(i) => i,
-        None => {
-            app.workflows.push(WorkflowView {
-                key: GROUP_KEY.to_string(),
-                name: "Workflow".to_string(),
-                nodes: Vec::new(),
-                finished: None,
-            });
-            app.workflows.len() - 1
-        }
+/// Sentinel `key` for a `WorkflowView` created by a node event that arrived
+/// before its `WorkflowStarted`. The double-underscore prefix can't collide
+/// with a real plan name (the engine's `workflow_id` is `plan.meta.name`).
+/// The next `WorkflowStarted` adopts the pending view, swapping in the real
+/// `workflow_id`.
+const PENDING_WORKFLOW_KEY: &str = "__pending__";
+
+/// ForgeFlows-Live — resolve the index of the CURRENT workflow run a
+/// `"workflow:<node_id>"` node event attaches to. The wire format carries no
+/// `workflow_id` on node events (only the `"workflow:"` prefix), and the
+/// engine runs workflows sequentially through one FIFO sink, so the current
+/// run is the last view in `app.workflows` IF it is unfinished. If the list
+/// is empty or the last view is already finished (a new run's node arrived
+/// before its `WorkflowStarted`), push a fresh pending view and return it —
+/// the upcoming `WorkflowStarted` will adopt it.
+fn current_workflow_for_node(app: &mut App) -> usize {
+    let attach_to_last = app.workflows.last().is_some_and(|w| w.finished.is_none());
+    if attach_to_last {
+        return app.workflows.len() - 1;
     }
+    app.workflows.push(WorkflowView {
+        key: PENDING_WORKFLOW_KEY.to_string(),
+        name: "Workflow".to_string(),
+        nodes: Vec::new(),
+        finished: None,
+    });
+    app.workflows.len() - 1
 }
 
 /// ForgeFlows-Live Phase 2 — fold a `"workflow:<node_id>"`-prefixed inner
@@ -1664,7 +1696,7 @@ fn apply_workflow_node_event(
     kind: &str,
     inner: &serde_json::Value,
 ) {
-    let wf_idx = ensure_workflow_group(app);
+    let wf_idx = current_workflow_for_node(app);
     let workflow = &mut app.workflows[wf_idx];
 
     let node_idx = match workflow.nodes.iter().position(|n| n.node_id == node_id) {

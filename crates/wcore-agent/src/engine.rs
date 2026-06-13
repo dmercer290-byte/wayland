@@ -4416,6 +4416,12 @@ impl AgentEngine {
                 // recursion-cut reason as synthesis above. The task takes
                 // ownership of the plan + spawner and returns them with the
                 // run result so the caller can render the per-stage summary.
+                //
+                // Snapshot the workflow id BEFORE the spawn moves `plan`. It
+                // must equal the `workflow_id` `run_workflow_owned` emits in
+                // `WorkflowStarted` (which is `plan.meta.name`) so the join-
+                // failure arm below can emit the matching `WorkflowFinished`.
+                let workflow_id = plan.meta.name.clone();
                 match tokio::spawn(run_workflow_owned(
                     spawner,
                     plan,
@@ -4466,6 +4472,14 @@ impl AgentEngine {
                             error = %join_err,
                             "workflow_live: execution task join failed; falling through"
                         );
+                        // ForgeFlows-Live: `run_workflow_owned` already emitted
+                        // `WorkflowStarted` before the panic/cancel, but the
+                        // matching `WorkflowFinished` rides at the END of that
+                        // task body and never fired. Without it the TUI's
+                        // WorkflowView stays `finished: None` (orange/running)
+                        // forever. Emit it here with the SAME `workflow_id` so
+                        // the card resolves to "failed".
+                        self.output.emit_workflow_finished(&workflow_id, false);
                         // GAP-8: the gate already emitted a `ToolRequest` proposal
                         // card for `call_id`, and the user `Approved` it. A
                         // JoinError (the detached run task panicked or was

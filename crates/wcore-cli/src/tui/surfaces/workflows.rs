@@ -149,6 +149,10 @@ impl Surface for WorkflowsSurface {
                 KeyCode::Enter => {
                     if len > 0 {
                         self.mode = ViewMode::Drill(self.clamped_selection(len));
+                        // `self.selected` doubles as the list-row cursor AND
+                        // the drill node cursor; reset it so Drill always
+                        // opens on node 0 instead of the stale list-row index.
+                        self.selected = 0;
                     }
                     SurfaceAction::None
                 }
@@ -777,8 +781,124 @@ mod tests {
         );
         assert_eq!(app.workflows.len(), 1, "must not create a 2nd group");
         assert_eq!(app.workflows[0].name, "Late Start");
+        assert_eq!(app.workflows[0].key, "late", "pending key adopted to id");
         // The nodes folded earlier survive the rename.
         assert_eq!(app.workflows[0].nodes.len(), 2);
+    }
+
+    /// A single `workflow:<node_id>` node event (one streaming line), for
+    /// driving sequential-run tests through the REAL bridge.
+    fn node_event(node_id: &str, agent: &str, text: &str) -> wcore_protocol::events::ProtocolEvent {
+        use wcore_protocol::events::ProtocolEvent;
+        ProtocolEvent::SubAgentEvent {
+            parent_call_id: format!("workflow:{node_id}"),
+            agent_name: agent.into(),
+            inner: serde_json::json!({ "type": "text_delta", "text": text }),
+        }
+    }
+
+    #[test]
+    fn two_sequential_runs_produce_two_distinct_workflow_views() {
+        // The merge bug: a second workflow run in the same session reused the
+        // first run's WorkflowView. With per-run keying, Started A → nodes →
+        // Finished A → Started B → nodes → Finished B must yield TWO views,
+        // each with its own name, nodes, and finished verdict.
+        use wcore_protocol::events::ProtocolEvent;
+        let mut app = App::new();
+
+        // ── Run A ──
+        apply_event(
+            &mut app,
+            ProtocolEvent::WorkflowStarted {
+                workflow_id: "run-a".into(),
+                name: "Audit".into(),
+                node_count: 1,
+            },
+        );
+        apply_event(&mut app, node_event("a1", "planner", "auditing"));
+        apply_event(
+            &mut app,
+            ProtocolEvent::WorkflowFinished {
+                workflow_id: "run-a".into(),
+                succeeded: true,
+            },
+        );
+
+        // ── Run B ──
+        apply_event(
+            &mut app,
+            ProtocolEvent::WorkflowStarted {
+                workflow_id: "run-b".into(),
+                name: "Refactor".into(),
+                node_count: 1,
+            },
+        );
+        apply_event(&mut app, node_event("b1", "builder", "refactoring"));
+        apply_event(
+            &mut app,
+            ProtocolEvent::WorkflowFinished {
+                workflow_id: "run-b".into(),
+                succeeded: false,
+            },
+        );
+
+        assert_eq!(app.workflows.len(), 2, "each run gets its own view");
+
+        let a = &app.workflows[0];
+        assert_eq!(a.key, "run-a");
+        assert_eq!(a.name, "Audit");
+        assert_eq!(a.finished, Some(true));
+        assert_eq!(a.nodes.len(), 1, "run A keeps only its own node");
+        assert_eq!(a.nodes[0].node_id, "a1");
+
+        let b = &app.workflows[1];
+        assert_eq!(b.key, "run-b");
+        assert_eq!(b.name, "Refactor");
+        assert_eq!(b.finished, Some(false));
+        assert_eq!(b.nodes.len(), 1, "run B node did NOT append to run A");
+        assert_eq!(b.nodes[0].node_id, "b1");
+
+        // Both runs render in the LIST surface (the surface iterates).
+        let mut surface = WorkflowsSurface::new();
+        let out = render(&mut surface, &app, 100, 24);
+        assert!(out.contains("Audit"), "run A name missing:\n{out}");
+        assert!(out.contains("Refactor"), "run B name missing:\n{out}");
+    }
+
+    #[test]
+    fn drill_always_opens_on_node_zero_ignoring_stale_list_cursor() {
+        // `self.selected` doubles as the list-row cursor and the drill node
+        // cursor. With two workflows, selecting row 1 then drilling must start
+        // the node cursor at 0, not the stale row index 1.
+        use wcore_protocol::events::ProtocolEvent;
+        let mut app = App::new();
+        for (id, name) in [("run-a", "Audit"), ("run-b", "Refactor")] {
+            apply_event(
+                &mut app,
+                ProtocolEvent::WorkflowStarted {
+                    workflow_id: id.into(),
+                    name: name.into(),
+                    node_count: 2,
+                },
+            );
+            apply_event(&mut app, node_event(&format!("{id}-n0"), "planner", "x"));
+            apply_event(&mut app, node_event(&format!("{id}-n1"), "builder", "y"));
+            apply_event(
+                &mut app,
+                ProtocolEvent::WorkflowFinished {
+                    workflow_id: id.into(),
+                    succeeded: true,
+                },
+            );
+        }
+
+        let mut surface = WorkflowsSurface::new();
+        // Move the list cursor to row 1, then drill.
+        surface.handle_key(key(KeyCode::Down), &mut app);
+        assert_eq!(surface.selected, 1, "list cursor moved to row 1");
+        surface.handle_key(key(KeyCode::Enter), &mut app);
+        assert!(matches!(surface.mode, ViewMode::Drill(1)), "drilled row 1");
+        assert_eq!(surface.selected, 0, "drill must reset node cursor to 0");
     }
 
     #[test]
