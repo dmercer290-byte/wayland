@@ -215,7 +215,7 @@ const AcpSendBox: React.FC<{
           // The CLI could not authenticate. Surface the remedy card (route
           // through Flux, add a provider key, or run the CLI login command)
           // instead of the raw auth tip.
-          emitter.emit('acp.auth.failed.card', { conversation_id, backend });
+          emitter.emit('acp.auth.failed.card', { conversation_id, backend, pendingInput: input, pendingFiles: files });
           setAiProcessing(false);
           throw error;
         }
@@ -325,6 +325,18 @@ Please check your local CLI tool authentication status`,
       setAtPath(merged as Array<string | FileOrFolderItem>);
     }
   });
+
+  // Flux failover replay: AcpChat re-routes the dead chat through Flux, then asks
+  // the send box to re-run the turn that triggered the auth-failure card. The
+  // send path awaits the re-spawned agent's init, so the turn cannot be dropped.
+  useAddEventListener(
+    'acp.flux.replay',
+    (p) => {
+      if (p.conversation_id !== conversation_id) return;
+      void executeCommand({ input: p.input, files: p.files });
+    },
+    [conversation_id, executeCommand]
+  );
 
   // Stop conversation handler
   const handleStop = async (): Promise<void> => {
