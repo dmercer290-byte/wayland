@@ -234,7 +234,7 @@ export function DetailPage() {
     [mcpServers, id],
   );
 
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab | null>(null);
   const [env, setEnv] = useState<Record<string, string>>({});
   const [installing, setInstalling] = useState(false);
   const [byoModal, setByoModal] = useState<{
@@ -453,6 +453,18 @@ export function DetailPage() {
   const oauthInFlight = installedServer ? !!loggingIn[installedServer.id] : false;
   const reconnecting = installedServer ? !!conn.testingServers[installedServer.id] : false;
 
+  // An auth-requiring connector that's installed but has never completed a
+  // successful connection (no lastConnected timestamp). Drives the "Sign in"
+  // hero + the Setup-first default tab, instead of a dead "Off + Reconnect".
+  const requiresAuth = isOauth || isApiKey;
+  const neverConnected = !installedServer || typeof installedServer.lastConnected !== 'number';
+
+  // Front-and-center setup: when the connector isn't connected yet, open on the
+  // Setup tab so the steps/sign-in are the first thing the user sees - not
+  // buried behind Overview. Once connected, default to Overview. A manual tab
+  // click (setTab) always wins.
+  const activeTab: Tab = tab ?? (!isReady && guide ? 'setup-guide' : 'overview');
+
   // Live UI status (running / warn / error / stopped) drives the 3 action-card
   // states. "stopped" splits further: a disabled server reads as "Off".
   const uiStatus: UIStatus | null = installedServer
@@ -619,6 +631,45 @@ export function DetailPage() {
       );
     }
 
+    // STATE 2b: Installed but never connected (OAuth/api-key still needs the
+    // first sign-in/token). Lead with the connect action, not a dead "Off +
+    // Reconnect" management card - reconnecting something never connected is
+    // meaningless, and the user just wants to finish setup.
+    if (uiStatus === 'stopped' && requiresAuth && neverConnected) {
+      return (
+        <div className={styles.action}>
+          <div className={styles.statusLine}>
+            <span className={`${styles.dot} ${styles.dotOff}`} />
+            {t('mcpLibrary.detail.notConnected', 'Not connected')}
+          </div>
+          <div className={styles.statusMeta}>
+            {isOauth
+              ? t('mcpLibrary.detail.notConnectedOauth', 'Installed. Sign in to connect it.')
+              : t('mcpLibrary.detail.notConnectedKey', 'Installed. Add your token to connect it.')}
+          </div>
+          <button
+            type="button"
+            className={`${styles.btnPrimary} ${styles.btnWarn}`}
+            onClick={() => (isOauth ? void onPrimary('oauth-flow') : setTab('setup-guide'))}
+            disabled={oauthInFlight}
+          >
+            <LogIn size={16} />
+            {isOauth
+              ? oauthInFlight
+                ? t('mcpLibrary.detail.signingIn', 'Signing in…')
+                : t('mcpLibrary.detail.signIn', 'Sign in')
+              : t('mcpLibrary.detail.addToken', 'Add token')}
+          </button>
+          <div className={styles.lifecycle}>
+            <button type="button" className={`${styles.btn2} ${styles.btn2Danger}`} onClick={confirmRemove}>
+              <Trash2 size={14} />
+              {t('mcpLibrary.detail.remove', 'Remove connector')}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     // STATE 2: Connected / healthy (running or disabled-but-installed).
     return (
       <div className={`${styles.action} ${disabled ? '' : styles.actionConnected}`}>
@@ -748,7 +799,7 @@ export function DetailPage() {
           <button
             key={tb.key}
             type="button"
-            className={`${styles.tab} ${tab === tb.key ? styles.tabActive : ''}`}
+            className={`${styles.tab} ${activeTab ===tb.key ? styles.tabActive : ''}`}
             onClick={() => setTab(tb.key)}
           >
             {tb.label}
@@ -759,7 +810,7 @@ export function DetailPage() {
 
       <div className={styles.cols}>
         <div className={styles.colMain}>
-          {tab === 'overview' && (
+          {activeTab ==='overview' && (
             <>
               <h2 className={styles.hSec}>{t('mcpLibrary.detail.whatItDoes', 'What it does')}</h2>
               <div className={styles.prose}>
@@ -775,7 +826,7 @@ export function DetailPage() {
             </>
           )}
 
-          {tab === 'tools' && (
+          {activeTab ==='tools' && (
             <>
               <h2 className={styles.hSec}>{t('mcpLibrary.detail.toolsHeading', 'Tools')}</h2>
               {installedServer?.tools && installedServer.tools.length > 0 ? (
@@ -804,7 +855,7 @@ export function DetailPage() {
             </>
           )}
 
-          {tab === 'setup-guide' && (
+          {activeTab ==='setup-guide' && (
             <>
               <h2 className={styles.hSec}>{t('mcpLibrary.detail.setupHeading', 'Setup guide')}</h2>
               {isReady && (
@@ -835,7 +886,7 @@ export function DetailPage() {
             </>
           )}
 
-          {tab === 'permissions' && (
+          {activeTab ==='permissions' && (
             <>
               <h2 className={styles.hSec}>{t('mcpLibrary.detail.permissionsHeading', 'What it can access')}</h2>
               {w.auth.scopes && w.auth.scopes.length > 0 ? (

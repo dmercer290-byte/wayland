@@ -106,7 +106,11 @@
     "links": "Links",
     "linkWebsite": "Website",
     "linkSource": "Source repository",
-    "linkSignup": "Create an account"
+    "linkSignup": "Create an account",
+    "notConnected": "Not connected",
+    "notConnectedOauth": "Installed. Sign in to connect it.",
+    "notConnectedKey": "Installed. Add your token to connect it.",
+    "addToken": "Add token"
   },
   "install": {
     "button": "Instalar",
