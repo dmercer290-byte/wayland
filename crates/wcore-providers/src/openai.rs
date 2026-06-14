@@ -376,9 +376,14 @@ impl OpenAIProvider {
         let mut body = json!({
             "model": request.model,
             "messages": Self::build_messages(&request.messages, &request.system, &self.compat),
-            "stream": true,
-            "stream_options": { "include_usage": true }
+            "stream": true
         });
+        // `stream_options: {include_usage: true}` asks for token accounting in
+        // the final chunk. Default on, but suppressible for generic self-hosted
+        // OpenAI-compatible endpoints that 400 on the unknown field (#86).
+        if self.compat.include_usage_in_stream() {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
         body[max_tokens_field] = json!(request.max_tokens);
 
         if !request.tools.is_empty() {
@@ -1615,6 +1620,30 @@ mod tests {
         assert!(
             body.get("stop").is_none(),
             "empty stop_sequences must emit no `stop` field (back-compat)"
+        );
+    }
+
+    // --- #86: stream_options gate for generic OpenAI-compatible endpoints ---
+
+    #[test]
+    fn build_request_body_emits_stream_options_by_default() {
+        // Default keeps stream_options:{include_usage:true} for token accounting.
+        let body = stop_provider().build_request_body(&stop_req());
+        assert_eq!(body["stream_options"]["include_usage"], json!(true));
+    }
+
+    #[test]
+    fn build_request_body_omits_stream_options_when_disabled() {
+        // A generic self-hosted endpoint that 400s on the unknown
+        // `stream_options` field can suppress it via compat.
+        let mut compat = openai_compat();
+        compat.include_usage_in_stream = Some(false);
+        let provider =
+            OpenAIProvider::new("key", "http://localhost", compat, DebugConfig::default());
+        let body = provider.build_request_body(&stop_req());
+        assert!(
+            body.get("stream_options").is_none(),
+            "stream_options must be omitted when include_usage_in_stream = false"
         );
     }
 
