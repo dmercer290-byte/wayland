@@ -115,6 +115,9 @@ const GuidPage: React.FC = () => {
   // --- Skills state ---
   const [builtinAutoSkills, setBuiltinAutoSkills] = useState<Array<{ name: string; description: string }>>([]);
   const [guidDisabledBuiltinSkills, setGuidDisabledBuiltinSkills] = useState<string[] | undefined>(undefined);
+  // Skills the user added in the composer "+" menu before this chat exists. On
+  // send they ride into the new conversation's extra.sessionSkills.
+  const [stagedSessionSkills, setStagedSessionSkills] = useState<string[]>([]);
 
   useEffect(() => {
     ipcBridge.fs.listBuiltinAutoSkills
@@ -229,6 +232,7 @@ const GuidPage: React.FC = () => {
     resolveEnabledSkills: agentSelection.resolveEnabledSkills,
     resolveDisabledBuiltinSkills: agentSelection.resolveDisabledBuiltinSkills,
     guidDisabledBuiltinSkills,
+    stagedSessionSkills,
     currentEffectiveAgentInfo: agentSelection.currentEffectiveAgentInfo,
     isGoogleAuth: modelSelection.isGoogleAuth,
 
@@ -867,6 +871,8 @@ const GuidPage: React.FC = () => {
       builtinAutoSkills={builtinAutoSkills}
       disabledBuiltinSkills={guidDisabledBuiltinSkills ?? []}
       onToggleBuiltinSkill={handleToggleBuiltinSkill}
+      draftText={guidInput.input}
+      onStagedSkillsChange={setStagedSessionSkills}
       hidePresetTag
       loading={guidInput.loading}
       isButtonDisabled={send.isButtonDisabled}

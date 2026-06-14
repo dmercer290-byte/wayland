@@ -1309,6 +1309,12 @@ export interface ICreateConversationParams {
     extraSkillPaths?: string[];
     /** Builtin skill names to exclude from auto-injection (e.g. 'cron' for cron-spawned conversations) */
     excludeBuiltinSkills?: string[];
+    /**
+     * Skills staged in the composer "+" menu before the conversation existed.
+     * Persisted to the new conversation so consumePendingSessionSkills injects
+     * their bodies on the first turn (same field skills.add-to-conversation writes).
+     */
+    sessionSkills?: string[];
     /** Team ownership - conversations with teamId are hidden from the sidebar */
     teamId?: string;
     /** Project ownership - stamps extra.projectId so the conversation lives under a project umbrella. */
