@@ -198,6 +198,28 @@ export class TeamSessionService {
     } as TProviderWithModel;
   }
 
+  /**
+   * Find the enabled provider that actually OWNS `modelId` (lists it in its
+   * model[] and has not disabled it), mirroring the main session's
+   * useWCoreModelSelection ownership check. Returns null when no provider owns
+   * the model so callers can fall back. Fixes #87: a spawned wcore teammate
+   * pinned to a specific model must hydrate THAT provider's key/baseUrl, not
+   * providers[0]'s (which could send an sk-flux key to an OpenAI surface).
+   */
+  private async resolveAionrsModelById(modelId: string): Promise<TProviderWithModel | null> {
+    const configuredProviders = await ProcessConfig.get('model.config');
+    const providers = Array.isArray(configuredProviders) ? configuredProviders.filter((p) => p.enabled !== false) : [];
+
+    const owner = providers.find(
+      (p) => Array.isArray(p.model) && p.model.includes(modelId) && p.modelEnabled?.[modelId] !== false
+    );
+    if (!owner) {
+      return null;
+    }
+
+    return { ...owner, useModel: modelId } as TProviderWithModel;
+  }
+
   private async resolveConversationModel(params: {
     backend: string;
     isPreset: boolean;
@@ -397,10 +419,16 @@ export class TeamSessionService {
       presetAgentType: isPreset ? backend : undefined,
     });
 
-    // Override useModel for Gemini/Aionrs when agent has an explicit model
+    // Override the working model when the agent pins one explicitly.
     if (agent.model) {
       const type = getConversationTypeForBackend(backend);
-      if (type === 'gemini' || type === 'wcore') {
+      if (type === 'wcore') {
+        // Re-select the provider that OWNS this model id so the spawn hydrates
+        // the right key/baseUrl (#87). Fall back to a useModel-only override on
+        // the already-resolved provider when no enabled provider claims it.
+        const owned = await this.resolveAionrsModelById(agent.model);
+        model = owned ?? { ...model, useModel: agent.model };
+      } else if (type === 'gemini') {
         model = { ...model, useModel: agent.model };
       }
     }
