@@ -377,9 +377,14 @@ const AcpModelSelector: React.FC<{
   // `curatedForAgent` only returns real models for CLIs mapped to a connected
   // provider (claude->anthropic, codex->openai). Vendor CLIs (qwen, goose, ...)
   // return [], and their switchable models live only in `modelInfo.availableModels`.
-  // Drive the unified flyout where curated rows exist; otherwise fall back to the
-  // native Arco menu (which still surfaces the agent's own models + Flux tiers).
-  const hasCuratedModels = resolvedVm.zones.some((z) => z.rows.length > 0) || resolvedVm.moreZones.some((z) => z.rows.length > 0);
+  // Drive the unified flyout where real curated provider rows exist; otherwise
+  // fall back to the native Arco menu (which still surfaces the agent's own
+  // models + Flux tiers). The synthesized 'flux' routing zone is always present
+  // when Flux is connected, so it must NOT flip a vendor CLI (curated == []) to
+  // the flyout - exclude it from the gate.
+  const hasCuratedModels =
+    resolvedVm.zones.some((z) => z.id !== 'flux' && z.rows.length > 0) ||
+    resolvedVm.moreZones.some((z) => z.rows.length > 0);
 
   // Flux-capable backend + connected Flux provider: render a switchable dropdown
   // with the Flux tiers at the top (selecting one routes the chat through Flux)
