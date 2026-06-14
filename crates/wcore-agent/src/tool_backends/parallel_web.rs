@@ -471,4 +471,37 @@ mod tests {
         let err = r#"{"jsonrpc":"2.0","id":"call-1","error":{"code":-32000,"message":"nope"}}"#;
         assert!(parse_mcp_body(err, "call-1").is_err());
     }
+
+    /// Live end-to-end smoke test against the real Parallel free MCP endpoint
+    /// (the zero-config default backend). Exercises the full production path —
+    /// `EgressClient`, the 3-step handshake, envelope parse, and result mapping.
+    /// `#[ignore]`d so CI never depends on a third-party network; run manually:
+    /// `cargo test -p wcore-agent --lib parallel_web::tests::live_ -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "live network: hits the real https://search.parallel.ai/mcp endpoint"]
+    async fn live_parallel_free_search_returns_results() {
+        let backend = ParallelWebBackend::free();
+        match backend
+            .search("latest stable rust compiler version", 5)
+            .await
+        {
+            WebOutcome::Ok { payload } => {
+                let web = payload
+                    .get("web")
+                    .and_then(Value::as_array)
+                    .expect("web[] present");
+                assert!(!web.is_empty(), "expected >=1 result from live Parallel");
+                let first = &web[0];
+                let url = first.get("url").and_then(Value::as_str).unwrap_or("");
+                let title = first.get("title").and_then(Value::as_str).unwrap_or("");
+                assert!(url.starts_with("http"), "result url must be http(s): {url}");
+                assert!(!title.is_empty(), "result title must be non-empty");
+                eprintln!(
+                    "LIVE PARALLEL OK — {} results; first: {url} | {title}",
+                    web.len()
+                );
+            }
+            WebOutcome::Err { message } => panic!("live parallel search returned Err: {message}"),
+        }
+    }
 }
