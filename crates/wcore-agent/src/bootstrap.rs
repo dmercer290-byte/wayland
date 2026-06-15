@@ -1593,6 +1593,41 @@ impl AgentBootstrap {
             crate::spawner::AgentSpawner::new(provider.clone(), self.config.clone())
                 .with_bus(Arc::clone(&agent_bus)),
         );
+        // Lane D3 (G2/G4): register agents copied into installed marketplace
+        // plugins (`<plugins-root>/<plugin>@<marketplace>/agents/*.yaml`),
+        // namespaced `<marketplace>/<plugin>:<agent>` so agents from different
+        // marketplaces never collide. A declarative plugin runs no code, so its
+        // agents are otherwise never registered. Only dirs with a `plugin.toml`
+        // are treated as installed plugins (mirrors the on-disk loader filter);
+        // sidecar files and the `.quarantine/` dir are skipped.
+        for root in crate::plugins::loader::resolved_plugins_roots() {
+            let read = match std::fs::read_dir(&root) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in read.flatten() {
+                let plugin_dir = entry.path();
+                if !plugin_dir.join("plugin.toml").is_file() {
+                    continue;
+                }
+                let agents_dir = plugin_dir.join("agents");
+                if !agents_dir.is_dir() {
+                    continue;
+                }
+                // Dir name is `<plugin>@<marketplace>` → namespace `<mkt>/<plugin>`.
+                let dirname = entry.file_name().to_string_lossy().into_owned();
+                let ns = match dirname.split_once('@') {
+                    Some((plugin, mkt)) => format!("{mkt}/{plugin}"),
+                    None => dirname.clone(),
+                };
+                applied
+                    .agent_registry
+                    .load_dir_namespaced(&agents_dir, &ns, |_p| {
+                        crate::agents::registry::AgentSource::Plugin(ns.clone())
+                    });
+            }
+        }
+
         // v0.6.4 Task 1.2/1.7 — share ONE `AgentRegistry` between the
         // `SpawnTool` (so the LLM can spawn plugin-contributed named agents)
         // and the engine (`set_agent_registry`, after construction). The
