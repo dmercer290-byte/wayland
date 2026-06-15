@@ -319,21 +319,71 @@ pub fn commit_install(
     Ok(dir)
 }
 
-/// Make a marketplace's catalog available on disk. A local-path source is read
-/// in place; any other source string is treated as a git URL and quarantine-
-/// cloned. Returns the directory that contains `.claude-plugin/marketplace.json`.
+/// Make a marketplace's catalog available on disk. Returns the directory that
+/// contains `.claude-plugin/marketplace.json`.
 fn acquire_marketplace(mref: &known::MarketplaceRef, quarantine_root: &Path) -> Result<PathBuf> {
-    let local = Path::new(&mref.source);
+    acquire_source(&mref.source, &mref.name, quarantine_root)
+}
+
+/// Acquire an arbitrary marketplace source string into the quarantine. A
+/// local-path source is read in place; anything else is treated as a git URL
+/// and quarantine-cloned. `label` only names the quarantine subdir.
+fn acquire_source(source: &str, label: &str, quarantine_root: &Path) -> Result<PathBuf> {
+    let local = Path::new(source);
     if local.is_dir() {
         return Ok(local.to_path_buf());
     }
     let kind = SourceKind::Url {
-        url: mref.source.clone(),
+        url: source.to_string(),
         git_ref: None,
         sha: None,
     };
-    let qdir = quarantine_root.join(sanitize(&format!("mkt__{}", mref.name)));
+    let qdir = quarantine_root.join(sanitize(&format!("mkt__{label}")));
     Ok(quarantine::quarantine_clone(&kind, &qdir)?.path)
+}
+
+/// Normalize a user-supplied marketplace source: a local dir stays as-is,
+/// `owner/repo` becomes a GitHub URL, anything else is a git URL verbatim.
+pub fn normalize_source(source: &str) -> String {
+    if Path::new(source).is_dir() {
+        return source.to_string();
+    }
+    // `owner/repo` shorthand: no scheme, exactly one `/`, not a path.
+    let looks_like_owner_repo = !source.contains("://")
+        && !source.contains(':')
+        && source.matches('/').count() == 1
+        && !source.starts_with('/')
+        && !source.starts_with('.');
+    if looks_like_owner_repo {
+        return format!("https://github.com/{}.git", source.trim_end_matches('/'));
+    }
+    source.to_string()
+}
+
+/// `plugin marketplace add <source>` — acquire the catalog, learn its declared
+/// name, and register it in `known_marketplaces.json`. Returns the catalog
+/// metadata (its `name` is the handle used by `install <plugin>@<name>`).
+pub fn add_marketplace_source(
+    plugins_root: &Path,
+    quarantine_root: &Path,
+    source: &str,
+) -> Result<MarketplaceMeta> {
+    let normalized = normalize_source(source);
+    let market_root = acquire_source(&normalized, "add", quarantine_root)?;
+    let mjson = std::fs::read_to_string(market_root.join(".claude-plugin/marketplace.json"))
+        .map_err(|_| {
+            PluginCliError::Quarantine("source has no .claude-plugin/marketplace.json".into())
+        })?;
+    let (meta, _entries) = parse_marketplace(&mjson)?;
+    known::add_marketplace(
+        plugins_root,
+        known::MarketplaceRef {
+            name: meta.name.clone(),
+            source: normalized,
+            official: false,
+        },
+    )?;
+    Ok(meta)
 }
 
 fn adapter_for(format: &str) -> Result<Box<dyn wcore_pluginsrc::PluginFormatAdapter>> {

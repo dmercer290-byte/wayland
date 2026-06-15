@@ -40,20 +40,31 @@ pub struct PluginArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum PluginCmd {
-    /// Install a plugin from the registry or a remote source.
+    /// Install a plugin. `name@marketplace` installs from a registered
+    /// Claude Code marketplace (see `plugin marketplace add`); a bare `name`
+    /// uses the legacy registry / GitHub-Releases path.
     Install {
-        /// Plugin name (kebab-case, e.g. `wayland-honcho`).
+        /// `<plugin>@<marketplace>` for a marketplace install, or a bare
+        /// kebab-case `name` for the legacy registry path.
         name: String,
-        /// Source spec. `local` reads from `--registry-dir` or the
-        /// embedded default registry. `github://<org>` resolves
-        /// against GitHub Releases on the given org.
+        /// Source spec for the legacy path. `local` reads from
+        /// `--registry-dir` or the embedded default registry.
+        /// `github://<org>` resolves against GitHub Releases. Ignored for
+        /// `name@marketplace` installs.
         #[arg(long, default_value = "local")]
         source: String,
-        /// Override the local registry directory (only honored when
-        /// `--source local`). If omitted, the embedded default
-        /// registry shipped with the binary is used.
+        /// Override the local registry directory (legacy path only).
         #[arg(long)]
         registry_dir: Option<PathBuf>,
+        /// Print the install plan (consent surface) and exit without writing
+        /// anything. Only meaningful for `name@marketplace` installs.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Manage Claude Code plugin marketplaces.
+    Marketplace {
+        #[command(subcommand)]
+        cmd: MarketplaceCmd,
     },
     /// List installed plugins.
     List,
@@ -66,6 +77,28 @@ pub enum PluginCmd {
     /// Remove an installed plugin.
     Remove {
         /// Plugin name to remove.
+        name: String,
+    },
+}
+
+/// `plugin marketplace <cmd>` — register and inspect Claude Code marketplaces.
+#[derive(Debug, Subcommand)]
+pub enum MarketplaceCmd {
+    /// Register a marketplace: `owner/repo`, a git URL, or a local path to a
+    /// dir containing `.claude-plugin/marketplace.json`.
+    Add {
+        /// The marketplace source.
+        source: String,
+    },
+    /// List registered marketplaces.
+    List {
+        /// Emit JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a registered marketplace by its name.
+    Remove {
+        /// Marketplace name (its declared `name`, not the source).
         name: String,
     },
 }
@@ -86,12 +119,45 @@ pub fn run(args: PluginArgs) -> anyhow::Result<()> {
             base.join("wayland-core").join("plugins")
         }
     };
+    // Marketplace plugins install into a discovery root the on-disk loader
+    // scans (`~/.wayland/plugins`), distinct from the legacy registry root
+    // above. `--install-root` overrides both (used by tests).
+    let marketplace_root = match &args.install_root {
+        Some(p) => p.clone(),
+        None => wcore_config::config::profile_home().join("plugins"),
+    };
     match args.cmd {
         PluginCmd::Install {
             name,
             source,
             registry_dir,
+            dry_run,
         } => {
+            if let Some((plugin, market)) = name.split_once('@') {
+                let quarantine_root = marketplace_root.join(".quarantine");
+                let planned = marketplace::resolve_and_plan(
+                    &marketplace_root,
+                    &quarantine_root,
+                    market,
+                    plugin,
+                )?;
+                println!("{}", planned.plan.render());
+                if dry_run {
+                    println!("(dry run — nothing installed)");
+                } else {
+                    let installed_at =
+                        humantime::format_rfc3339(std::time::SystemTime::now()).to_string();
+                    let dir =
+                        marketplace::commit_install(&marketplace_root, &planned, installed_at)?;
+                    println!("installed {plugin}@{market} → {}", dir.display());
+                }
+                return Ok(());
+            }
+            if dry_run {
+                anyhow::bail!(
+                    "--dry-run is only supported for marketplace installs (name@marketplace)"
+                );
+            }
             if source == "local" {
                 let reg = match &registry_dir {
                     Some(dir) => registry::Registry::from_dir(dir)?,
@@ -142,6 +208,37 @@ pub fn run(args: PluginArgs) -> anyhow::Result<()> {
                 println!("{}\t{}\t{}", mf.name, mf.version, mf.description);
             }
         }
+        PluginCmd::Marketplace { cmd } => match cmd {
+            MarketplaceCmd::Add { source } => {
+                let quarantine_root = marketplace_root.join(".quarantine");
+                let meta = marketplace::add_marketplace_source(
+                    &marketplace_root,
+                    &quarantine_root,
+                    &source,
+                )?;
+                println!("added marketplace '{}'", meta.name);
+            }
+            MarketplaceCmd::List { json } => {
+                let list = known::list_marketplaces(&marketplace_root)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&list)?);
+                } else if list.is_empty() {
+                    println!("(no marketplaces registered)");
+                } else {
+                    for m in list {
+                        let tag = if m.official { " (official)" } else { "" };
+                        println!("{}\t{}{}", m.name, m.source, tag);
+                    }
+                }
+            }
+            MarketplaceCmd::Remove { name } => {
+                if known::remove_marketplace(&marketplace_root, &name)? {
+                    println!("removed marketplace '{name}'");
+                } else {
+                    println!("no such marketplace '{name}'");
+                }
+            }
+        },
     }
     Ok(())
 }
