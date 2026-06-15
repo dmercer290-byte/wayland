@@ -4,6 +4,11 @@ members = [
     "crates/wcore-types",
     "crates/wcore-protocol",
     "crates/wcore-plugin-api",
+    # Marketplace (2026-06-15): install-time acquisition + lowering of foreign
+    # plugin formats (Claude Code, raw-MCP) into the native plugin model.
+    # Format-blind canonical model; no wcore-agent dep. Spec:
+    # .planning/2026-06-15-PLUGIN-MARKETPLACE-DESIGN.md
+    "crates/wcore-pluginsrc",
     # v0.6.5 Task 2.1: WASM Component Model plugin host (wasmtime 30 + WASI).
     "crates/wcore-plugin-wasm",
     "crates/wcore-compact",
@@ -149,6 +154,7 @@ repository = "https://github.com/FerroxLabs/wayland-core"
 wcore-types         = { path = "crates/wcore-types" }
 wcore-protocol      = { path = "crates/wcore-protocol" }
 wcore-plugin-api    = { path = "crates/wcore-plugin-api" }
+wcore-pluginsrc     = { path = "crates/wcore-pluginsrc" }
 # v0.6.5 Task 2.7 — host wire-up. Both deps are LEAF (depend on
 # wcore-plugin-api only); wcore-agent's dep on them does not create a
 # cycle because they cannot themselves depend on wcore-agent.
