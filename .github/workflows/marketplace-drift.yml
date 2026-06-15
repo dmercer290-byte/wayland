@@ -1,0 +1,98 @@
+name: Marketplace Drift Sentinel
+
+# Lane G — HEAD-drift detection. The vendored golden conformance corpus
+# (crates/wcore-pluginsrc/tests/conformance.rs) pins our lowering against
+# FROZEN fixtures. This job complements it by running the real CLI against
+# LIVE upstream Claude Code marketplaces, so we learn when an upstream format
+# change breaks our `marketplace add` / `install` path before a user does.
+#
+# Assertions are deliberately STRUCTURAL (a marketplace adds, a plugin lowers,
+# the expected transport/content kind appears) rather than exact counts —
+# upstream content evolves; what we guard is that OUR pipeline still handles it.
+#
+# Schedule: 07:00 UTC = 14:00 ICT (Sean's GMT+7), weekly on Monday.
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: live marketplace drift
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup vx (installs Rust + just from vx.toml)
+        uses: loonghao/vx@v0.9.17
+        with:
+          setup: 'true'
+          cache: 'true'
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-reg-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-reg-${{ runner.os }}-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: cargo-target-drift-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-target-drift-${{ runner.os }}-
+
+      - name: Build wayland-core
+        run: vx cargo build -p wcore-cli --bin wayland-core
+
+      - name: Drift check against live marketplaces
+        run: |
+          set -euo pipefail
+          WB="$(pwd)/target/debug/wayland-core"
+          ROOT="$(mktemp -d)/plugins"
+          mkdir -p "$ROOT"
+
+          # Helper: add a marketplace then dry-run a plugin, asserting the
+          # consent surface contains an expected marker. Strips the noisy
+          # symlink-skip warnings from stderr first.
+          dryrun() {
+            local market_src="$1" plugin_ref="$2" expect="$3"
+            echo "::group::$plugin_ref (expect: $expect)"
+            "$WB" plugin --install-root "$ROOT" marketplace add "$market_src" 2>&1 \
+              | grep -v "skipping symlink" || true
+            local out
+            out="$("$WB" plugin --install-root "$ROOT" install "$plugin_ref" --dry-run 2>&1 \
+              | grep -v "skipping symlink")"
+            echo "$out"
+            echo "::endgroup::"
+            if ! grep -qiE "$expect" <<<"$out"; then
+              echo "::error::drift: '$plugin_ref' no longer matches /$expect/ — our lowering may be broken against upstream"
+              return 1
+            fi
+          }
+
+          rc=0
+          # claude-mem: skills + a stdio MCP server (transport kind in the plan).
+          dryrun "thedotmack/claude-mem" "claude-mem@thedotmack" "stdio" || rc=1
+          # official catalog: a plugin that lowers a NON-ZERO number of agents.
+          dryrun "anthropics/claude-plugins-official" "agent-sdk-dev@claude-plugins-official" "[1-9][0-9]* agent\(s\)" || rc=1
+          # official catalog: a partner plugin whose MCP server is the real HTTP endpoint.
+          dryrun "anthropics/claude-plugins-official" "stripe@claude-plugins-official" "mcp\.stripe\.com" || rc=1
+
+          exit $rc

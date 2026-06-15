@@ -1,0 +1,23 @@
+{
+  "adds": [
+    {
+      "kind": "agent",
+      "name": "acme/sdkkit:verify"
+    },
+    {
+      "kind": "command",
+      "name": "acme/sdkkit:scaffold"
+    }
+  ],
+  "grade": "ContentCompatible",
+  "ignored": [],
+  "marketplace": "acme",
+  "namespace_collisions": [],
+  "plugin": "sdkkit",
+  "resolved_version": {
+    "Explicit": "1.0.0"
+  },
+  "spawns": [],
+  "store_path": "<store>",
+  "warnings": []
+}

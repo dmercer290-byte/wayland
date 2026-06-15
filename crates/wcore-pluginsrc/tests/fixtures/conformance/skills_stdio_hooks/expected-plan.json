@@ -1,0 +1,40 @@
+{
+  "adds": [
+    {
+      "kind": "skill",
+      "name": "acme/memkit:alpha"
+    },
+    {
+      "kind": "skill",
+      "name": "acme/memkit:beta"
+    }
+  ],
+  "grade": "HooksIgnored",
+  "ignored": [
+    {
+      "detail": "plugin declares hooks (not run in v1)",
+      "kind": "hooks"
+    }
+  ],
+  "marketplace": "acme",
+  "namespace_collisions": [],
+  "plugin": "memkit",
+  "resolved_version": {
+    "Explicit": "2.0.0"
+  },
+  "spawns": [
+    {
+      "args": [
+        "server.js"
+      ],
+      "command": "node",
+      "env_keys": [
+        "MEM_TOKEN"
+      ],
+      "name": "mem",
+      "transport_kind": "stdio"
+    }
+  ],
+  "store_path": "<store>",
+  "warnings": []
+}

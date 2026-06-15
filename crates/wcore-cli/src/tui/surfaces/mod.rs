@@ -22,6 +22,7 @@ use crate::tui::widgets::{SystemSampler, status_bar, top_chrome};
 
 use self::config::ConfigSurface;
 use self::diagnostics::DiagnosticsSurface;
+use self::marketplace::MarketplaceSurface;
 use self::onboarding::OnboardingSurface;
 use self::palette::PaletteSurface;
 use self::plan_review::PlanReviewSurface;
@@ -38,6 +39,7 @@ pub mod agent_nav; // v0.9.3 — pub for bench visibility (S0.3)
 mod agent_transcript; // v0.9.3
 mod config;
 mod diagnostics;
+mod marketplace; // Lane F2 — the /plugins marketplace overlay
 mod onboarding;
 mod palette;
 mod plan_review;
@@ -64,8 +66,12 @@ pub enum SurfaceId {
     PlanReview,
     /// The settings / config screen (surface 07).
     Config,
-    /// The plugin marketplace screen.
+    /// The legacy plugin tab (registry installs). Superseded as the `/plugins`
+    /// entry point by `Marketplace`; retained for the `/plugins <verb>` path.
     Plugins,
+    /// Lane F2 — the `/plugins` marketplace overlay (browse / inspect / install
+    /// / uninstall). Summoned by `/plugins`, dismissed with Esc. Not a tab.
+    Marketplace,
     /// The `/doctor` `/cost` `/memory` diagnostics screens.
     Diagnostics,
     /// v0.9.3 — the sub-agent list / nav surface.
@@ -88,12 +94,11 @@ impl SurfaceId {
     /// `Workflows` LAST so the existing tab indices (and the `1`-`6`
     /// digit-jump that only spans indices 0-5) are undisturbed; the new
     /// tab is reachable by Tab-cycling.
-    pub const TABS: [SurfaceId; 7] = [
+    pub const TABS: [SurfaceId; 6] = [
         SurfaceId::Workspace,
         SurfaceId::SubAgents,
         SurfaceId::PlanReview,
         SurfaceId::Config,
-        SurfaceId::Plugins,
         SurfaceId::Diagnostics,
         SurfaceId::Workflows,
     ];
@@ -108,6 +113,7 @@ impl SurfaceId {
             SurfaceId::PlanReview => "Plan",
             SurfaceId::Config => "Config",
             SurfaceId::Plugins => "Plugins",
+            SurfaceId::Marketplace => "Plugins",
             SurfaceId::Diagnostics => "Diagnostics",
             SurfaceId::AgentNav => "Agents",
             SurfaceId::AgentTranscript => "Agent",
@@ -1227,7 +1233,16 @@ impl Router {
             }
         }
         let action = self.active.tick(app);
-        self.apply(action, app)
+        let active_quit = self.apply(action, app);
+        // Lane F2: overlays need ticks too (the marketplace overlay polls its
+        // async resolve/install/uninstall jobs in `tick`). The active surface
+        // is ticked above; tick the overlay when one is open.
+        if let Some(overlay) = self.overlay.as_mut() {
+            let overlay_action = overlay.tick(app);
+            let overlay_quit = self.apply(overlay_action, app);
+            return active_quit || overlay_quit;
+        }
+        active_quit
     }
 
     /// Switch to the plan-review surface when the engine has presented a
@@ -1639,7 +1654,11 @@ impl Router {
                             }
                             self.show_plugins_fresh(app);
                         } else {
-                            self.switch(app, SurfaceId::Plugins);
+                            // Lane F2: bare `/plugins` summons the marketplace
+                            // overlay (browse / inspect / install / uninstall),
+                            // dismissed with Esc — not a permanent tab.
+                            let _ =
+                                self.apply(SurfaceAction::OpenOverlay(SurfaceId::Marketplace), app);
                         }
                     }
                     "/doctor" | "/memory" | "/tools" => {
@@ -2685,6 +2704,7 @@ fn make_surface(id: SurfaceId) -> Box<dyn Surface> {
         SurfaceId::PlanReview => Box::new(PlanReviewSurface::new()),
         SurfaceId::Config => Box::new(ConfigSurface::new()),
         SurfaceId::Plugins => Box::new(PluginsSurface::new()),
+        SurfaceId::Marketplace => Box::new(MarketplaceSurface::new()),
         SurfaceId::Diagnostics => Box::new(DiagnosticsSurface::new()),
         SurfaceId::AgentNav => Box::new(agent_nav::AgentNavSurface::default()),
         SurfaceId::AgentTranscript => Box::new(agent_transcript::AgentTranscriptSurface::default()),
@@ -3763,9 +3783,12 @@ mod tests {
         // Onboarding is a first-run gate, not a peer surface — it must not
         // appear in the tab chrome.
         assert!(!SurfaceId::TABS.contains(&SurfaceId::Onboarding));
-        // ForgeFlows-Live Phase 2 appended `Workflows`, taking the tab count to 7.
-        assert_eq!(SurfaceId::TABS.len(), 7);
-        // ...and it carries no tab index.
+        // Lane F2 removed the permanent `Plugins` tab — `/plugins` now summons
+        // the `Marketplace` overlay — taking the tab count from 7 back to 6.
+        assert_eq!(SurfaceId::TABS.len(), 6);
+        assert!(!SurfaceId::TABS.contains(&SurfaceId::Plugins));
+        assert!(!SurfaceId::TABS.contains(&SurfaceId::Marketplace));
+        // ...and Onboarding carries no tab index.
         assert!(SurfaceId::Onboarding.tab_index().is_none());
     }
 
@@ -3861,6 +3884,26 @@ mod tests {
     }
 
     #[test]
+    fn bare_slash_plugins_opens_the_marketplace_overlay() {
+        // Lane F2: `/plugins` summons the marketplace overlay (not a tab
+        // switch). The overlay's on_enter reads the plugins dir from disk, but
+        // reload tolerates a missing/empty dir, so this is safe in a test.
+        let mut app = App::new();
+        let mut router = Router::new(&app);
+        router.apply(SurfaceAction::Switch(SurfaceId::Workspace), &mut app);
+        router.apply(SurfaceAction::Command("/plugins".to_string()), &mut app);
+        assert_eq!(
+            app.overlay,
+            Some(SurfaceId::Marketplace),
+            "/plugins should open the Marketplace overlay"
+        );
+        // The active surface stays put underneath; Esc on the overlay closes it.
+        assert_eq!(app.surface, SurfaceId::Workspace);
+        router.handle_key(key(KeyCode::Esc), &mut app);
+        assert_eq!(app.overlay, None, "Esc should close the overlay");
+    }
+
+    #[test]
     fn number_keys_jump_directly_to_a_tab() {
         // `1`-`6` jump straight to a tab on surfaces without a text field
         // or an internal digit binding.
@@ -3869,6 +3912,10 @@ mod tests {
         router.apply(SurfaceAction::Switch(SurfaceId::SubAgents), &mut app);
         router.handle_key(key(KeyCode::Char('5')), &mut app);
         assert_eq!(app.surface, SurfaceId::TABS[4]);
+        // Jump the second digit from a clean tab. (TABS[4] is now Diagnostics,
+        // which binds digits for its own mode nav, so chaining a digit off it
+        // would be consumed internally — switch back to a digit-free tab first.)
+        router.apply(SurfaceAction::Switch(SurfaceId::SubAgents), &mut app);
         router.handle_key(key(KeyCode::Char('1')), &mut app);
         assert_eq!(app.surface, SurfaceId::TABS[0]);
     }
@@ -4837,14 +4884,13 @@ mod tests {
         let mut router = Router::new(&app);
         router.apply(SurfaceAction::Switch(SurfaceId::Workspace), &mut app);
 
-        // Seven Tab presses from Workspace must land us back on Workspace
-        // (Workspace → SubAgents → PlanReview → Config → Plugins →
-        // Diagnostics → Workflows → Workspace).
+        // Six Tab presses from Workspace must land us back on Workspace
+        // (Workspace → SubAgents → PlanReview → Config → Diagnostics →
+        // Workflows → Workspace). Lane F2 dropped the permanent Plugins tab.
         let expected = [
             SurfaceId::SubAgents,
             SurfaceId::PlanReview,
             SurfaceId::Config,
-            SurfaceId::Plugins,
             SurfaceId::Diagnostics,
             SurfaceId::Workflows,
             SurfaceId::Workspace,
@@ -4863,14 +4909,14 @@ mod tests {
     #[test]
     fn shift_tab_cycles_backwards_v0911() {
         // Shift+Tab is the previous-surface chord on every non-Workspace
-        // tab. Starting from Diagnostics and pressing Shift+Tab five
+        // tab. Starting from Diagnostics and pressing Shift+Tab four
         // times must walk us back through every tab to Workspace.
+        // (Lane F2 dropped the Plugins tab, so Diagnostics' prev is Config.)
         let mut app = App::new();
         let mut router = Router::new(&app);
         router.apply(SurfaceAction::Switch(SurfaceId::Diagnostics), &mut app);
 
         let expected = [
-            SurfaceId::Plugins,
             SurfaceId::Config,
             SurfaceId::PlanReview,
             SurfaceId::SubAgents,

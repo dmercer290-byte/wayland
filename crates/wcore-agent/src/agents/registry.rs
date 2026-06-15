@@ -41,6 +41,28 @@ impl AgentRegistry {
     /// Load all `.yaml` files under `dir` if it exists. Errors on a
     /// malformed file are logged-and-skipped; the registry is best-effort.
     pub fn load_dir(&self, dir: &Path, source: impl Fn(&Path) -> AgentSource) {
+        self.load_dir_inner(dir, None, source);
+    }
+
+    /// Like [`AgentRegistry::load_dir`], but every agent's registry key is
+    /// prefixed with `<namespace>:` so plugin-contributed agents from different
+    /// marketplaces never collide (mirrors Claude Code's `plugin:component`
+    /// namespacing — here `<marketplace>/<plugin>:<agent>`).
+    pub fn load_dir_namespaced(
+        &self,
+        dir: &Path,
+        namespace: &str,
+        source: impl Fn(&Path) -> AgentSource,
+    ) {
+        self.load_dir_inner(dir, Some(namespace), source);
+    }
+
+    fn load_dir_inner(
+        &self,
+        dir: &Path,
+        namespace: Option<&str>,
+        source: impl Fn(&Path) -> AgentSource,
+    ) {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => return,
@@ -56,9 +78,13 @@ impl AgentRegistry {
             };
             match serde_yaml::from_str::<AgentManifest>(&txt) {
                 Ok(manifest) => {
+                    let key = match namespace {
+                        Some(ns) => format!("{ns}:{}", manifest.name),
+                        None => manifest.name.clone(),
+                    };
                     let mut guard = self.inner.lock();
                     let src = source(&path);
-                    guard.insert(manifest.name.clone(), (manifest, src));
+                    guard.insert(key, (manifest, src));
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -132,5 +158,44 @@ mod tests {
         let reg = AgentRegistry::new();
         reg.load_dir(dir.path(), |p| AgentSource::GlobalYaml(p.to_path_buf()));
         assert!(reg.list().is_empty());
+    }
+
+    #[test]
+    fn namespaced_load_prefixes_key_and_avoids_collision() {
+        let reg = AgentRegistry::new();
+
+        // Two marketplaces each ship an agent literally named `reviewer`.
+        let a = tempfile::tempdir().unwrap();
+        std::fs::write(
+            a.path().join("reviewer.yaml"),
+            "name: reviewer\ndescription: acme review\nsystem_prompt: a\n",
+        )
+        .unwrap();
+        let b = tempfile::tempdir().unwrap();
+        std::fs::write(
+            b.path().join("reviewer.yaml"),
+            "name: reviewer\ndescription: beta review\nsystem_prompt: b\n",
+        )
+        .unwrap();
+
+        reg.load_dir_namespaced(a.path(), "acme/db", |_| {
+            AgentSource::Plugin("acme/db".into())
+        });
+        reg.load_dir_namespaced(b.path(), "beta/qa", |_| {
+            AgentSource::Plugin("beta/qa".into())
+        });
+
+        // Both register under distinct namespaced keys — no collision.
+        assert_eq!(
+            reg.get("acme/db:reviewer").unwrap().description,
+            "acme review"
+        );
+        assert_eq!(
+            reg.get("beta/qa:reviewer").unwrap().description,
+            "beta review"
+        );
+        // The bare (un-namespaced) name is NOT registered.
+        assert!(reg.get("reviewer").is_none());
+        assert_eq!(reg.list().len(), 2);
     }
 }
