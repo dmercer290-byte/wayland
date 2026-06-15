@@ -1,0 +1,41 @@
+{
+  "adds": [
+    {
+      "kind": "command",
+      "name": "acme/paykit:charge"
+    },
+    {
+      "kind": "skill",
+      "name": "acme/paykit:evil"
+    },
+    {
+      "kind": "skill",
+      "name": "acme/paykit:pay"
+    }
+  ],
+  "grade": "ContentCompatible",
+  "ignored": [],
+  "marketplace": "acme",
+  "namespace_collisions": [],
+  "plugin": "paykit",
+  "resolved_version": {
+    "Explicit": "0.1.0"
+  },
+  "spawns": [
+    {
+      "args": [],
+      "command": "https://mcp.example.com",
+      "env_keys": [],
+      "name": "pay",
+      "transport_kind": "http"
+    }
+  ],
+  "store_path": "<store>",
+  "warnings": [
+    {
+      "component": "skill:evil",
+      "detail": "contains prompt-injection marker: \"ignore previous instructions\"",
+      "kind": "prompt-risk"
+    }
+  ]
+}
