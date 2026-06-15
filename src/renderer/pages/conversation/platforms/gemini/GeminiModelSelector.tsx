@@ -14,6 +14,7 @@ import type { IProvider } from '@/common/config/storage';
 import { FLUX_PROVIDER_ID, isFluxModelId } from '@/common/config/flux';
 import ModelSelectorFlyout from '@renderer/components/model/modelSelector/ModelSelectorFlyout';
 import { modelKey } from '@renderer/components/model/modelSelector/modelRowHelpers';
+import { resolveSelectedProvider } from '@renderer/components/model/modelSelector/resolveSelectedProvider';
 import { useModelSelectorViewModel } from '@renderer/components/model/modelSelector/useModelSelectorViewModel';
 import { usePinnedModels } from '@renderer/hooks/usage/usePinnedModels';
 
@@ -89,12 +90,12 @@ const GeminiModelSelector: React.FC<{
   const { providers, geminiModeLookup, getAvailableModels, handleSelectModel, formatModelLabel } = selection;
 
   // The flyout emits `(modelId, providerId)`; route it through the existing
-  // `handleSelectModel(provider, modelName)` path. A Flux selection's provider
-  // id is opaque, so match it by its flux-* model catalog.
+  // `handleSelectModel(provider, modelName)` path. The flyout's providerId is
+  // the registry ProviderId, not the legacy storage provider.id, so resolve the
+  // owning provider robustly (see resolveSelectedProvider) - matching on
+  // provider.id alone silently dropped every non-Flux selection (#99/102/103/104).
   const onSelect = (modelId: string, providerId: string) => {
-    const provider = isFluxModelId(modelId)
-      ? providers.find((p) => (p.model ?? []).some((m) => isFluxModelId(m)))
-      : providers.find((p) => p.id === providerId);
+    const provider = resolveSelectedProvider(providers, getAvailableModels, modelId, providerId);
     if (!provider) return;
     void handleSelectModel(provider, modelId);
   };
