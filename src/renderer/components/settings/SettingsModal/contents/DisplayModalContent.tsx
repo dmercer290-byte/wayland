@@ -84,7 +84,9 @@ const DisplayModalContent: React.FC = () => {
     }
   };
 
-  const [reduceMotion, setReduceMotion] = useState(() => localStorage.getItem(STORAGE_KEYS.reduceMotion) === 'true');
+  // Reduce Motion defaults ON (calmer, faster-feeling UI; matches the brand's
+  // "no ceremony" stance) - on unless the user has explicitly turned it off.
+  const [reduceMotion, setReduceMotion] = useState(() => localStorage.getItem(STORAGE_KEYS.reduceMotion) !== 'false');
   const [densityCompact, setDensityCompact] = useState(() => localStorage.getItem(STORAGE_KEYS.density) === 'compact');
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
 

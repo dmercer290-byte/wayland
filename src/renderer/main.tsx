@@ -27,6 +27,18 @@ if (__sentryDsn && (window as { electronAPI?: unknown }).electronAPI) {
     .catch((err) => console.warn('[Sentry] renderer import skipped:', (err as Error)?.message ?? err));
 }
 
+// Apply Reduce Motion before first paint so the UI is calm/fast from frame one.
+// Defaults ON unless the user has explicitly turned it off (mirrors the Settings
+// default in DisplayModalContent). Module scripts run after HTML parse, so
+// document.body is available.
+try {
+  if (typeof document !== 'undefined' && document.body && localStorage.getItem('wayland:reduce-motion') !== 'false') {
+    document.body.classList.add('reduce-motion');
+  }
+} catch {
+  /* localStorage unavailable - ignore */
+}
+
 // Runtime patches must be imported early
 import './utils/ui/runtimePatches';
 
