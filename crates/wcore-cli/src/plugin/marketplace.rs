@@ -368,6 +368,40 @@ pub fn list_marketplace_installed(plugins_root: &Path) -> Result<Vec<Provenance>
     Ok(out)
 }
 
+/// Uninstall a marketplace-installed plugin: remove its self-contained install
+/// dir and its lockfile record. The dir is located by matching its
+/// `provenance.json` (plugin + marketplace) rather than recomputing the
+/// sanitized name, so it stays correct regardless of how the name was sanitized
+/// at commit time. Returns whether an install dir was removed.
+pub fn remove_marketplace_plugin(
+    plugins_root: &Path,
+    plugin: &str,
+    marketplace: &str,
+) -> Result<bool> {
+    let mut removed = false;
+    if plugins_root.exists() {
+        for ent in std::fs::read_dir(plugins_root)? {
+            let path = ent?.path();
+            let prov = path.join("provenance.json");
+            if !path.is_dir() || !prov.is_file() {
+                continue;
+            }
+            let matches = std::fs::read_to_string(&prov)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Provenance>(&raw).ok())
+                .is_some_and(|p| p.plugin == plugin && p.marketplace == marketplace);
+            if matches {
+                std::fs::remove_dir_all(&path)?;
+                removed = true;
+            }
+        }
+    }
+    // Drop the lockfile record regardless (keeps the lock consistent even if the
+    // dir was already gone).
+    lockfile::remove_record(plugins_root, plugin, marketplace)?;
+    Ok(removed)
+}
+
 /// Make a marketplace's catalog available on disk. Returns the directory that
 /// contains `.claude-plugin/marketplace.json`.
 fn acquire_marketplace(mref: &known::MarketplaceRef, quarantine_root: &Path) -> Result<PathBuf> {

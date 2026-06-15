@@ -184,3 +184,42 @@ fn list_is_marketplace_aware_and_tolerates_sidecars() {
     assert_eq!(market[0].plugin, "demo");
     assert_eq!(market[0].marketplace, "local");
 }
+
+#[test]
+fn uninstall_removes_dir_and_lockfile_record() {
+    use wcore_cli::plugin::marketplace::{list_marketplace_installed, remove_marketplace_plugin};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let store = tmp.path().join("store");
+    let quarantine = tmp.path().join("quarantine");
+    let fixture = tmp.path().join("fixture");
+    std::fs::create_dir_all(&store).unwrap();
+    build_fixture(&fixture);
+
+    add_marketplace(
+        &store,
+        MarketplaceRef {
+            name: "local".into(),
+            source: fixture.to_string_lossy().into_owned(),
+            official: false,
+        },
+    )
+    .unwrap();
+    let planned = resolve_and_plan(&store, &quarantine, "local", "demo").unwrap();
+    let dir = commit_install(&store, &planned, "2026-06-15T00:00:00Z".into()).unwrap();
+    assert!(dir.is_dir());
+    assert_eq!(read_lock(&store).unwrap().len(), 1);
+    assert_eq!(list_marketplace_installed(&store).unwrap().len(), 1);
+
+    let removed = remove_marketplace_plugin(&store, "demo", "local").unwrap();
+    assert!(removed, "an install dir should have been removed");
+    assert!(!dir.exists(), "install dir must be gone");
+    assert!(
+        read_lock(&store).unwrap().is_empty(),
+        "lock record must be gone"
+    );
+    assert!(list_marketplace_installed(&store).unwrap().is_empty());
+
+    // Idempotent: removing again is a no-op, not an error.
+    assert!(!remove_marketplace_plugin(&store, "demo", "local").unwrap());
+}
