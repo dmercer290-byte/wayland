@@ -28,6 +28,7 @@ import { useResponsive } from '@renderer/hooks/ui/useResponsive';
 import { useSidebarWidth } from '@renderer/hooks/ui/useSidebarWidth';
 import { useGlobalKeybind } from '@renderer/hooks/settings/useGlobalKeybind';
 import { CommandPalette } from '@renderer/components/cmdk';
+import BudgetGateModal from '@renderer/components/cost/BudgetGateModal';
 import type { PaletteAssistant, PaletteStarterPrompt } from '@renderer/components/cmdk';
 import { getAgentKey } from '@renderer/pages/guid/hooks/agentSelectionUtils';
 import type { AcpBackend } from '@/common/types/acpTypes';
@@ -704,6 +705,7 @@ const Layout: React.FC<{
                 onResumeChat={handleResumeChat}
                 onFillPrompt={handleFillPrompt}
               />
+              <BudgetGateModal />
             </ArcoLayout.Content>
           </ArcoLayout>
         </div>

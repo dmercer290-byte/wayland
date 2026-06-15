@@ -37,6 +37,7 @@ import { ConversationTurnCompletionService } from './ConversationTurnCompletionS
 import { cronBusyGuard } from '@process/services/cron/CronBusyGuard';
 import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher';
 import { getCostRecorder } from '@process/services/cost/CostRecorder';
+import { getBudgetController } from '@process/services/cost/BudgetController';
 
 // ---------------------------------------------------------------------------
 // Truncation-heuristic constants (HC-4 - see audit at
@@ -337,6 +338,26 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   }
 
   async sendMessage(data: { content: string; msg_id: string; files?: string[] }) {
+    // Runaway circuit-breaker Phase 1: pre-turn budget pause gate. If a 'pause'
+    // budget for this model/backend is already over its limit, hold the turn
+    // before anything is persisted or dispatched (no tokens spent) and surface a
+    // resumable card carrying the held message. Default (no pause budget) allows.
+    const gate = getBudgetController()?.canStartTurn({ modelId: this.model?.useModel, backend: 'wcore' });
+    if (gate && !gate.allowed && gate.budget) {
+      ipcBridge.cost.budgetGateBlocked.emit({
+        conversationId: this.conversation_id,
+        content: data.content,
+        files: data.files,
+        budgetId: gate.budget.id,
+        scope: gate.budget.scope,
+        scopeKey: gate.budget.scopeKey,
+        limitUsd: gate.budget.limitUsd,
+        spentUsd: gate.spentUsd ?? gate.budget.limitUsd,
+        period: gate.budget.period,
+      });
+      return;
+    }
+
     const message: TMessage = {
       id: data.msg_id,
       type: 'text',

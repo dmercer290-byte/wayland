@@ -2435,6 +2435,12 @@ export const cost = {
   listBudgets: buildProvider<import('@process/services/cost/types').BudgetStatus[], void>('cost.listBudgets'),
   /** One-time non-blocking over-budget warn notification (main -> renderer). */
   budgetAlert: buildEmitter<import('@process/services/cost/types').BudgetAlert>('cost.budgetAlert'),
+  /**
+   * A 'pause' budget blocked a turn before it started (runaway circuit-breaker
+   * Phase 1). The renderer shows a resumable card; the held message is in the
+   * payload so it can be re-sent after the user raises the cap (main -> renderer).
+   */
+  budgetGateBlocked: buildEmitter<import('@process/services/cost/types').BudgetGateBlocked>('cost.budgetGateBlocked'),
 };
 
 // ==================== Memory Archive (v0.6.4) ====================

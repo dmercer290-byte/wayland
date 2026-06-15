@@ -19,7 +19,7 @@ import { prewarmProviderSdks } from '@process/utils/prewarmProviders';
 import { SqliteCostRepository } from '@process/services/cost/SqliteCostRepository';
 import { SqliteBudgetRepository } from '@process/services/cost/SqliteBudgetRepository';
 import { CostAnalyticsService } from '@process/services/cost/CostAnalyticsService';
-import { BudgetController } from '@process/services/cost/BudgetController';
+import { BudgetController, setBudgetController } from '@process/services/cost/BudgetController';
 import { initCostBridge, initCostBudgetBridge } from '@process/bridge/costBridge';
 import { CostRecorder, setCostRecorder } from '@process/services/cost/CostRecorder';
 import { getModelPricing } from '@process/services/cost/ModelPricing';
@@ -199,6 +199,11 @@ void getDatabase()
       });
       initCostBudgetBridge(budgetController);
       costRecorder.setTurnRecordedHook((ctx) => budgetController.checkAfterTurn(ctx));
+      // Expose the controller process-wide so the turn-start path can consult
+      // the pre-turn pause gate (canStartTurn) - the runaway circuit-breaker
+      // Phase 1. checkAfterTurn (warn) was already wired above; this completes
+      // the pause half.
+      setBudgetController(budgetController);
     } catch (err) {
       console.warn('[cost] init failed:', err);
     }
