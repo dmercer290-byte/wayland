@@ -274,7 +274,22 @@ pub fn resolve_and_plan(
     let draft = adapter.lower(market, &entry, &fetched_root)?;
 
     let store_path = plugins_root.join(format!("{}@{market}", draft.name));
-    let plan = InstallPlan::from_draft(&draft, market, store_path);
+    let mut plan = InstallPlan::from_draft(&draft, market, store_path);
+
+    // Lane E3: trust ≠ capability. Capability grants come from the manifest
+    // permissions; trust is about provenance. An unofficial (user-added)
+    // marketplace ships unsigned third-party code, so surface that as a
+    // non-blocking warning. Official bundled catalogs are exempt.
+    if !mref.official {
+        plan.warnings.push(wcore_pluginsrc::PlanWarning {
+            kind: "unsigned-source".to_string(),
+            component: String::new(),
+            detail: format!(
+                "marketplace '{market}' is an unofficial source — its plugins are \
+                 unsigned third-party code that will run inside your agent"
+            ),
+        });
+    }
 
     Ok(PlannedInstall {
         plan,

@@ -89,3 +89,56 @@ fn plan_is_pure_then_commit_writes_store_and_lockfile() {
     assert_eq!(lock[0].version, "0.1.0");
     assert_eq!(lock[0].installed_at, "2026-06-15T00:00:00Z");
 }
+
+#[test]
+fn unofficial_marketplace_yields_unsigned_source_warning_official_does_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = tmp.path().join("store");
+    let quarantine = tmp.path().join("quarantine");
+    let fixture = tmp.path().join("fixture");
+    std::fs::create_dir_all(&store).unwrap();
+    build_fixture(&fixture);
+
+    // Unofficial (user-added) marketplace → unsigned-source trust warning.
+    add_marketplace(
+        &store,
+        MarketplaceRef {
+            name: "local".into(),
+            source: fixture.to_string_lossy().into_owned(),
+            official: false,
+        },
+    )
+    .unwrap();
+    let planned = resolve_and_plan(&store, &quarantine, "local", "demo").unwrap();
+    assert!(
+        planned
+            .plan
+            .warnings
+            .iter()
+            .any(|w| w.kind == "unsigned-source"),
+        "unofficial source must warn, got {:?}",
+        planned.plan.warnings
+    );
+
+    // Official (bundled) marketplace pointing at the same fixture → no trust
+    // warning (capability is still manifest-driven, independent of trust).
+    add_marketplace(
+        &store,
+        MarketplaceRef {
+            name: "bundled".into(),
+            source: fixture.to_string_lossy().into_owned(),
+            official: true,
+        },
+    )
+    .unwrap();
+    let official = resolve_and_plan(&store, &quarantine, "bundled", "demo").unwrap();
+    assert!(
+        !official
+            .plan
+            .warnings
+            .iter()
+            .any(|w| w.kind == "unsigned-source"),
+        "official source must not warn, got {:?}",
+        official.plan.warnings
+    );
+}
