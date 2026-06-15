@@ -2437,7 +2437,16 @@ async fn run_json_stream_mode(
                     }
                     Err(e) => {
                         eprintln!("[mcp] connect_one failed for '{name}': {e:#}");
-                        output.emit_error(&format!("AddMcpServer '{name}' failed: {e:#}"), false);
+                        let reason = format!("{e:#}");
+                        output
+                            .emit_error(&format!("AddMcpServer '{name}' failed: {reason}"), false);
+                        // Companion to the McpReady success emit: tell the host /
+                        // TUI *why* this server's tools never appeared so /doctor
+                        // can surface it, instead of the failure only hitting stderr.
+                        let _ = writer.emit(&ProtocolEvent::McpFailed {
+                            name: name.clone(),
+                            reason,
+                        });
                     }
                 }
             }
