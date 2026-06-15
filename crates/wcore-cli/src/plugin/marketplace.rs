@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use wcore_pluginsrc::{
-    CanonicalDraft, CommitMeta, InstallPlan, ResolvedVersion, SourceEntry, SourceKind, commit_plan,
-    detect_format,
+    CanonicalDraft, CommitMeta, InstallPlan, Provenance, ResolvedVersion, SourceEntry, SourceKind,
+    commit_plan, detect_format,
 };
 
 use crate::plugin::error::{PluginCliError, Result};
@@ -332,6 +332,35 @@ pub fn commit_install(
     )?;
 
     Ok(dir)
+}
+
+/// List marketplace-installed plugins under `plugins_root`. A marketplace
+/// install is a flat `<plugin>@<marketplace>/` dir carrying a `provenance.json`
+/// sidecar — that sidecar is the marker (and the source of truth for the
+/// listing), which also distinguishes these from legacy `<name>.json` installs
+/// and from the marketplace's own JSON sidecars in the same root. Unreadable or
+/// non-provenance dirs are skipped, never fatal.
+pub fn list_marketplace_installed(plugins_root: &Path) -> Result<Vec<Provenance>> {
+    let mut out = Vec::new();
+    if !plugins_root.exists() {
+        return Ok(out);
+    }
+    for ent in std::fs::read_dir(plugins_root)? {
+        let path = ent?.path();
+        let prov = path.join("provenance.json");
+        if !path.is_dir() || !prov.is_file() {
+            continue;
+        }
+        match std::fs::read_to_string(&prov)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Provenance>(&raw).ok())
+        {
+            Some(p) => out.push(p),
+            None => tracing::debug!(path = %prov.display(), "skipping unreadable provenance"),
+        }
+    }
+    out.sort_by(|a, b| a.plugin.cmp(&b.plugin));
+    Ok(out)
 }
 
 /// Make a marketplace's catalog available on disk. Returns the directory that

@@ -191,12 +191,16 @@ pub fn run(args: PluginArgs) -> anyhow::Result<()> {
             println!("removed {name}");
         }
         PluginCmd::List => {
-            let entries = install::list_installed(&install_root)?;
-            if entries.is_empty() {
+            let legacy = install::list_installed(&install_root)?;
+            let market = marketplace::list_marketplace_installed(&marketplace_root)?;
+            if legacy.is_empty() && market.is_empty() {
                 println!("(no plugins installed)");
             }
-            for mf in entries {
+            for mf in legacy {
                 println!("{}\t{}\t{}", mf.name, mf.version, mf.description);
+            }
+            for p in market {
+                println!("{}@{}\t{}\t{}", p.plugin, p.marketplace, p.version, p.grade);
             }
         }
         PluginCmd::Available { registry_dir } => {

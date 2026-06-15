@@ -142,3 +142,45 @@ fn unofficial_marketplace_yields_unsigned_source_warning_official_does_not() {
         official.plan.warnings
     );
 }
+
+#[test]
+fn list_is_marketplace_aware_and_tolerates_sidecars() {
+    use wcore_cli::plugin::install::list_installed;
+    use wcore_cli::plugin::marketplace::list_marketplace_installed;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let store = tmp.path().join("store");
+    let quarantine = tmp.path().join("quarantine");
+    let fixture = tmp.path().join("fixture");
+    std::fs::create_dir_all(&store).unwrap();
+    build_fixture(&fixture);
+
+    add_marketplace(
+        &store,
+        MarketplaceRef {
+            name: "local".into(),
+            source: fixture.to_string_lossy().into_owned(),
+            official: false,
+        },
+    )
+    .unwrap();
+    let planned = resolve_and_plan(&store, &quarantine, "local", "demo").unwrap();
+    commit_install(&store, &planned, "2026-06-15T00:00:00Z".into()).unwrap();
+
+    // The store now holds known_marketplaces.json + installed.lock.json
+    // sidecars alongside the demo@local dir. The legacy *.json scan must NOT
+    // choke on those (regression: it parsed every json as a manifest).
+    assert!(store.join("known_marketplaces.json").is_file());
+    assert!(store.join("installed.lock.json").is_file());
+    let legacy = list_installed(&store).expect("list_installed must skip non-manifest sidecars");
+    assert!(
+        legacy.is_empty(),
+        "no legacy <name>.json plugins here, got {legacy:?}"
+    );
+
+    // The marketplace-aware listing finds the install via its provenance.
+    let market = list_marketplace_installed(&store).unwrap();
+    assert_eq!(market.len(), 1);
+    assert_eq!(market[0].plugin, "demo");
+    assert_eq!(market[0].marketplace, "local");
+}

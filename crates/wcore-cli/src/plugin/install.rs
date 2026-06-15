@@ -75,8 +75,17 @@ pub fn list_installed(install_root: &Path) -> Result<Vec<PluginManifest>> {
             continue;
         }
         let raw = std::fs::read_to_string(&path)?;
-        let mf: PluginManifest = serde_json::from_str(&raw)?;
-        out.push(mf);
+        // The marketplace shares this root with its own sidecars
+        // (known_marketplaces.json, installed.lock.json) and any other JSON a
+        // user may drop here. Only legacy `<name>.json` files are plugin
+        // manifests; anything that doesn't parse as one is skipped, not fatal.
+        match serde_json::from_str::<PluginManifest>(&raw) {
+            Ok(mf) => out.push(mf),
+            Err(e) => {
+                tracing::debug!(path = %path.display(), error = %e,
+                    "skipping non-manifest JSON in plugin root");
+            }
+        }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
