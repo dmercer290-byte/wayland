@@ -1229,6 +1229,37 @@ impl AgentBootstrap {
         )
         .await;
 
+        // Lane D3 (G2/G4): load skills copied into installed marketplace plugins
+        // (`<plugins-root>/<plugin>@<marketplace>/skills/`), namespaced
+        // `<marketplace>/<plugin>:<skill>`. A declarative plugin runs no code, so
+        // its skills are otherwise never registered. Only dirs with a plugin.toml
+        // are treated as plugins (mirrors the on-disk loader); the bare skills/
+        // layout matches what the install committer writes.
+        for root in crate::plugins::loader::resolved_plugins_roots() {
+            let read = match std::fs::read_dir(&root) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in read.flatten() {
+                let plugin_dir = entry.path();
+                if !plugin_dir.join("plugin.toml").is_file() {
+                    continue;
+                }
+                let skills_dir = plugin_dir.join("skills");
+                if !skills_dir.is_dir() {
+                    continue;
+                }
+                let dirname = entry.file_name().to_string_lossy().into_owned();
+                let ns = match dirname.split_once('@') {
+                    Some((plugin, mkt)) => format!("{mkt}/{plugin}"),
+                    None => dirname.clone(),
+                };
+                let plugin_skills =
+                    wcore_skills::loader::load_plugin_skill_catalog(&skills_dir, &ns).await;
+                skill_refs.extend(plugin_skills);
+            }
+        }
+
         // F-067 (MED): warn when a user- or project-level skill would shadow a
         // bundled skill. Bundled skills win dedup inside `load_catalog` (spliced
         // to index 0), so the user's copy is silently dropped. This warn surfaces

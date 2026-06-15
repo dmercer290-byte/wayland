@@ -164,6 +164,28 @@ fn metadata_to_ref(m: SkillMetadata) -> crate::refs::SkillRef {
     crate::refs::metadata_to_ref(&m)
 }
 
+/// Lane D3 (G2/G4): load skills contributed by an installed marketplace plugin.
+///
+/// Scans `<plugin_skills_dir>/<name>/SKILL.md` (the bare `skills/` tree inside a
+/// committed plugin dir) and namespaces each skill `<namespace>:<skill>` so a
+/// plugin's skills never collide with user/project skills or with another
+/// marketplace's. Returns listing refs ready to splice into the boot catalog;
+/// bodies are read lazily, same as `load_catalog`.
+pub async fn load_plugin_skill_catalog(
+    plugin_skills_dir: &Path,
+    namespace: &str,
+) -> Vec<crate::refs::SkillRef> {
+    let loaded =
+        load_skills_from_dir(plugin_skills_dir, SkillSource::Project, LoadedFrom::Skills).await;
+    loaded
+        .into_iter()
+        .map(|mut s| {
+            s.metadata.name = format!("{namespace}:{}", s.metadata.name);
+            metadata_to_ref(s.metadata)
+        })
+        .collect()
+}
+
 /// Call `bundled::prepare_bundled_skills()` and wrap results as `LoadedSkill`.
 ///
 /// Each bundled skill is assigned a virtual path `<bundled:name>` for
