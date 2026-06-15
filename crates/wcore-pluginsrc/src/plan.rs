@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use wcore_plugin_api::mcp_server_spec::McpTransport;
 
-use crate::model::{CanonicalDraft, CompatibilityGrade, IgnoredFeature, ResolvedVersion};
+use crate::model::{
+    CanonicalDraft, CompatibilityGrade, IgnoredFeature, PlanWarning, ResolvedVersion,
+};
 
 /// One namespaced component the install will contribute.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +47,8 @@ pub struct InstallPlan {
     pub spawns: Vec<McpSpawnPreview>,
     pub ignored: Vec<IgnoredFeature>,
     pub namespace_collisions: Vec<Collision>,
+    /// Non-blocking risks (Lane E2 prompt-risk, E3 trust). Shown for consent.
+    pub warnings: Vec<PlanWarning>,
     pub grade: CompatibilityGrade,
     pub store_path: PathBuf,
 }
@@ -89,6 +93,7 @@ impl InstallPlan {
             spawns,
             ignored: draft.ignored.clone(),
             namespace_collisions: Vec::new(),
+            warnings: draft.warnings.clone(),
             grade,
             store_path: store_path.into(),
         }
@@ -141,6 +146,20 @@ impl InstallPlan {
             out.push_str("  ignores (unsupported in v1):\n");
             for i in &self.ignored {
                 out.push_str(&format!("    - {}: {}\n", i.kind, i.detail));
+            }
+        }
+
+        // Warnings last so they're the final thing the user reads before
+        // deciding. Non-blocking by contract — surfaced, never auto-rejected.
+        if !self.warnings.is_empty() {
+            out.push_str("  ⚠ warnings (review before installing):\n");
+            for w in &self.warnings {
+                let where_ = if w.component.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", w.component)
+                };
+                out.push_str(&format!("    - {}: {}{}\n", w.kind, w.detail, where_));
             }
         }
         out

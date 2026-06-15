@@ -41,6 +41,20 @@ pub struct IgnoredFeature {
     pub detail: String,
 }
 
+/// A non-blocking risk surfaced on the [`InstallPlan`](crate::InstallPlan): it
+/// is graded and shown, never auto-blocked — the user decides. Lane E2 emits
+/// `prompt-risk` warnings (injection / credential markers found in asset text);
+/// Lane E3 emits `unsigned-source` trust warnings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanWarning {
+    /// Category, e.g. `"prompt-risk"` or `"unsigned-source"`.
+    pub kind: String,
+    /// The asset the warning is about (`"skill:<name>"`, `"agent:<name>"`, …),
+    /// or empty for a plan-level warning.
+    pub component: String,
+    pub detail: String,
+}
+
 /// A skill copied verbatim (`<rel_dir>/SKILL.md` + supporting files).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillAsset {
@@ -132,6 +146,8 @@ pub struct CanonicalDraft {
     pub agents: Vec<AgentAsset>,
     pub mcp_servers: Vec<McpServerDraft>,
     pub ignored: Vec<IgnoredFeature>,
+    /// Non-blocking risks surfaced for consent (Lane E2/E3).
+    pub warnings: Vec<PlanWarning>,
     pub grade: CompatibilityGrade,
 }
 
@@ -146,6 +162,7 @@ impl CanonicalDraft {
             agents: Vec::new(),
             mcp_servers: Vec::new(),
             ignored: Vec::new(),
+            warnings: Vec::new(),
             grade: CompatibilityGrade::ContentCompatible,
         }
     }

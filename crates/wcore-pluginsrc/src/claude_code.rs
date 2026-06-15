@@ -50,6 +50,11 @@ impl PluginFormatAdapter for ClaudeCodeAdapter {
         lower_agents(root, &mut draft)?;
         lower_mcp_servers(root, &manifest, &mut draft)?;
 
+        // Lane E2: scan the prompt-asset text (skill/command bodies + agent
+        // prompts) for injection / credential markers. Non-blocking — the
+        // warnings ride on the InstallPlan consent surface.
+        draft.warnings = scan_assets(root, &draft);
+
         // Hooks are not run in v1: record them so the grade is honest.
         if root.join("hooks/hooks.json").is_file()
             || manifest.hooks.as_ref().is_some_and(|v| !v.is_null())
@@ -88,6 +93,38 @@ fn read_plugin_json(root: &Path) -> Result<ClaudePluginJson> {
     let txt = fs::read_to_string(&p)?;
     serde_json::from_str(&txt)
         .map_err(|e| PluginSrcError::PluginManifest(format!("{}: {e}", p.display())))
+}
+
+/// Lane E2: read each lowered asset's text and collect prompt-risk warnings.
+/// Skill/command bodies are read from disk; agent prompts are already in the
+/// draft. Unreadable files are skipped (the copy step will surface real IO
+/// errors) so scanning never fails an otherwise-valid install.
+fn scan_assets(root: &Path, draft: &CanonicalDraft) -> Vec<crate::model::PlanWarning> {
+    let mut warnings = Vec::new();
+    for s in &draft.skills {
+        if let Ok(text) = fs::read_to_string(root.join(&s.rel_dir).join("SKILL.md")) {
+            warnings.extend(crate::scan::scan_prompt_risk(
+                &format!("skill:{}", s.name),
+                &text,
+            ));
+        }
+    }
+    for c in &draft.commands {
+        if let Ok(text) = fs::read_to_string(root.join(&c.rel_file)) {
+            warnings.extend(crate::scan::scan_prompt_risk(
+                &format!("command:{}", c.name),
+                &text,
+            ));
+        }
+    }
+    for a in &draft.agents {
+        let text = format!("{}\n{}", a.description, a.system_prompt);
+        warnings.extend(crate::scan::scan_prompt_risk(
+            &format!("agent:{}", a.name),
+            &text,
+        ));
+    }
+    warnings
 }
 
 fn lower_skills(root: &Path, draft: &mut CanonicalDraft) -> Result<()> {
