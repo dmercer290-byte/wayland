@@ -202,11 +202,12 @@ export class TeamSessionService {
    * Find the enabled provider that actually OWNS `modelId` (lists it in its
    * model[] and has not disabled it), mirroring the main session's
    * useWCoreModelSelection ownership check. Returns null when no provider owns
-   * the model so callers can fall back. Fixes #87: a spawned wcore teammate
-   * pinned to a specific model must hydrate THAT provider's key/baseUrl, not
-   * providers[0]'s (which could send an sk-flux key to an OpenAI surface).
+   * the model so callers can fall back. Fixes #87: a spawned teammate pinned to
+   * a specific model must hydrate THAT provider's key/baseUrl, not the
+   * default-resolved provider's (which could send an sk-flux key to an OpenAI
+   * surface). Shared by the wcore and gemini pin paths.
    */
-  private async resolveAionrsModelById(modelId: string): Promise<TProviderWithModel | null> {
+  private async resolveOwningProviderModelById(modelId: string): Promise<TProviderWithModel | null> {
     const configuredProviders = await ProcessConfig.get('model.config');
     const providers = Array.isArray(configuredProviders) ? configuredProviders.filter((p) => p.enabled !== false) : [];
 
@@ -422,14 +423,17 @@ export class TeamSessionService {
     // Override the working model when the agent pins one explicitly.
     if (agent.model) {
       const type = getConversationTypeForBackend(backend);
-      if (type === 'wcore') {
+      if (type === 'wcore' || type === 'gemini') {
         // Re-select the provider that OWNS this model id so the spawn hydrates
-        // the right key/baseUrl (#87). Fall back to a useModel-only override on
-        // the already-resolved provider when no enabled provider claims it.
-        const owned = await this.resolveAionrsModelById(agent.model);
+        // the right key/baseUrl (#87). Without this a pinned teammate keeps the
+        // default-resolved provider and only swaps the model name, so a
+        // Flux-backed Gemini/WCore teammate sends its sk-flux key to
+        // api.openai.com (no Flux base URL applied) and 401s. Fall back to a
+        // useModel-only override on the already-resolved provider when no
+        // enabled provider claims it - e.g. a Google-auth Gemini model that
+        // lives outside model.config.
+        const owned = await this.resolveOwningProviderModelById(agent.model);
         model = owned ?? { ...model, useModel: agent.model };
-      } else if (type === 'gemini') {
-        model = { ...model, useModel: agent.model };
       }
     }
 
