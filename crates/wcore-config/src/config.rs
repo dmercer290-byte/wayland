@@ -1132,9 +1132,12 @@ fn chatgpt_oauth_token_path() -> Option<PathBuf> {
 /// (`wcore-providers`). Mirrors the three credential classes
 /// [`resolve_api_key`] distinguishes:
 ///
-/// - **Ambient cloud** (`bedrock`, `vertex`): always connected — they
-///   authenticate with AWS/GCP ambient credentials and carry no API key
-///   (`resolve_api_key` returns `Ok("")` for them by design).
+/// - **Ambient cloud** (`bedrock`, `vertex`): connected only when a real
+///   credential source is present on this host (see
+///   [`aws_ambient_credentials_present`] / [`gcp_ambient_credentials_present`])
+///   — NOT unconditionally. They carry no API key, but listing them as
+///   connected on a box with no AWS/GCP credentials offered the user a provider
+///   that would error on the first turn.
 /// - **OAuth** (`openai-chatgpt`): connected when the stored login file
 ///   (`~/.wayland/oauth/chatgpt.json`) exists.
 /// - **API key** (everything else): connected when `resolve_api_key`
@@ -1143,8 +1146,11 @@ fn chatgpt_oauth_token_path() -> Option<PathBuf> {
 ///   connected".
 pub fn provider_connected(provider: ProviderType) -> bool {
     match provider {
-        // Ambient cloud credentials — no API key, treated as available.
-        ProviderType::Bedrock | ProviderType::Vertex => true,
+        // Ambient cloud credentials — connected only when AWS/GCP credentials
+        // are actually present (env, shared config/credentials files, container
+        // or OIDC role, or ADC), decided with no network call.
+        ProviderType::Bedrock => aws_ambient_credentials_present(),
+        ProviderType::Vertex => gcp_ambient_credentials_present(),
         // OAuth-backed — the stored login token is the credential.
         ProviderType::OpenAIChatGpt => chatgpt_oauth_token_path()
             .map(|p| p.exists())
@@ -1158,6 +1164,49 @@ pub fn provider_connected(provider: ProviderType) -> bool {
             )
         }
     }
+}
+
+/// Whether AWS credentials the Bedrock provider's default SDK chain would use
+/// are present on this host — checked synchronously with no network (never
+/// touches IMDS). Mirrors the sources listed in `bedrock.rs`'s
+/// "No AWS credentials found" error: explicit access keys, a named profile, an
+/// ECS/EKS container or web-identity role, or the shared `~/.aws` files.
+fn aws_ambient_credentials_present() -> bool {
+    let present = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    // Explicit static keys (both halves required), a named profile, or an
+    // ECS/EKS/OIDC role handed to the process via env.
+    if (present("AWS_ACCESS_KEY_ID") && present("AWS_SECRET_ACCESS_KEY"))
+        || present("AWS_PROFILE")
+        || present("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
+        || present("AWS_CONTAINER_CREDENTIALS_FULL_URI")
+        || present("AWS_WEB_IDENTITY_TOKEN_FILE")
+    {
+        return true;
+    }
+    // Shared credentials/config files (honour the standard overrides, else the
+    // default `~/.aws/{credentials,config}` locations).
+    let home = dirs::home_dir();
+    let creds_file = std::env::var_os("AWS_SHARED_CREDENTIALS_FILE")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|h| h.join(".aws").join("credentials")));
+    let config_file = std::env::var_os("AWS_CONFIG_FILE")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|h| h.join(".aws").join("config")));
+    creds_file.is_some_and(|p| p.exists()) || config_file.is_some_and(|p| p.exists())
+}
+
+/// Whether GCP credentials the Vertex provider would use are present on this
+/// host — checked synchronously with no network. Mirrors `vertex.rs`'s
+/// resolution order: a `GOOGLE_APPLICATION_CREDENTIALS` service-account file, or
+/// gcloud Application Default Credentials at
+/// `~/.config/gcloud/application_default_credentials.json`.
+fn gcp_ambient_credentials_present() -> bool {
+    if std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some_and(|v| !v.is_empty()) {
+        return true;
+    }
+    dirs::home_dir()
+        .map(|h| h.join(".config/gcloud/application_default_credentials.json"))
+        .is_some_and(|p| p.exists())
 }
 
 /// The built-in providers (from [`KNOWN_PROVIDER_TYPES`]) that have a usable
@@ -4704,6 +4753,18 @@ skills_lifecycle = true
         "OPENAI_API_KEY",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
+        // Ambient cloud credential sources read by the Bedrock/Vertex probes,
+        // so the guard is hermetic for them too (sandboxed HOME clears the
+        // `~/.aws/*` and ADC file fallbacks).
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_PROFILE",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_CONFIG_FILE",
+        "GOOGLE_APPLICATION_CREDENTIALS",
     ];
 
     /// Hermetic credential environment: points `HOME` (the ChatGPT OAuth-file
@@ -4813,8 +4874,10 @@ skills_lifecycle = true
             !provider_connected(ProviderType::OpenAIChatGpt),
             "ChatGPT without a stored token file must be unconnected"
         );
-        // Ambient cloud stays connected regardless of any credential env.
-        assert!(provider_connected(ProviderType::Bedrock));
+        // Ambient cloud is connected only with a real credential source — none
+        // exists in this hermetic env (creds cleared, HOME sandboxed), so
+        // Bedrock is now correctly unconnected.
+        assert!(!provider_connected(ProviderType::Bedrock));
     }
 
     #[test]
@@ -4838,5 +4901,73 @@ skills_lifecycle = true
             cfg.prompt_caching,
             "for_provider_discovery must inherit base fields like prompt_caching"
         );
+    }
+
+    #[test]
+    #[serial_test::serial(wayland_home_env)]
+    fn ambient_cloud_connection_reflects_real_credentials() {
+        // Snapshot every var these probes read so the test restores them.
+        let keys = [
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_PROFILE",
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+            "AWS_WEB_IDENTITY_TOKEN_FILE",
+            "AWS_SHARED_CREDENTIALS_FILE",
+            "AWS_CONFIG_FILE",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        ];
+        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
+            keys.iter().map(|k| (*k, std::env::var_os(k))).collect();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("does-not-exist");
+
+        // SAFETY: serialized via the shared `wayland_home_env` group, so no
+        // other env-reading test runs concurrently.
+        unsafe {
+            for k in keys {
+                std::env::remove_var(k);
+            }
+            // Point the AWS shared-file lookups at nonexistent paths so the
+            // `~/.aws/*` fallback is bypassed deterministically on every OS.
+            std::env::set_var("AWS_SHARED_CREDENTIALS_FILE", &missing);
+            std::env::set_var("AWS_CONFIG_FILE", &missing);
+        }
+
+        // No env keys + nonexistent shared files ⇒ Bedrock not connected.
+        assert!(
+            !provider_connected(ProviderType::Bedrock),
+            "Bedrock must NOT be connected without any AWS credential source"
+        );
+
+        // Explicit static keys ⇒ connected.
+        unsafe {
+            std::env::set_var("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE");
+            std::env::set_var("AWS_SECRET_ACCESS_KEY", "secret");
+        }
+        assert!(
+            provider_connected(ProviderType::Bedrock),
+            "explicit AWS keys must mark Bedrock connected"
+        );
+
+        // A GOOGLE_APPLICATION_CREDENTIALS path ⇒ Vertex connected.
+        unsafe { std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", missing.as_os_str()) };
+        assert!(
+            provider_connected(ProviderType::Vertex),
+            "GOOGLE_APPLICATION_CREDENTIALS must mark Vertex connected"
+        );
+
+        // Restore every var.
+        // SAFETY: still inside the serial guard.
+        unsafe {
+            for (k, v) in saved {
+                match v {
+                    Some(val) => std::env::set_var(k, val),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
     }
 }
