@@ -1018,6 +1018,15 @@ pub(crate) const PROVIDER_CATALOG: &[ProviderEntry] = &[
         signup_url: "https://console.cloud.google.com/apis/credentials",
         deferred: false,
     },
+    ProviderEntry {
+        name: "openai-chatgpt",
+        category: "Meet & OAuth",
+        description: "Sign in with ChatGPT (OAuth). `auth login chatgpt` starts the flow.",
+        // OAuth-backed: status comes from the stored token, not an env var.
+        env_vars: &[],
+        signup_url: "https://chatgpt.com/",
+        deferred: false,
+    },
     // ── Voice ────────────────────────────────────────────────────────
     ProviderEntry {
         name: "voice_mode",
@@ -1201,9 +1210,40 @@ fn resolve_voice_mode_status() -> ProviderStatus {
     }
 }
 
+/// Resolve the `openai-chatgpt` OAuth status from the stored ChatGPT token.
+///
+/// Uses [`wcore_agent::oauth::chatgpt_login_status`] — the same sync,
+/// network-free reader the CLI `auth status` command and the `/provider` swap
+/// precheck use — so the `/config` badge can't disagree with them. No token →
+/// `NotConfigured`; a stored token with a past expiry → `OAuthExpired`;
+/// otherwise `OAuthConnected` (a token with no recorded expiry is treated as
+/// valid, mirroring the google-meet row's missing-expiry handling).
+fn resolve_chatgpt_status() -> ProviderStatus {
+    let status = wcore_agent::oauth::OAuthStorage::from_home()
+        .ok()
+        .and_then(|s| wcore_agent::oauth::chatgpt_login_status(&s).ok().flatten());
+    let Some(status) = status else {
+        return ProviderStatus::NotConfigured;
+    };
+    match status.expires_at_unix_secs {
+        Some(exp) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if exp <= now {
+                ProviderStatus::OAuthExpired
+            } else {
+                ProviderStatus::OAuthConnected
+            }
+        }
+        None => ProviderStatus::OAuthConnected,
+    }
+}
+
 /// Resolve a provider entry's status by inspecting the env. The voice /
-/// google-meet cases need extra probes; everything else is the simple
-/// "any of these env vars is set?" check.
+/// google-meet / chatgpt cases need extra probes; everything else is the
+/// simple "any of these env vars is set?" check.
 pub(crate) fn resolve_provider_status(entry: &ProviderEntry) -> ProviderStatus {
     if entry.deferred {
         return ProviderStatus::Deferred;
@@ -1230,6 +1270,14 @@ pub(crate) fn resolve_provider_status(entry: &ProviderEntry) -> ProviderStatus {
             GoogleMeetTokenStatus::Expired => ProviderStatus::OAuthExpired,
             GoogleMeetTokenStatus::Absent => ProviderStatus::NotConfigured,
         };
+    }
+    if entry.name == "openai-chatgpt" {
+        // OAuth-backed: status is driven by the stored ChatGPT token, decoded
+        // via the single-source `chatgpt_login_status` helper (sync, no
+        // network/refresh). Not signed in → NotConfigured; signed in with a
+        // past expiry → OAuthExpired (the next use silently refreshes, but the
+        // badge should be honest); otherwise OAuthConnected.
+        return resolve_chatgpt_status();
     }
     // Default: configured if every env var is present + non-empty
     // (for multi-var entries like home-assistant) OR any of them
@@ -2855,6 +2903,91 @@ mod tests {
         assert_eq!(
             google_meet_token_status(&path),
             GoogleMeetTokenStatus::Valid
+        );
+    }
+
+    // ── FIX 3: openai-chatgpt OAuth status row ───────────────────────────
+
+    /// Seed (or omit) `$HOME/.wayland/oauth/chatgpt.json` under a tempdir HOME,
+    /// run `resolve_chatgpt_status`, and restore HOME. The `token` arg:
+    /// - `None` → write NO token file (not signed in).
+    /// - `Some(None)` → write a token with no `expires_at_unix_secs` field.
+    /// - `Some(Some(exp))` → write a token whose expiry is `exp`.
+    #[cfg(unix)]
+    fn chatgpt_status_with_home(token: Option<Option<u64>>) -> ProviderStatus {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        if let Some(expires_at) = token {
+            let oauth_dir = tmp.path().join(".wayland").join("oauth");
+            std::fs::create_dir_all(&oauth_dir).expect("mkdir");
+            // A JWT-less access_token is fine: the plan decode just yields None,
+            // and the status row only reads expiry. The struct must round-trip
+            // through `OAuthTokens`'s serde shape.
+            let body = match expires_at {
+                Some(exp) => format!(
+                    r#"{{"access_token":"hdr.e30.sig","refresh_token":"r","expires_at_unix_secs":{exp},"token_type":"Bearer"}}"#
+                ),
+                None => {
+                    r#"{"access_token":"hdr.e30.sig","refresh_token":"r","token_type":"Bearer"}"#
+                        .to_string()
+                }
+            };
+            std::fs::write(oauth_dir.join("chatgpt.json"), body).expect("write token");
+        }
+        let saved = std::env::var_os("HOME");
+        // SAFETY: serial test; HOME reverted before return.
+        unsafe { std::env::set_var("HOME", tmp.path()) };
+        let status = resolve_chatgpt_status();
+        match saved {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        status
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn chatgpt_status_not_configured_when_no_token() {
+        assert_eq!(
+            chatgpt_status_with_home(None),
+            ProviderStatus::NotConfigured
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn chatgpt_status_connected_when_future_expiry() {
+        let far_future = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+            + 3600;
+        assert_eq!(
+            chatgpt_status_with_home(Some(Some(far_future))),
+            ProviderStatus::OAuthConnected
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn chatgpt_status_expired_when_past_expiry() {
+        assert_eq!(
+            chatgpt_status_with_home(Some(Some(1))),
+            ProviderStatus::OAuthExpired
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn chatgpt_status_connected_when_no_expiry_field() {
+        // A token with no recorded expiry is treated as valid (mirrors the
+        // google-meet missing-expiry handling).
+        assert_eq!(
+            chatgpt_status_with_home(Some(None)),
+            ProviderStatus::OAuthConnected
         );
     }
 

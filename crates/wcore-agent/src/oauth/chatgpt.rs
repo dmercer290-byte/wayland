@@ -141,6 +141,65 @@ fn decode_jwt_exp(token: &str) -> Option<u64> {
     v.get("exp").and_then(|x| x.as_u64())
 }
 
+/// A point-in-time, NETWORK-FREE snapshot of the stored ChatGPT login.
+///
+/// Produced by [`login_status`] from the on-disk token bundle alone — no
+/// refresh, no HTTP. `signed_in` is true whenever a token file is present;
+/// `expires_at_unix_secs` lets the caller decide expired-vs-valid against its
+/// own wall-clock (an expired-but-present token is still `signed_in` because
+/// the next real use will silently refresh it). This is the ONE source of
+/// truth shared by the CLI `auth status` command, the `/provider` swap
+/// precheck, and the `/config` status row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatGptLoginStatus {
+    /// `chatgpt_plan_type` from the access-token claims (e.g. `pro`, `plus`),
+    /// when present and decodable.
+    pub plan: Option<String>,
+    /// Access-token expiry in Unix epoch seconds, when known. Prefers the
+    /// stored `expires_at_unix_secs`; falls back to the JWT `exp` claim.
+    pub expires_at_unix_secs: Option<u64>,
+    /// Always `true` when this value exists (a token file was found).
+    pub signed_in: bool,
+}
+
+impl ChatGptLoginStatus {
+    /// Decode a signed-in status from an already-loaded token bundle (no I/O).
+    /// Shared by [`login_status`] (which loads from `OAuthStorage` first) and
+    /// the CLI `auth status` renderer so the plan/expiry decode lives in ONE
+    /// place. `plan` is the `chatgpt_plan_type` claim; expiry prefers the
+    /// stored field, falling back to the JWT `exp`.
+    pub fn from_tokens(tokens: &OAuthTokens) -> Self {
+        let plan = decode_codex_claims(&tokens.access_token)
+            .ok()
+            .and_then(|c| c.plan_type);
+        let expires_at_unix_secs = tokens
+            .expires_at_unix_secs
+            .or_else(|| decode_jwt_exp(&tokens.access_token));
+        Self {
+            plan,
+            expires_at_unix_secs,
+            signed_in: true,
+        }
+    }
+}
+
+/// Report the stored ChatGPT login WITHOUT any network call or refresh.
+///
+/// Loads `chatgpt`'s tokens from `storage`, and — when present — decodes the
+/// plan from the access-token claims and the expiry from the stored field
+/// (falling back to the JWT `exp`). Returns `Ok(None)` when no token file
+/// exists (not signed in), `Err` only on a storage read error. This is a pure
+/// read of already-persisted state, so it is safe to call from synchronous UI
+/// paths (the `/config` surface, the `/provider` precheck).
+pub fn login_status(
+    storage: &OAuthStorage,
+) -> Result<Option<ChatGptLoginStatus>, crate::oauth::OAuthStorageError> {
+    let Some(tokens) = storage.load(PROVIDER)? else {
+        return Ok(None);
+    };
+    Ok(Some(ChatGptLoginStatus::from_tokens(&tokens)))
+}
+
 /// Import a ChatGPT login from the Codex CLI's `auth.json`.
 ///
 /// Reads `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), maps the
@@ -1122,6 +1181,64 @@ mod tests {
         let jwt = jwt_with_account_and_exp("acct_x", 1_900_000_000);
         assert_eq!(decode_jwt_exp(&jwt), Some(1_900_000_000));
         assert_eq!(decode_jwt_exp("not-a-jwt"), None);
+    }
+
+    // ── login_status: sync, network-free login snapshot ──────────────
+
+    /// A 3-segment JWT carrying the account id + a `chatgpt_plan_type` claim.
+    fn jwt_with_plan(account_id: &str, plan: &str) -> String {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        let payload = serde_json::json!({
+            "https://api.openai.com/auth": {
+                "chatgpt_account_id": account_id,
+                "chatgpt_plan_type": plan
+            }
+        });
+        let seg = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
+        format!("hdr.{seg}.sig")
+    }
+
+    #[test]
+    fn login_status_none_for_empty_store() {
+        let tmp = TempDir::new().unwrap();
+        let storage = OAuthStorage::at_root(tmp.path().join("oauth")).unwrap();
+        assert_eq!(login_status(&storage).unwrap(), None);
+    }
+
+    #[test]
+    fn login_status_reports_plan_and_expiry_from_seeded_token() {
+        let tmp = TempDir::new().unwrap();
+        let storage = OAuthStorage::at_root(tmp.path().join("oauth")).unwrap();
+        let exp = far_future();
+        storage
+            .store(
+                PROVIDER,
+                &token(&jwt_with_plan("acct_s", "pro"), Some("rt"), Some(exp)),
+            )
+            .unwrap();
+
+        let status = login_status(&storage).unwrap().expect("signed in");
+        assert!(status.signed_in);
+        assert_eq!(status.plan.as_deref(), Some("pro"));
+        assert_eq!(status.expires_at_unix_secs, Some(exp));
+    }
+
+    #[test]
+    fn login_status_falls_back_to_jwt_exp_when_field_absent() {
+        // No stored `expires_at_unix_secs`, but the JWT carries a top-level
+        // `exp`. The snapshot must surface the JWT expiry rather than None.
+        let tmp = TempDir::new().unwrap();
+        let storage = OAuthStorage::at_root(tmp.path().join("oauth")).unwrap();
+        let jwt = jwt_with_account_and_exp("acct_j", 1_900_000_000);
+        storage
+            .store(PROVIDER, &token(&jwt, Some("rt"), None))
+            .unwrap();
+
+        let status = login_status(&storage).unwrap().expect("signed in");
+        assert_eq!(status.expires_at_unix_secs, Some(1_900_000_000));
+        // No plan claim in this fixture → None, but still signed in.
+        assert_eq!(status.plan, None);
+        assert!(status.signed_in);
     }
 
     // ── Device-code flow: usercode + poll JSON parsing ───────────────

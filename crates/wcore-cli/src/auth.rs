@@ -457,12 +457,13 @@ async fn status_cmd() -> Result<()> {
 
 /// Render the signed-in status line from a token bundle. Split out so the
 /// claim-decode + expiry formatting is unit-testable without a token store.
+/// The plan/expiry decode is delegated to
+/// [`chatgpt::ChatGptLoginStatus::from_tokens`] so this renderer and the
+/// `/provider` precheck + `/config` status row all read the same source.
 fn print_status_line(tokens: &OAuthTokens) {
-    let plan = chatgpt::decode_codex_claims(&tokens.access_token)
-        .ok()
-        .and_then(|c| c.plan_type)
-        .unwrap_or_else(|| "unknown".to_string());
-    let expiry = match tokens.expires_at_unix_secs {
+    let status = chatgpt::ChatGptLoginStatus::from_tokens(tokens);
+    let plan = status.plan.unwrap_or_else(|| "unknown".to_string());
+    let expiry = match status.expires_at_unix_secs {
         Some(exp) => {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

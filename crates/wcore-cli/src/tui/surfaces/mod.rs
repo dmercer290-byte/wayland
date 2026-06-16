@@ -552,6 +552,17 @@ impl Router {
     /// binding. Returns the user-facing confirmation (or a "skipped" line when
     /// the resolve failed, e.g. the provider has no configured API key).
     fn apply_provider_swap(&mut self, app: &mut App, name: &str) -> String {
+        // Precheck: an OAuth-backed provider needs a stored login before a swap
+        // can succeed — building it without one yields a provider that errors
+        // on the first turn. Refuse the swap (leaving the engine untouched)
+        // with an actionable hint when not signed in. Non-OAuth providers
+        // return `None` here and fall through to the normal swap.
+        if oauth_provider_signed_in(name) == Some(false) {
+            return format!(
+                "Not signed in to ChatGPT. Run `wayland-core auth login chatgpt` \
+                 first, then retry /provider {name}."
+            );
+        }
         // Drive the live swap first and capture the OWNED outcome, so the
         // `&self` borrow of the engine ends before the `self`/`app` mutations
         // below (NLL would otherwise see the engine borrow span the writes).
@@ -2418,6 +2429,35 @@ fn provider_is_known(name: &str) -> bool {
     wcore_types::model_aliases::known_providers().contains(&name)
 }
 
+/// Providers whose credentials come from an OAuth login (a stored token), not
+/// an API key. Switching to one before the user has run `auth login` builds a
+/// provider that errors on the first turn, so the `/provider` swap prechecks
+/// login status for these. Extensible: a future `xai-oauth` adds one entry.
+/// `name` is already lowercased by the caller.
+fn provider_is_oauth(name: &str) -> bool {
+    matches!(name, "openai-chatgpt" | "chatgpt")
+}
+
+/// For an OAuth provider, report whether a stored login exists (sync, no
+/// network/refresh). Returns `None` for non-OAuth providers (no precheck
+/// applies) and `Some(bool)` for OAuth providers (`true` = signed in). Reads
+/// the same stored token the provider's bearer source would, via the
+/// single-source [`wcore_agent::oauth::chatgpt_login_status`] helper.
+fn oauth_provider_signed_in(name: &str) -> Option<bool> {
+    if !provider_is_oauth(name) {
+        return None;
+    }
+    // Today every OAuth provider is ChatGPT-backed; a future provider routes
+    // on `name` here. A storage open/read error is treated as "not signed in"
+    // — the swap is refused rather than risking a first-turn auth failure.
+    let signed_in = wcore_agent::oauth::OAuthStorage::from_home()
+        .ok()
+        .and_then(|s| wcore_agent::oauth::chatgpt_login_status(&s).ok().flatten())
+        .map(|status| status.signed_in)
+        .unwrap_or(false);
+    Some(signed_in)
+}
+
 fn render_provider(active: &str, arg: Option<&str>) -> String {
     use wcore_types::model_aliases::known_providers;
     let known = known_providers();
@@ -4280,6 +4320,46 @@ mod tests {
                 .contains("Unknown provider"),
             "an unknown provider must list the known set, not attempt a swap"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn provider_swap_refuses_chatgpt_when_not_signed_in() {
+        // FIX 2: switching to the OAuth-backed `openai-chatgpt` provider with no
+        // stored login must be REFUSED (not swapped) with an actionable hint —
+        // otherwise the rebind builds a provider that errors on the first turn.
+        // HOME is pointed at an empty tempdir so `chatgpt_login_status` reads no
+        // token (deterministically "not signed in") regardless of the real home.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let saved = std::env::var_os("HOME");
+        // SAFETY: serial test; HOME reverted before exit.
+        unsafe { std::env::set_var("HOME", tmp.path()) };
+
+        let mut app = App::new();
+        app.config.provider = "anthropic".into();
+        let mut router = router_with_inventory(&app, vec![], None);
+        router.apply(
+            SurfaceAction::Command("/provider openai-chatgpt".into()),
+            &mut app,
+        );
+        let last = app.session.turns.last().unwrap().text();
+
+        match saved {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        assert!(
+            last.contains("Not signed in to ChatGPT"),
+            "an OAuth provider with no login must be refused, not swapped: {last}"
+        );
+        assert!(
+            last.contains("auth login chatgpt"),
+            "the refusal must point at the login command: {last}"
+        );
+        // The provider must NOT have been swapped.
+        assert_eq!(app.config.provider, "anthropic");
     }
 
     #[test]
