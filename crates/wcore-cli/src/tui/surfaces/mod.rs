@@ -1995,6 +1995,26 @@ impl Router {
                                 let _ = self
                                     .apply(SurfaceAction::OpenOverlay(SurfaceId::ModelPicker), app);
                             }
+                            // `/model refresh` — force a live re-fetch of every
+                            // connected provider's model list, bypassing the 24h
+                            // TTL. Fire-and-forget (write-through cache): reopen
+                            // `/model` once it finishes to see the fresh lists.
+                            (Some(sub), None) if sub.eq_ignore_ascii_case("refresh") => {
+                                push_system(
+                                    app,
+                                    "Refreshing model lists for connected providers… reopen /model in a moment."
+                                        .to_string(),
+                                );
+                                if tokio::runtime::Handle::try_current().is_ok() {
+                                    tokio::spawn(async {
+                                        if let Ok(base) = wcore_config::config::Config::resolve(
+                                            &wcore_config::config::CliArgs::default(),
+                                        ) {
+                                            wcore_providers::model_catalog::refresh_connected_force(&base).await;
+                                        }
+                                    });
+                                }
+                            }
                             // Two-arg `/model <provider> <role>` — the cross-
                             // provider form the model picker emits. Swap the
                             // provider FIRST through `apply_provider_swap` (which

@@ -44,7 +44,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use wcore_providers::model_catalog::{DEFAULT_TTL, load_cached};
+use wcore_providers::model_catalog::{DEFAULT_TTL, ModelSource, cache_freshness, load_cached_meta};
 use wcore_types::model_aliases::{known_providers, models_for_provider};
 
 use crate::tui::app::App;
@@ -73,8 +73,12 @@ fn centered_rect(area: Rect) -> Rect {
 /// One renderable line in the model picker — a provider heading or a
 /// selectable model row. Only `Model` rows are selectable.
 enum ModelRow {
-    /// A provider section heading (e.g. `anthropic`). Not selectable.
-    Heading(&'static str),
+    /// A provider section heading (e.g. `anthropic · synced 2h ago`). Not
+    /// selectable. `status` is the freshness/source label.
+    Heading {
+        provider: &'static str,
+        status: String,
+    },
     /// A selectable model row: `(provider, role, resolved_id)`.
     ///
     /// The fields are owned `String`s (not `&'static str`) because live cache
@@ -107,7 +111,7 @@ impl ModelPickerSurface {
     /// Build the picker from the static catalog. The selection lands on the
     /// active model when it is present, else the first model row.
     pub fn new(active_provider: &str, active_model: &str) -> Self {
-        let rows = Self::build_rows();
+        let rows = Self::build_rows(active_provider);
         let mut surface = Self { rows, selected: 0 };
         surface.selected = surface
             .index_of_active(active_provider, active_model)
@@ -120,24 +124,39 @@ impl ModelPickerSurface {
     /// row list, in the catalog's display order.
     ///
     /// Cache-first: a provider with a fresh live snapshot
-    /// ([`load_cached`] within [`DEFAULT_TTL`]) renders those live model ids;
-    /// a provider with no fresh cache falls back to its static alias catalog
-    /// ([`models_for_provider`]) so the picker is never empty. The two sources
-    /// are never mixed for one provider — a fresh cache fully replaces the
-    /// alias rows for that provider.
-    fn build_rows() -> Vec<ModelRow> {
+    /// ([`load_cached_meta`] within [`DEFAULT_TTL`]) renders those live model
+    /// ids; a provider with no fresh cache falls back to its static alias
+    /// catalog ([`models_for_provider`]) so the picker is never empty. The two
+    /// sources are never mixed for one provider — a fresh cache fully replaces
+    /// the alias rows for that provider.
+    ///
+    /// Connection-aware: only providers the user can actually use are listed,
+    /// PLUS the active provider itself (so you can always re-pick a model on
+    /// the one you're already on, even mid-setup). Each heading carries a
+    /// freshness label ([`heading_status`]).
+    fn build_rows(active_provider: &str) -> Vec<ModelRow> {
         let mut rows = Vec::new();
-        for provider in known_providers() {
-            let model_rows = match load_cached(provider, DEFAULT_TTL) {
+        for &provider in known_providers() {
+            // Connection-aware: list only providers the user can actually use
+            // (resolved key / ambient cloud creds / OAuth login), PLUS the
+            // active provider itself — you can always re-pick a model on the
+            // one you're already on, even mid-setup.
+            let connected =
+                super::provider_connection_status(provider) == super::ProviderConnection::Connected;
+            if !connected && provider != active_provider {
+                continue;
+            }
+            let model_rows = match load_cached_meta(provider, DEFAULT_TTL) {
                 // Fresh live cache: each entry's id is both the command token
                 // (resolve_model_choice accepts a literal id) and the resolved
                 // id. Skip an empty snapshot so we fall back to the alias list.
-                Some(cached) if !cached.is_empty() => cached
-                    .into_iter()
+                Some(meta) if !meta.models.is_empty() => meta
+                    .models
+                    .iter()
                     .map(|m| ModelRow::Model {
                         provider,
                         role: m.id.clone(),
-                        resolved: m.id,
+                        resolved: m.id.clone(),
                     })
                     .collect::<Vec<_>>(),
                 // No fresh cache (missing/stale/empty): the static alias rows.
@@ -156,7 +175,10 @@ impl ModelPickerSurface {
             if model_rows.is_empty() {
                 continue;
             }
-            rows.push(ModelRow::Heading(provider));
+            rows.push(ModelRow::Heading {
+                provider,
+                status: heading_status(provider),
+            });
             rows.extend(model_rows);
         }
         rows
@@ -232,6 +254,24 @@ impl ModelPickerSurface {
     }
 }
 
+/// Freshness/source label for a provider's `/model` section heading:
+/// "synced Nm/Nh ago" for a live snapshot, "built-in" for the static catalog.
+fn heading_status(provider: &str) -> String {
+    match cache_freshness(provider, DEFAULT_TTL) {
+        Some((ModelSource::Live, secs)) => {
+            let mins = secs / 60;
+            if mins < 1 {
+                "synced just now".to_string()
+            } else if mins < 60 {
+                format!("synced {mins}m ago")
+            } else {
+                format!("synced {}h ago", mins / 60)
+            }
+        }
+        _ => "built-in".to_string(),
+    }
+}
+
 impl Surface for ModelPickerSurface {
     fn id(&self) -> SurfaceId {
         SurfaceId::ModelPicker
@@ -270,7 +310,9 @@ impl Surface for ModelPickerSurface {
             self.rows.iter().enumerate().map(|(i, row)| {
                 let selected = i == self.selected;
                 match row {
-                    ModelRow::Heading(p) => RowView::Heading((*p).to_string()),
+                    ModelRow::Heading { provider, status } => {
+                        RowView::Heading(format!("{provider} · {status}"))
+                    }
                     ModelRow::Model {
                         provider,
                         role,
@@ -694,7 +736,7 @@ mod tests {
             .iter()
             .filter_map(|r| match r {
                 ModelRow::Model { provider, role, .. } => Some((*provider, role.clone())),
-                ModelRow::Heading(_) => None,
+                ModelRow::Heading { .. } => None,
             })
             .collect()
     }
@@ -704,39 +746,66 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn model_rows_are_grouped_by_provider_with_headings() {
-        // Empty cache → the static alias catalog is the source of truth.
+        // Empty cache → the static alias catalog is the source of truth. The
+        // picker is connection-aware, so list only connected providers (PLUS
+        // the active one); make anthropic + openai connected via their API
+        // keys so the cross-provider assertions below have rows to find.
         let _home = ModelHomeGuard::new();
+        // SAFETY: serial test; keys cleared before return.
+        unsafe {
+            std::env::set_var("ANTHROPIC_API_KEY", "sk-test");
+            std::env::set_var("OPENAI_API_KEY", "sk-test");
+        }
         let p = ModelPickerSurface::new("anthropic", "");
-        // Every known provider with a catalog yields a heading followed by
-        // its models, and every model row sits under its provider heading.
+        // Every listed provider yields a heading followed by its models, and
+        // every model row sits under its provider heading.
         let mut current: Option<&str> = None;
         let mut headings = Vec::new();
         for row in &p.rows {
             match row {
-                ModelRow::Heading(g) => {
-                    current = Some(g);
-                    headings.push(*g);
+                ModelRow::Heading { provider, .. } => {
+                    current = Some(provider);
+                    headings.push(*provider);
                 }
                 ModelRow::Model { provider, .. } => {
                     assert_eq!(Some(*provider), current, "model under wrong heading");
                 }
             }
         }
-        // The grouping covers the catalog providers in known order.
+        // The grouping covers the listed (connected/active) catalog providers
+        // in known order.
         let expected: Vec<&str> = known_providers()
             .iter()
             .filter(|p| !models_for_provider(p).is_empty())
+            .filter(|p| {
+                **p == "anthropic"
+                    || super::super::provider_connection_status(p)
+                        == super::super::ProviderConnection::Connected
+            })
             .copied()
             .collect();
         assert_eq!(headings, expected);
-        // At least anthropic:opus and openai-chatgpt:5.5 are present.
+        // anthropic:opus is present (anthropic is keyed above). A
+        // cross-provider row (openai-chatgpt:5.5) is only listed when that
+        // provider is connected — its OAuth status depends on the machine's
+        // `~/.wayland/oauth/chatgpt.json` (read from $HOME, NOT WAYLAND_HOME, so
+        // ModelHomeGuard can't sandbox it). Assert it exactly when connected.
         let pairs = model_rows(&p);
         assert!(pairs.iter().any(|(p, r)| *p == "anthropic" && r == "opus"));
-        assert!(
+        let chatgpt_connected = super::super::provider_connection_status("openai-chatgpt")
+            == super::super::ProviderConnection::Connected;
+        assert_eq!(
+            chatgpt_connected,
             pairs
                 .iter()
-                .any(|(p, r)| *p == "openai-chatgpt" && r == "5.5")
+                .any(|(p, r)| *p == "openai-chatgpt" && r == "5.5"),
+            "openai-chatgpt rows appear iff the provider is connected"
         );
+        // SAFETY: serial test; restore the cleared env.
+        unsafe {
+            std::env::remove_var("ANTHROPIC_API_KEY");
+            std::env::remove_var("OPENAI_API_KEY");
+        }
     }
 
     #[test]
@@ -779,6 +848,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn enter_on_different_provider_emits_qualified_command() {
+        // Empty cache → the static alias rows are deterministic. Target
+        // `bedrock` (ambient cloud → always Connected, so the connection-aware
+        // filter always lists it) for a stable cross-provider row regardless of
+        // the machine's API keys / OAuth login.
         let _home = ModelHomeGuard::new();
         // Active provider differs from the selected model's provider → the
         // two-arg `/model <provider> <role>` form so the dispatch routes the
@@ -786,17 +859,17 @@ mod tests {
         let mut app = App::new();
         app.config.provider = "anthropic".into();
         app.config.model = "opus".into();
-        // Build the picker, then point the selection at an openai-chatgpt row.
+        // Build the picker, then point the selection at a bedrock row.
         let mut p = ModelPickerSurface::new("anthropic", "opus");
         let target = p
             .rows
             .iter()
-            .position(|r| matches!(r, ModelRow::Model { provider, role, .. } if *provider == "openai-chatgpt" && *role == "5.5"))
-            .expect("openai-chatgpt:5.5 row must exist");
+            .position(|r| matches!(r, ModelRow::Model { provider, role, .. } if *provider == "bedrock" && *role == "sonnet"))
+            .expect("bedrock:sonnet row must exist");
         p.selected = target;
         match p.handle_key(key(KeyCode::Enter), &mut app) {
             SurfaceAction::Command(line) => {
-                assert_eq!(line, "/model openai-chatgpt 5.5");
+                assert_eq!(line, "/model bedrock sonnet");
             }
             other => panic!("expected a qualified /model command, got {other:?}"),
         }

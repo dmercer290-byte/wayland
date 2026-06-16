@@ -30,15 +30,39 @@ use crate::{LlmProvider, ModelInfo, alias_models, create_native_provider};
 /// `/model` picker snappy without serving stale catalogs for long.
 pub const DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// Per-provider wall-clock cap for a single live model fetch during a warm.
+/// Model-list fetches are quick (<1s) in the normal case; this only bites a
+/// provider whose endpoint hangs (e.g. a blocked egress route), so it is
+/// abandoned rather than stalling the concurrent warm for the others.
+const PROVIDER_REFRESH_TIMEOUT: Duration = Duration::from_secs(8);
+
 /// Rollback env var. When set to `off` (case-insensitive), live model
 /// discovery is disabled and callers should fall back to the static alias
 /// catalog without touching the network or this cache.
 const DISCOVERY_ENV: &str = "WAYLAND_MODEL_DISCOVERY";
 
+/// Where a cached model list came from: a live provider `/v1/models` fetch, or
+/// the static built-in alias catalog (for providers with no live endpoint, or
+/// as the floor when a live fetch yields nothing). Drives the picker's
+/// "synced Nh ago" vs "built-in" heading label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSource {
+    /// Fetched live from the provider's model-list endpoint.
+    #[default]
+    Live,
+    /// The static built-in alias catalog (no live endpoint / live floor).
+    BuiltIn,
+}
+
 /// On-disk snapshot of a provider's model list with the time it was fetched.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedModels {
     pub fetched_at: DateTime<Utc>,
+    /// Provenance of `models` — defaults to `Live` for back-compat with cache
+    /// files written before this field existed.
+    #[serde(default)]
+    pub source: ModelSource,
     pub models: Vec<ModelInfo>,
 }
 
@@ -69,10 +93,9 @@ pub fn cache_path(provider: &str) -> PathBuf {
         .join(format!("{safe}.json"))
 }
 
-/// Load `provider`'s cached model list if the snapshot exists and is within
-/// `ttl`. Returns `None` for a missing, stale, or corrupt cache — never an
-/// error, so the live-fetch path can treat a cache miss uniformly.
-pub fn load_cached(provider: &str, ttl: Duration) -> Option<Vec<ModelInfo>> {
+/// Load `provider`'s cached snapshot (models + metadata) if present and within
+/// `ttl`. `None` for a missing, stale, or corrupt cache — never an error.
+pub fn load_cached_meta(provider: &str, ttl: Duration) -> Option<CachedModels> {
     let path = cache_path(provider);
     if !path.exists() {
         return None;
@@ -83,15 +106,40 @@ pub fn load_cached(provider: &str, ttl: Duration) -> Option<Vec<ModelInfo>> {
     if age.num_seconds().unsigned_abs() > ttl.as_secs() {
         return None;
     }
-    Some(cached.models)
+    Some(cached)
 }
 
-/// Snapshot `models` for `provider` to disk, stamped with the current time.
-/// Creates the cache directory tree if needed.
-pub fn save(provider: &str, models: &[ModelInfo]) -> std::io::Result<()> {
+/// Load just the model list for `provider` (see [`load_cached_meta`]).
+pub fn load_cached(provider: &str, ttl: Duration) -> Option<Vec<ModelInfo>> {
+    load_cached_meta(provider, ttl).map(|c| c.models)
+}
+
+/// Source + age-in-seconds of `provider`'s fresh, non-empty snapshot, for the
+/// picker's section-heading label. `None` when there is no fresh snapshot (the
+/// picker then shows the static alias list and labels it "built-in").
+pub fn cache_freshness(provider: &str, ttl: Duration) -> Option<(ModelSource, i64)> {
+    let meta = load_cached_meta(provider, ttl)?;
+    if meta.models.is_empty() {
+        return None;
+    }
+    let age = Utc::now()
+        .signed_duration_since(meta.fetched_at)
+        .num_seconds()
+        .max(0);
+    Some((meta.source, age))
+}
+
+/// Snapshot `models` for `provider` to disk, stamped with the current time and
+/// the given source. Creates the cache directory tree if needed.
+pub fn save_with_source(
+    provider: &str,
+    models: &[ModelInfo],
+    source: ModelSource,
+) -> std::io::Result<()> {
     let path = cache_path(provider);
     let cached = CachedModels {
         fetched_at: Utc::now(),
+        source,
         models: models.to_vec(),
     };
     let json = serde_json::to_string_pretty(&cached)
@@ -100,6 +148,11 @@ pub fn save(provider: &str, models: &[ModelInfo]) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&path, json)
+}
+
+/// Snapshot a live-fetched `models` list (source = [`ModelSource::Live`]).
+pub fn save(provider: &str, models: &[ModelInfo]) -> std::io::Result<()> {
+    save_with_source(provider, models, ModelSource::Live)
 }
 
 /// Refresh the on-disk model cache for every connected provider, fetching a
@@ -132,9 +185,51 @@ pub async fn refresh_connected(base: &Config) {
     if !discovery_enabled() {
         return;
     }
-    for provider in connected_providers() {
-        refresh_one(base, provider, create_native_provider).await;
+    // Concurrent + individually time-bounded. A sequential loop stalls entirely
+    // if the first provider's `list_models` hangs (e.g. a blocked egress route
+    // that drops packets without a RST) — so a single slow provider would
+    // starve the warm for everyone after it. Run each provider concurrently and
+    // cap each at `PROVIDER_REFRESH_TIMEOUT`; a hung one is abandoned without
+    // blocking the rest. Each writes a distinct cache file, so there is no
+    // shared mutable state across the concurrent refreshes.
+    let tasks = connected_providers()
+        .into_iter()
+        .map(|provider| async move {
+            let _ = tokio::time::timeout(
+                PROVIDER_REFRESH_TIMEOUT,
+                refresh_one(base, provider, create_native_provider),
+            )
+            .await;
+        });
+    futures::future::join_all(tasks).await;
+}
+
+/// Best-effort delete of `provider`'s cache file (ignores a missing file).
+pub fn clear_cache(provider: &str) {
+    let _ = std::fs::remove_file(cache_path(provider));
+}
+
+/// Force a full re-fetch of every connected provider's model list, bypassing
+/// the staleness skip: each connected provider's cache is cleared, then
+/// `refresh_one` re-fetches it. Drives the `/model refresh` command.
+pub async fn refresh_connected_force(base: &Config) {
+    if !discovery_enabled() {
+        return;
     }
+    // Concurrent + time-bounded, same rationale as `refresh_connected` (one
+    // hung provider must not stall the rest). Clear each cache first so the
+    // staleness skip in `refresh_one` can't short-circuit the re-fetch.
+    let tasks = connected_providers()
+        .into_iter()
+        .map(|provider| async move {
+            clear_cache(provider_type_slug(provider));
+            let _ = tokio::time::timeout(
+                PROVIDER_REFRESH_TIMEOUT,
+                refresh_one(base, provider, create_native_provider),
+            )
+            .await;
+        });
+    futures::future::join_all(tasks).await;
 }
 
 /// Refresh a single `provider`'s cache, building the live provider via `build`.
@@ -158,7 +253,7 @@ where
     // `create_native_provider` (it panics — constructed in bootstrap). Snapshot
     // the static alias catalog so the picker still has a warm cache entry.
     if provider == ProviderType::OpenAIChatGpt {
-        let _ = save(slug, &alias_models(slug));
+        let _ = save_with_source(slug, &alias_models(slug), ModelSource::BuiltIn);
         return;
     }
 
@@ -230,6 +325,15 @@ mod tests {
         save("openai", &models).unwrap();
         let loaded = load_cached("openai", DEFAULT_TTL).expect("fresh cache present");
         assert_eq!(loaded, models);
+    }
+
+    #[test]
+    #[serial]
+    fn save_with_source_tags_built_in() {
+        let _guard = HomeGuard::new();
+        save_with_source("vertex", &sample_models(), ModelSource::BuiltIn).unwrap();
+        let meta = load_cached_meta("vertex", DEFAULT_TTL).expect("fresh cache present");
+        assert_eq!(meta.source, ModelSource::BuiltIn);
     }
 
     #[test]
