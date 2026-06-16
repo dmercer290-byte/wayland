@@ -19,13 +19,21 @@
 //! [`PasteModal::start_detecting`]; [`PasteModal::poll`] (called each tick)
 //! pulls the [`DetectionResult`] in without ever blocking the render loop.
 
+use ratatui::Frame;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent};
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::Line;
+use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tokio::sync::oneshot;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
-use wcore_providers::fingerprint::CredentialKind;
-use wcore_providers::paste_detect::DetectionResult;
+use super::{Surface, SurfaceAction, SurfaceId};
+use crate::tui::app::App;
+use crate::tui::theme::Theme;
+use wcore_providers::fingerprint::{CredentialKind, fingerprint_key};
+use wcore_providers::paste_detect::{DetectionResult, detect_paste};
 
 /// What the host (the `Surface`/router) should do after a key press. Keeps the
 /// modal ignorant of `App`, async runtimes, and storage.
@@ -246,7 +254,10 @@ impl PasteModal {
             }
             PasteState::Guided { kind, provider } => {
                 let what = guided_hint(*kind, provider.as_deref());
-                vec![what, "Press [Esc] to set it up, or paste a different key".to_string()]
+                vec![
+                    what,
+                    "Press [Esc] to set it up, or paste a different key".to_string(),
+                ]
             }
             PasteState::Unresolved {
                 best_guess,
@@ -281,6 +292,211 @@ fn guided_hint(kind: CredentialKind, provider: Option<&str>) -> String {
             Some(p) => format!("{p} needs a bit more to finish setup"),
             None => "This credential needs a bit more to finish setup".to_string(),
         },
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Surface — the thin TUI wrapper over `PasteModal` (S4b).
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The `/connect` overlay surface: an arrow-key-free modal that hosts a
+/// [`PasteModal`], spawns the async `detect_paste` probe, and — on a connected
+/// provider the user accepts — writes the validated key to the credentials
+/// store, makes it the default, and triggers a live engine rebind.
+///
+/// All rendered text comes from the modal's view-model
+/// ([`PasteModal::reveal_lines`] / [`PasteModal::ladder_lines`]); this struct
+/// only owns the spinner tick and the host-side effects the pure modal cannot
+/// perform (async spawn, storage write, rebind signal).
+pub(crate) struct PasteDetectSurface {
+    modal: PasteModal,
+    /// Drives the detection-ladder spinner; advanced once per `tick`.
+    tick: usize,
+}
+
+impl PasteDetectSurface {
+    pub(crate) fn new() -> Self {
+        Self {
+            modal: PasteModal::new(),
+            tick: 0,
+        }
+    }
+
+    /// Persist a validated, accepted credential and request a live rebind.
+    ///
+    /// Returns a human-readable status line for the transcript. The pasted
+    /// value is re-normalized through the fingerprinter so the bytes written
+    /// are exactly the bytes that authenticated (an `export NAME=…` paste is
+    /// stripped to the bare key), and the key is written under the same
+    /// credentials-store slot [`resolve_api_key`](wcore_config) reads — so the
+    /// next rebind resolves it without a restart. On any failure the engine is
+    /// left untouched (no rebind requested).
+    fn save_credential(&self, app: &mut App, slug: &str) -> String {
+        use wcore_config::config::{
+            ProviderType, default_model_for_slug, patch_global_config, provider_type_from_slug,
+            store_provider_api_key,
+        };
+
+        let Some(provider) = provider_type_from_slug(slug) else {
+            return format!("Couldn't map provider \"{slug}\" — nothing saved.");
+        };
+        // Bedrock/Vertex/ChatGPT never reach a Connected state via paste, but
+        // guard anyway: those authenticate out-of-band and have no key slot.
+        if matches!(
+            provider,
+            ProviderType::Bedrock | ProviderType::Vertex | ProviderType::OpenAIChatGpt
+        ) {
+            return format!("{slug} authenticates out-of-band; nothing to store.");
+        }
+
+        let secret = fingerprint_key(self.modal.value()).normalized;
+        if let Err(e) = store_provider_api_key(provider, &secret) {
+            tracing::warn!(target: "wcore_cli::tui::paste_detect", "credential save failed: {e:#}");
+            return format!("Couldn't save the key: {e}");
+        }
+
+        // Make the freshly-connected provider the default so the next prompt
+        // runs against it. Non-destructive: only the `[default]` keys change.
+        let model = default_model_for_slug(slug);
+        let persist = patch_global_config(|f| {
+            f.default.provider = slug.to_string();
+            if !model.is_empty() {
+                f.default.model = Some(model.to_string());
+            }
+        });
+        if let Err(e) = persist {
+            tracing::warn!(target: "wcore_cli::tui::paste_detect", "default-provider write failed: {e:#}");
+            return format!("Key saved, but couldn't set the default: {e}");
+        }
+
+        // The router consumes this on the next tick and rebinds the live
+        // engine, which re-resolves the config (new default + stored key).
+        app.rebind_request = crate::tui::app::RebindRequest::Credential;
+        format!("Connected {slug} — it's now your default. Applying to this session…")
+    }
+
+    /// The lines to draw for the current state: an animated ladder while
+    /// detecting, the masked input while editing, otherwise the settled reveal.
+    fn body_lines(&self) -> Vec<String> {
+        match self.modal.state() {
+            PasteState::Detecting => self.modal.ladder_lines(self.tick),
+            PasteState::Editing => {
+                let mut lines = self.modal.reveal_lines();
+                let echo = self.modal.masked_input();
+                lines.push(String::new());
+                lines.push(format!("  ▸ {echo}"));
+                lines
+            }
+            _ => self.modal.reveal_lines(),
+        }
+    }
+}
+
+impl Surface for PasteDetectSurface {
+    fn id(&self) -> SurfaceId {
+        SurfaceId::PasteDetect
+    }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect, _app: &App, theme: &Theme) {
+        let pane = centered_rect(area, 72, 12);
+        frame.render_widget(Clear, pane);
+        let block = Block::bordered()
+            .title("Connect a provider")
+            .border_style(Style::default().fg(theme.orange))
+            .style(Style::default().bg(theme.surface_elevated).fg(theme.text));
+        let inner = block.inner(pane);
+        frame.render_widget(block, pane);
+        if inner.height == 0 {
+            return;
+        }
+
+        let lines: Vec<Line> = self
+            .body_lines()
+            .into_iter()
+            .map(|s| {
+                // Color by the line's own marker so success/failure read at a
+                // glance; everything else stays in the body text color.
+                let style = if s.starts_with('✓') {
+                    Style::default()
+                        .fg(theme.success)
+                        .add_modifier(Modifier::BOLD)
+                } else if s.starts_with('✗') {
+                    Style::default()
+                        .fg(theme.warning)
+                        .add_modifier(Modifier::BOLD)
+                } else if s.contains("[Enter]") || s.contains("[Esc]") || s.contains("⏎") {
+                    Style::default().fg(theme.text_dim)
+                } else {
+                    Style::default().fg(theme.text)
+                };
+                Line::styled(s, style)
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    }
+
+    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> SurfaceAction {
+        match self.modal.handle_key(key) {
+            PasteModalAction::None => SurfaceAction::None,
+            PasteModalAction::Close => SurfaceAction::CloseOverlay,
+            PasteModalAction::Detect(raw) => {
+                // Spawn the live probe off the render loop; the result lands via
+                // `tick → poll`. Requires a tokio runtime (always present under
+                // the TUI loop). Without one the modal stays in Detecting and
+                // the dropped sender flips it to Unresolved on the next poll.
+                let (tx, rx) = oneshot::channel();
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    tokio::spawn(async move {
+                        let base = wcore_config::config::Config::resolve(
+                            &wcore_config::config::CliArgs::default(),
+                        )
+                        .unwrap_or_default();
+                        let _ = tx.send(detect_paste(&base, &raw).await);
+                    });
+                }
+                self.modal.start_detecting(rx);
+                SurfaceAction::None
+            }
+            PasteModalAction::Save { provider } => {
+                let status = self.save_credential(app, &provider);
+                push_system_line(app, status);
+                SurfaceAction::CloseOverlay
+            }
+        }
+    }
+
+    fn tick(&mut self, _app: &mut App) -> SurfaceAction {
+        self.tick = self.tick.wrapping_add(1);
+        // Drain an in-flight detection result into the modal state. A redraw
+        // happens every frame regardless, so no explicit invalidation needed.
+        self.modal.poll();
+        SurfaceAction::None
+    }
+}
+
+/// Append a one-line System turn so the user sees the outcome of a save without
+/// the modal having to grow a status state. Mirrors the transcript-append shape
+/// used elsewhere in the router (`note_surface_panic`).
+fn push_system_line(app: &mut App, msg: String) {
+    use crate::tui::app::{TurnRole, TurnView};
+    use crate::tui::turn_element::TurnElement;
+    app.session.turns.push(TurnView {
+        role: TurnRole::System,
+        elements: vec![TurnElement::Markdown(msg)],
+    });
+    app.session.trim_history();
+}
+
+/// A centered sub-rect of `area`, clamped to fit. Self-contained so the surface
+/// does not depend on `config.rs`'s private layout helpers.
+fn centered_rect(area: Rect, w: u16, h: u16) -> Rect {
+    let w = w.min(area.width);
+    let h = h.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(w) / 2,
+        y: area.y + area.height.saturating_sub(h) / 2,
+        width: w,
+        height: h,
     }
 }
 
@@ -433,5 +649,116 @@ mod tests {
         assert!(masked.ends_with("1234"));
         assert!(masked.contains('•'));
         assert!(!masked.contains("secret"));
+    }
+
+    // ── Surface (S4b) ───────────────────────────────────────────────────
+
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    /// Render the surface into an 80×24 `TestBackend` and flatten the buffer.
+    fn render_surface(surface: &mut PasteDetectSurface, app: &App) -> String {
+        let theme = Theme::no_color();
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+        terminal
+            .draw(|f| surface.render(f, f.area(), app, &theme))
+            .expect("render paste-detect surface");
+        let buf = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn surface_reports_paste_detect_id() {
+        assert_eq!(PasteDetectSurface::new().id(), SurfaceId::PasteDetect);
+    }
+
+    #[test]
+    fn editing_state_renders_prompt_framed_with_masked_echo() {
+        let app = App::new();
+        let mut surface = PasteDetectSurface::new();
+        type_str(&mut surface.modal, "sk-ant-api03-bodyXY42");
+        let text = render_surface(&mut surface, &app);
+        assert!(text.contains("Connect a provider"), "framed title missing");
+        assert!(text.contains("Paste an API key"), "editing prompt missing");
+        // The echo masks everything but the last four chars: the tail shows so
+        // the user can confirm the paste, the secret body never reaches screen.
+        assert!(text.contains('•'), "masked dots missing from echo");
+        assert!(text.contains("XY42"), "confirmation tail missing");
+        assert!(!text.contains("api03"), "secret body leaked to screen");
+        assert!(
+            !text.contains("sk-ant-api03-bodyXY42"),
+            "raw secret leaked to screen"
+        );
+    }
+
+    #[test]
+    fn connected_state_renders_real_data_and_default_prompt() {
+        let app = App::new();
+        let mut surface = PasteDetectSurface::new();
+        surface.modal.apply_result(DetectionResult::Connected {
+            provider: "anthropic".to_string(),
+            models: vec![
+                ModelInfo::from_id("claude-opus-4-8"),
+                ModelInfo::from_id("claude-haiku-4-5"),
+            ],
+        });
+        let text = render_surface(&mut surface, &app);
+        assert!(
+            text.contains("anthropic connected"),
+            "provider line missing"
+        );
+        assert!(text.contains("2 models"), "live count missing");
+        assert!(text.contains("claude-opus-4-8"), "flagship id missing");
+        assert!(text.contains("default"), "make-default prompt missing");
+    }
+
+    #[test]
+    fn detecting_state_renders_the_ladder() {
+        let app = App::new();
+        let mut surface = PasteDetectSurface::new();
+        let (_tx, rx) = oneshot::channel();
+        surface.modal.start_detecting(rx);
+        let text = render_surface(&mut surface, &app);
+        assert!(text.contains("Detecting provider"), "ladder not rendered");
+    }
+
+    #[test]
+    fn esc_closes_the_overlay() {
+        let mut app = App::new();
+        let mut surface = PasteDetectSurface::new();
+        type_str(&mut surface.modal, "abc");
+        let action = surface.handle_key(key(KeyCode::Esc), &mut app);
+        assert!(matches!(action, SurfaceAction::CloseOverlay));
+    }
+
+    #[test]
+    fn tick_advances_the_spinner_and_drains_a_result() {
+        let mut app = App::new();
+        let mut surface = PasteDetectSurface::new();
+        let (tx, rx) = oneshot::channel();
+        surface.modal.start_detecting(rx);
+        tx.send(DetectionResult::Connected {
+            provider: "groq".to_string(),
+            models: vec![ModelInfo::from_id("llama-3.1-70b")],
+        })
+        .unwrap();
+        let before = surface.tick;
+        surface.tick(&mut app);
+        assert_eq!(
+            surface.tick,
+            before.wrapping_add(1),
+            "spinner did not advance"
+        );
+        assert!(
+            matches!(surface.modal.state(), PasteState::Connected { .. }),
+            "tick did not drain the detection result into the modal"
+        );
     }
 }

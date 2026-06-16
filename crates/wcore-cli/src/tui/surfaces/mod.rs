@@ -46,9 +46,8 @@ mod onboarding;
 // `Surface` wiring (draw, async detect spawn, storage write + rebind, slash
 // command) lands in S4b; until then its items are exercised only by unit tests,
 // so allow dead_code on this staged module.
-#[allow(dead_code)]
-mod paste_detect_modal;
 mod palette;
+mod paste_detect_modal;
 mod plan_review;
 mod plugins;
 mod subagents;
@@ -97,6 +96,10 @@ pub enum SurfaceId {
     /// Arrow-key `/provider` picker overlay. Summoned by bare `/provider`,
     /// dismissed with Esc. Not a tab.
     ProviderPicker,
+    /// S4b — the `/connect` paste-to-detect overlay. Paste a key; it
+    /// fingerprints, validates live, and (on accept) stores + makes default.
+    /// Summoned by `/connect`, dismissed with Esc. Not a tab.
+    PasteDetect,
 }
 
 impl SurfaceId {
@@ -133,6 +136,7 @@ impl SurfaceId {
             SurfaceId::Workflows => "Workflows",
             SurfaceId::ModelPicker => "Model",
             SurfaceId::ProviderPicker => "Provider",
+            SurfaceId::PasteDetect => "Connect",
         }
     }
 
@@ -1662,6 +1666,12 @@ impl Router {
                     "/config" => {
                         self.switch(app, SurfaceId::Config);
                     }
+                    "/connect" => {
+                        // S4b: the paste-to-detect overlay — paste a key, it
+                        // fingerprints + validates live, then stores it and
+                        // makes the provider default. Dismissed with Esc.
+                        let _ = self.apply(SurfaceAction::OpenOverlay(SurfaceId::PasteDetect), app);
+                    }
                     "/setup" => {
                         // Re-enter the first-run onboarding flow on demand.
                         self.switch(app, SurfaceId::Onboarding);
@@ -2881,6 +2891,7 @@ fn make_surface(id: SurfaceId) -> Box<dyn Surface> {
         // (make_surface has no `App`), so a bare construction is fine here.
         SurfaceId::ModelPicker => Box::new(model_picker::ModelPickerSurface::new("", "")),
         SurfaceId::ProviderPicker => Box::new(model_picker::ProviderPickerSurface::new("")),
+        SurfaceId::PasteDetect => Box::new(paste_detect_modal::PasteDetectSurface::new()),
     }
 }
 

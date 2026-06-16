@@ -1937,10 +1937,15 @@ fn resolve_api_key(
 )]
 pub struct MissingApiKey;
 
-fn lookup_store_api_key(
-    store: &dyn crate::credentials::CredentialsStore,
-    provider: ProviderType,
-) -> Option<String> {
+/// The credentials-store key under which `provider`'s API key is stored, or
+/// `None` for providers that authenticate out-of-band (Bedrock/Vertex via cloud
+/// credentials, ChatGPT Codex via OAuth) and therefore have no store slot.
+///
+/// This is the single source of truth for the mapping: both the read path
+/// ([`lookup_store_api_key`], consumed by [`resolve_api_key`]) and the write
+/// path ([`store_provider_api_key`]) go through it, so a key written here is
+/// guaranteed to be the key resolution later reads back.
+pub fn credentials_store_key(provider: ProviderType) -> Option<String> {
     let key = match provider {
         ProviderType::Anthropic => "providers.anthropic.api_key",
         ProviderType::OpenAI => "providers.openai.api_key",
@@ -1967,7 +1972,56 @@ fn lookup_store_api_key(
         ProviderType::Mistral => "providers.mistral.api_key",
         ProviderType::Cohere => "providers.cohere.api_key",
     };
-    store.get(key).ok().flatten()
+    Some(key.to_string())
+}
+
+fn lookup_store_api_key(
+    store: &dyn crate::credentials::CredentialsStore,
+    provider: ProviderType,
+) -> Option<String> {
+    let key = credentials_store_key(provider)?;
+    store.get(&key).ok().flatten()
+}
+
+/// Persist a validated API key for `provider` into the configured credentials
+/// store — the same store [`resolve_api_key`] reads from — so a subsequent
+/// [`Config::resolve`] (e.g. a live engine rebind) picks it up without a
+/// restart and without mutating process environment variables.
+///
+/// The storage backend (keyring / plaintext-0600 / encrypted-file) is read
+/// from the on-disk `[storage.credentials]` block, exactly as resolution will
+/// read it. Returns an error for providers with no store slot
+/// ([`credentials_store_key`] returns `None`) or on a store write failure. The
+/// value is never logged.
+pub fn store_provider_api_key(provider: ProviderType, api_key: &str) -> anyhow::Result<()> {
+    let Some(store_key) = credentials_store_key(provider) else {
+        anyhow::bail!(
+            "provider {} authenticates out-of-band and has no credentials-store API key",
+            provider_type_slug(provider)
+        );
+    };
+
+    // Resolve the SAME storage backend resolution will later read from: the
+    // on-disk `[storage.credentials]` block (defaulted when the file or the
+    // block is absent).
+    let storage = load_global_config_file()
+        .map(|f| f.storage.credentials)
+        .unwrap_or_default();
+
+    let store = crate::credentials::open_store(&storage, &credentials_storage_path())?;
+    store
+        .put(&store_key, api_key)
+        .map_err(|e| anyhow::anyhow!("writing {store_key} to credentials store: {e}"))?;
+    Ok(())
+}
+
+/// Load and parse the global `config.toml` into a [`ConfigFile`], or `None`
+/// when the file does not exist. Mirrors the load half of
+/// [`patch_global_config`] without mutating or rewriting the file.
+fn load_global_config_file() -> Option<ConfigFile> {
+    let path = global_config_path();
+    let raw = std::fs::read_to_string(&path).ok()?;
+    toml::from_str(&raw).ok()
 }
 
 // --- App directories ---
@@ -3540,6 +3594,49 @@ mod tests {
         let storage = crate::credentials::CredentialsStorageConfig::default();
         let result = resolve_api_key(None, None, ProviderType::Vertex, &storage).unwrap();
         assert_eq!(result, "");
+    }
+
+    #[test]
+    fn credentials_store_key_maps_bearer_providers_and_excludes_oob() {
+        // Out-of-band auth (cloud creds / OAuth) has no store slot.
+        assert_eq!(credentials_store_key(ProviderType::Bedrock), None);
+        assert_eq!(credentials_store_key(ProviderType::Vertex), None);
+        assert_eq!(credentials_store_key(ProviderType::OpenAIChatGpt), None);
+        // Bearer-key providers map to `providers.<slug>.api_key`, including the
+        // hyphenated slugs that are easy to get wrong by hand.
+        assert_eq!(
+            credentials_store_key(ProviderType::Anthropic).as_deref(),
+            Some("providers.anthropic.api_key")
+        );
+        assert_eq!(
+            credentials_store_key(ProviderType::AzureOpenAI).as_deref(),
+            Some("providers.azure-openai.api_key")
+        );
+        assert_eq!(
+            credentials_store_key(ProviderType::FluxRouter).as_deref(),
+            Some("providers.flux-router.api_key")
+        );
+    }
+
+    #[test]
+    fn stored_key_is_read_back_by_resolution() {
+        // The contract paste-to-detect depends on: a key written under
+        // `credentials_store_key` is the exact key resolution reads back, so a
+        // saved credential resolves live on the next rebind. Exercised through
+        // the real read path (`lookup_store_api_key`) against a plaintext store,
+        // with no process-env mutation.
+        use crate::credentials::CredentialsStore;
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            crate::credentials::PlaintextCredentialsStore::new(dir.path().join("creds.toml"));
+        let write_key = credentials_store_key(ProviderType::Deepseek).unwrap();
+        store.put(&write_key, "sk-deepseek-secret").unwrap();
+
+        let read = lookup_store_api_key(&store, ProviderType::Deepseek);
+        assert_eq!(read.as_deref(), Some("sk-deepseek-secret"));
+
+        // A provider with no slot resolves to nothing from the store.
+        assert_eq!(lookup_store_api_key(&store, ProviderType::Bedrock), None);
     }
 
     // -------------------------------------------------------------------------
