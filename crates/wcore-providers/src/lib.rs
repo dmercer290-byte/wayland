@@ -22,6 +22,7 @@ pub mod key_rotation;
 // These were framework-shaped local-inference adapters shipped as code but
 // never wired to ProviderType arms. Revivable as plugins if needed.
 pub mod mistral;
+pub mod model_catalog;
 pub mod moonshot;
 pub mod nvidia;
 pub mod openai;
@@ -77,7 +78,7 @@ use wcore_types::llm::{LlmEvent, LlmRequest};
 /// `display` is the human-facing label. When a provider has no richer
 /// display name (e.g. OpenAI's `/v1/models` returns only ids) `display`
 /// mirrors `id`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     pub display: String,
