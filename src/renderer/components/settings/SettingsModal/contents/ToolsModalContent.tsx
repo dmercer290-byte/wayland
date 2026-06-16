@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CheckCircle2, ChevronDown, HelpCircle, Plus, RotateCcw } from 'lucide-react';
+import { CheckCircle2, HelpCircle, RotateCcw } from 'lucide-react';
 import {
   ConfigStorage,
   type IConfigStorageRefer,
@@ -13,8 +13,7 @@ import {
 } from '@/common/config/storage';
 import type { SpeechToTextConfig, SpeechToTextProvider } from '@/common/types/speech';
 import type { TextToSpeechConfig, TextToSpeechProvider } from '@/common/types/ttsTypes';
-import { DEFAULT_TTS_CONFIG, normalizeTextToSpeechConfig } from '@/common/types/ttsTypes';
-import { acpConversation, voiceAsset } from '@/common/adapter/ipcBridge';
+import { voiceAsset } from '@/common/adapter/ipcBridge';
 import { isImageModelName } from '@/common/config/imageModels';
 import type { VoiceAsset } from '@/common/types/voiceAsset';
 import {
@@ -23,9 +22,6 @@ import {
   Tooltip,
   Message,
   Button,
-  Dropdown,
-  Menu,
-  Modal,
   Switch,
   Input,
   Slider,
@@ -46,8 +42,6 @@ import classNames from 'classnames';
 import { useNavigate } from 'react-router-dom';
 import { useSettingsViewMode } from '../settingsViewContext';
 import MicrophoneCheck from '@/renderer/pages/settings/VoiceSettings/MicrophoneCheck';
-
-type MessageInstance = ReturnType<typeof Message.useMessage>[0];
 
 const isBuiltinImageGenServer = (server: IMcpServer) => server.builtin === true && server.id === BUILTIN_IMAGE_GEN_ID;
 export const SPEECH_TO_TEXT_CONFIG_CHANGED_EVENT = 'wayland:speech-to-text-config-changed';
