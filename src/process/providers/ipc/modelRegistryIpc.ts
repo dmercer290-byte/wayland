@@ -82,6 +82,7 @@ import { ModelsDevClient } from '../enrichment/ModelsDevClient';
 import type { ModelsDevRegistry } from '../enrichment/modelsDevSchema';
 import { ProviderRepository } from '../storage/ProviderRepository';
 import { runLegacyModelConfigMigration } from '../migration/legacyModelConfigMigration';
+import { runOrphanProviderDedup } from '../migration/orphanProviderDedup';
 import { mirrorConnectOrRekey, mirrorDisconnect } from '../legacyModelConfigBridge';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { isEncryptionAvailable } from '@process/secrets/safeStorage';
@@ -1645,6 +1646,20 @@ function scheduleStartupMigration(): void {
         // The migration is itself defensive - this catch is the belt-and-braces
         // outer guard so a thrown migration cannot crash the main process.
         console.warn('[modelRegistry] Legacy-config migration failed:', error);
+      }
+      // Remove orphaned pre-registry duplicate rows (the "Two Geminis" the
+      // legacy->registry migration leaves behind). Runs after the legacy
+      // migration so any freshly-mirrored bridge rows are visible, and uses
+      // `ProcessConfig` directly - it only edits `model.config`, no creds.
+      try {
+        await runOrphanProviderDedup({
+          get: (key) => ProcessConfig.get(key as never) as Promise<unknown>,
+          set: async (key, value) => {
+            await ProcessConfig.set(key as never, value as never);
+          },
+        });
+      } catch (error) {
+        console.warn('[modelRegistry] Orphan-provider dedup failed:', error);
       }
       let postUpgradeSwept = false;
       try {
