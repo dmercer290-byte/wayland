@@ -12,6 +12,7 @@ pub mod cohere;
 pub mod cooldown;
 pub mod deepseek;
 pub mod failover;
+pub mod fingerprint;
 pub mod fireworks;
 pub mod flux_router;
 pub mod gemini;
