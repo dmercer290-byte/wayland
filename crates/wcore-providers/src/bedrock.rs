@@ -203,10 +203,7 @@ impl BedrockProvider {
         if let Some(base) = &self.endpoint_override {
             return format!("{}/{}", base.trim_end_matches('/'), query);
         }
-        format!(
-            "https://bedrock.{}.amazonaws.com/{}",
-            self.region, query
-        )
+        format!("https://bedrock.{}.amazonaws.com/{}", self.region, query)
     }
 
     fn resolve_credentials(&self) -> Result<Credentials, ProviderError> {

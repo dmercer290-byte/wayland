@@ -345,7 +345,10 @@ mod tests {
         })
         .await;
         let cached = load_cached("openai", DEFAULT_TTL).expect("refresh must write a cache entry");
-        assert_eq!(cached, live, "the live model list must be snapshotted verbatim");
+        assert_eq!(
+            cached, live,
+            "the live model list must be snapshotted verbatim"
+        );
     }
 
     #[tokio::test]
@@ -383,8 +386,8 @@ mod tests {
             panic!("ChatGPT must not be built via the live path");
         })
         .await;
-        let cached =
-            load_cached("openai-chatgpt", DEFAULT_TTL).expect("ChatGPT alias catalog must be cached");
+        let cached = load_cached("openai-chatgpt", DEFAULT_TTL)
+            .expect("ChatGPT alias catalog must be cached");
         assert_eq!(
             cached,
             alias_models("openai-chatgpt"),

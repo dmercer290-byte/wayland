@@ -732,7 +732,11 @@ mod tests {
         // At least anthropic:opus and openai-chatgpt:5.5 are present.
         let pairs = model_rows(&p);
         assert!(pairs.iter().any(|(p, r)| *p == "anthropic" && r == "opus"));
-        assert!(pairs.iter().any(|(p, r)| *p == "openai-chatgpt" && r == "5.5"));
+        assert!(
+            pairs
+                .iter()
+                .any(|(p, r)| *p == "openai-chatgpt" && r == "5.5")
+        );
     }
 
     #[test]
@@ -862,7 +866,9 @@ mod tests {
         assert_eq!(anthropic, vec!["claude-live-1", "claude-live-2"]);
         // …and the static alias role (`opus`) no longer appears for anthropic.
         assert!(
-            !pairs.iter().any(|(prov, r)| *prov == "anthropic" && r == "opus"),
+            !pairs
+                .iter()
+                .any(|(prov, r)| *prov == "anthropic" && r == "opus"),
             "a fresh cache must fully replace the static alias rows"
         );
     }
@@ -875,7 +881,9 @@ mod tests {
         let p = ModelPickerSurface::new("anthropic", "");
         let pairs = model_rows(&p);
         assert!(
-            pairs.iter().any(|(prov, r)| *prov == "anthropic" && r == "opus"),
+            pairs
+                .iter()
+                .any(|(prov, r)| *prov == "anthropic" && r == "opus"),
             "missing cache must fall back to the static alias catalog"
         );
     }
@@ -918,7 +926,9 @@ mod tests {
         let p = ModelPickerSurface::new("anthropic", "");
         let pairs = model_rows(&p);
         assert!(
-            pairs.iter().any(|(prov, r)| *prov == "anthropic" && r == "opus"),
+            pairs
+                .iter()
+                .any(|(prov, r)| *prov == "anthropic" && r == "opus"),
             "an empty snapshot must fall back to the static alias catalog"
         );
     }
