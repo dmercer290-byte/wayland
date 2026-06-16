@@ -715,6 +715,83 @@ describe('modelRegistry IPC - refresh', () => {
     expect(result).toEqual({ ok: false });
     expect(repo.getRegistryProvider('openai')?.state).toBe('error');
   });
+
+  it('rebuilds the chatgpt-subscription STATIC catalog on refresh instead of wiping it', async () => {
+    // Regression: the ChatGPT backend has no `/v1/models`, so the API source
+    // returns nothing. Without the static-catalog short-circuit, a refresh
+    // (manual or the periodic auto-refresh sweep) overwrites the connect-time
+    // catalog with [] and every ChatGPT model vanishes - including on the very
+    // next auto-refresh tick.
+    const { deps, repo, apiListModels } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'chatgpt-subscription',
+      connectedVia: 'ChatGPT subscription',
+      state: 'connected',
+      creds: { key: 'access-token', baseUrl: 'https://chatgpt.com/backend-api' },
+    });
+    // Seed the connect-time static catalog, then make the API source empty
+    // (what the ChatGPT backend really returns for a model listing).
+    repo.replaceRegistryCatalog('chatgpt-subscription', [
+      catalogModel({ id: 'gpt-5.2', providerId: 'chatgpt-subscription' }),
+    ]);
+    apiListModels.mockResolvedValue([]);
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.refresh({ providerId: 'chatgpt-subscription' });
+
+    expect(result).toEqual({ ok: true });
+    const ids = repo.getRegistryCatalog('chatgpt-subscription').map((m) => m.id);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids).toContain('gpt-5.2');
+    // The static set must NOT have been replaced by the empty API listing.
+    expect(apiListModels).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the models.dev slice when an OAuth bearer (xai) lists no models', async () => {
+    // Regression: "Sign in with X" gives a bearer that works for inference but
+    // returns nothing from `/v1/models`, so xai's catalog was persisted empty
+    // and its provider toggle went dead. Synthesize the CURRENT catalog from the
+    // models.dev registry instead (no hardcoded grok ids - this self-updates).
+    const { deps, repo, apiListModels, getRegistry } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'xai',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'oauth-bearer' },
+    });
+    // The live listing returns nothing (the OAuth-bearer limitation)...
+    apiListModels.mockResolvedValue([]);
+    // ...but models.dev tracks the current grok line.
+    getRegistry.mockResolvedValue({ xai: { models: { 'grok-4': {}, 'grok-3': {} } } });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.refresh({ providerId: 'xai' });
+
+    expect(result).toEqual({ ok: true });
+    const ids = repo.getRegistryCatalog('xai').map((m) => m.id).toSorted();
+    expect(ids).toContain('grok-4');
+    expect(ids).toContain('grok-3');
+  });
+
+  it('does NOT use the models.dev fallback when the live listing is non-empty (api key wins)', async () => {
+    // An API-key xai with a working `/v1/models` keeps its real account models;
+    // the fallback must not overwrite them with the broader registry slice.
+    const { deps, repo, apiListModels, getRegistry } = makeFakes();
+    repo.upsertRegistryProvider({
+      providerId: 'xai',
+      connectedVia: 'api-key',
+      state: 'connected',
+      creds: { key: 'real-api-key' },
+    });
+    apiListModels.mockResolvedValue([{ id: 'grok-4-fast', providerId: 'xai' }]);
+    getRegistry.mockResolvedValue({ xai: { models: { 'grok-4': {}, 'grok-3': {} } } });
+    const h = createModelRegistryHandlers(deps);
+
+    const result = await h.refresh({ providerId: 'xai' });
+
+    expect(result).toEqual({ ok: true });
+    expect(repo.getRegistryCatalog('xai').map((m) => m.id)).toEqual(['grok-4-fast']);
+  });
 });
 
 describe('modelRegistry IPC - disconnect', () => {

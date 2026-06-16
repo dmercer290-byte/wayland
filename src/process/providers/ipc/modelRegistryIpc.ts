@@ -47,7 +47,6 @@ import type {
   IModelRegistryCreds,
   IModelRegistryDetectedKey,
   IModelRegistryProviderView,
-  IModelRegistryRefreshState,
   IModelRegistryRefreshSummary,
   IModelRegistryResolveForChatStartResult,
   IModelRegistryTestResult,
@@ -58,7 +57,7 @@ import { isLocalBaseUrl } from '@/common/utils/urlValidation';
 import { autoRegisterOllamaInRepo } from '@process/onboarding/autoRegisterOllama';
 import type { OllamaProbe, OllamaRegistryRepo } from '@process/onboarding/autoRegisterOllama';
 import { getDatabase } from '@process/services/database';
-import type { ConnectError, CuratedModel, ProviderConnState, ProviderId, RawModel } from '../types';
+import type { ConnectError, CuratedModel, ProviderId, RawModel } from '../types';
 import type { CatalogSource } from '../sources/CatalogSource';
 import { ApiProviderSource } from '../sources/ApiProviderSource';
 import { validateProviderBaseUrl } from '../sources/validateBaseUrl';
@@ -376,6 +375,19 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
         return { ok: false, models: 0, sourceErrors: 0 };
       }
 
+      // The ChatGPT subscription has a STATIC catalog - there is no `/v1/models`
+      // on the ChatGPT backend to list. Running it through the API source below
+      // would fetch zero models and overwrite the static catalog with [], so a
+      // refresh (manual or the periodic auto-refresh sweep) silently wipes every
+      // ChatGPT model. Rebuild from the static set instead, exactly as connect
+      // does. (Flux is handled differently: it has a real `/v1/models`, so it
+      // assembles normally and only APPENDS its virtual tier aliases below.)
+      if (providerId === CHATGPT_SUBSCRIPTION_PROVIDER_ID) {
+        const staticModels = buildChatGptSubscriptionCatalog();
+        repo.replaceRegistryCatalog(providerId, staticModels);
+        return { ok: true, models: staticModels.length, sourceErrors: 0 };
+      }
+
       // `refreshAllOnce` fetches the models.dev registry once for the whole
       // sweep and threads it in, so N providers don't each re-fetch (and can't
       // assemble against different registry versions mid-sweep). Single-provider
@@ -386,6 +398,7 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
       const isGoogleAuth = 'useGoogleAuth' in creds && creds.useGoogleAuth === true;
 
       let sources: CatalogSource[];
+      let usedLiveApiSource = false;
       if (CLOUD_PROVIDERS.has(providerId) || isGoogleAuth) {
         // Cloud + google-auth-Gemini - synthesize the catalog from the
         // models.dev registry slice. The OAuth-authenticated SDK reads model
@@ -401,11 +414,30 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
             ? (stored.creds.baseUrl as string)
             : undefined;
         sources = [deps.makeApiSource(providerId, creds.key, customBaseUrl)];
+        usedLiveApiSource = true;
       } else {
         sources = [];
       }
 
-      const { models, sourceErrors } = await assembler.assemble(sources, registry);
+      const { models: liveModels, sourceErrors } = await assembler.assemble(sources, registry);
+      let models = liveModels;
+
+      // models.dev fallback: a live `/v1/models` source that enumerated NOTHING
+      // is the signature of an OAuth/subscription bearer that authenticates for
+      // inference but cannot list models - xAI "Sign in with X" is the case in
+      // point, and it is exactly why google-auth Gemini already routes through
+      // CloudRegistrySource above. Rather than persist an empty catalog (dead
+      // provider, dead toggle), synthesize from the models.dev registry slice.
+      // That keeps the catalog CURRENT with no hardcoded id list - models.dev is
+      // re-fetched on every refresh - and yields [] for providers models.dev
+      // does not track, so a genuinely-empty custom endpoint still stays empty.
+      // API-KEY connections are unaffected: their live listing is non-empty, so
+      // the fallback never runs and the user's real account models win.
+      if (usedLiveApiSource && models.length === 0) {
+        const fallback = await assembler.assemble([new CloudRegistrySource(providerId, registry)], registry);
+        if (fallback.models.length > 0) models = fallback.models;
+      }
+
       const finalModels = providerId === FLUX_PROVIDER_ID ? injectFluxVirtualModels(models) : models;
       repo.replaceRegistryCatalog(providerId, finalModels);
       return { ok: true, models: finalModels.length, sourceErrors };
