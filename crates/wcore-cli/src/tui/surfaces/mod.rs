@@ -1986,9 +1986,12 @@ impl Router {
                         let mut args = line.split_whitespace().skip(1);
                         match (args.next(), args.next()) {
                             // Bare `/model` opens the arrow-key picker overlay
-                            // (static catalog, instant). The old async live-fetch
-                            // listing is gone from the bare path.
+                            // (cache-first, instant). It also kicks a best-effort
+                            // background refresh of the live model cache for
+                            // stale/missing connected providers — write-through,
+                            // so the NEXT open shows the freshly fetched data.
                             (None, _) => {
+                                kick_model_catalog_refresh();
                                 let _ = self
                                     .apply(SurfaceAction::OpenOverlay(SurfaceId::ModelPicker), app);
                             }
@@ -2730,6 +2733,40 @@ fn resolve_model_choice(provider: &str, arg: &str) -> (String, String) {
         return (id.to_string(), arg.to_string());
     }
     (arg.to_string(), arg.to_string())
+}
+
+/// Kick a best-effort background refresh of the live model-list cache for every
+/// connected provider whose snapshot is stale or missing.
+///
+/// Fire-and-forget: the spawned task re-resolves a base `Config` (the same
+/// boot-equivalent `Config::resolve(CliArgs::default())` the engine bootstraps
+/// from) and calls [`wcore_providers::model_catalog::refresh_connected`], which
+/// writes the cache through. v1 semantics are write-through-cache, so the
+/// *current* `/model` open renders whatever is already cached and the *next*
+/// open picks up the freshly fetched data — no live re-render. Every failure
+/// (a config-resolve error, a provider HTTP/auth error, a cache-write error) is
+/// swallowed: `refresh_connected` is internally best-effort and `list_models`
+/// never errors (it floors to the alias catalog), so the worst case leaves the
+/// existing cache untouched. A no-op when `WAYLAND_MODEL_DISCOVERY=off`
+/// (`refresh_connected` checks the flag itself).
+fn kick_model_catalog_refresh() {
+    // Only spawn when a Tokio runtime is actually present. The live TUI always
+    // runs inside one (the dispatch path already drives `engine.index_repomap`
+    // / `engine.compact`, which spawn the same way), but the no-engine render
+    // tests drive `/model` synchronously with no runtime — guard so the bare
+    // `/model` open never panics there.
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    tokio::spawn(async {
+        // Re-resolving here (not on the synchronous open path) keeps the picker
+        // instant. A resolve failure simply skips this round's refresh.
+        if let Ok(base) =
+            wcore_config::config::Config::resolve(&wcore_config::config::CliArgs::default())
+        {
+            wcore_providers::model_catalog::refresh_connected(&base).await;
+        }
+    });
 }
 
 /// Parse a `/mode <arg>` token into a session mode. Accepts the canonical

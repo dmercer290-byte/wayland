@@ -7,13 +7,22 @@
 //! [`PaletteSurface`](super::palette) — there is no `ListState` pattern in
 //! this codebase.
 //!
-//! ## Static catalog, no async
+//! ## Cache-first catalog, no async on the render path
 //!
-//! The model picker is built from the **static** alias catalog
-//! ([`known_providers`] × [`models_for_provider`]) so it opens instantly —
-//! it deliberately does NOT use the async `engine.list_models()` path (which
-//! arrives later as an `Info` turn). The bare `/model <id>` shortcut keeps
-//! using the live fetch.
+//! The model picker is built **cache-first**: for each known provider it reads
+//! the live model list snapshotted by the discovery service
+//! ([`wcore_providers::model_catalog::load_cached`]) when a fresh (within
+//! [`DEFAULT_TTL`]) snapshot exists, and falls back to the **static** alias
+//! catalog ([`models_for_provider`]) otherwise — so the picker is never empty
+//! and still opens instantly (the read is a single small file, no network).
+//!
+//! Opening the overlay also fires a best-effort background refresh
+//! ([`wcore_providers::model_catalog::refresh_connected`]) for stale/missing
+//! connected providers; v1 semantics are write-through-cache, so the *next*
+//! open shows the freshly fetched data (no live re-render). That spawn is
+//! kicked from the `/model` dispatch arm (which holds the engine handle), not
+//! from this surface. The bare `/model <id>` shortcut keeps using the live
+//! fetch.
 //!
 //! ## Selection routes through the existing command dispatch
 //!
@@ -35,6 +44,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use wcore_providers::model_catalog::{DEFAULT_TTL, load_cached};
 use wcore_types::model_aliases::{known_providers, models_for_provider};
 
 use crate::tui::app::App;
@@ -66,13 +76,21 @@ enum ModelRow {
     /// A provider section heading (e.g. `anthropic`). Not selectable.
     Heading(&'static str),
     /// A selectable model row: `(provider, role, resolved_id)`.
+    ///
+    /// The fields are owned `String`s (not `&'static str`) because live cache
+    /// rows carry runtime-fetched model ids. Static alias rows still use the
+    /// catalog's `&'static str` data, just `.to_string()`-ed at build time.
     Model {
+        /// The provider slug — always a known catalog provider, so `&'static`.
         provider: &'static str,
-        /// The human role handle (the part after `provider:` in the short
-        /// form, e.g. `opus`).
-        role: &'static str,
-        /// The resolved model id the request carries.
-        resolved: &'static str,
+        /// The role token the `/model` command carries. For an alias row this
+        /// is the human role handle (the part after `provider:` in the short
+        /// form, e.g. `opus`); for a live cache row it is the model id itself
+        /// (which `resolve_model_choice` accepts as a literal).
+        role: String,
+        /// The resolved model id the request carries / the active-marker
+        /// matches against.
+        resolved: String,
     },
 }
 
@@ -98,24 +116,48 @@ impl ModelPickerSurface {
         surface
     }
 
-    /// Flatten `known_providers() × models_for_provider()` into a
-    /// heading-interleaved row list, in the catalog's display order.
+    /// Flatten every known provider's model list into a heading-interleaved
+    /// row list, in the catalog's display order.
+    ///
+    /// Cache-first: a provider with a fresh live snapshot
+    /// ([`load_cached`] within [`DEFAULT_TTL`]) renders those live model ids;
+    /// a provider with no fresh cache falls back to its static alias catalog
+    /// ([`models_for_provider`]) so the picker is never empty. The two sources
+    /// are never mixed for one provider — a fresh cache fully replaces the
+    /// alias rows for that provider.
     fn build_rows() -> Vec<ModelRow> {
         let mut rows = Vec::new();
         for provider in known_providers() {
-            let models = models_for_provider(provider);
-            if models.is_empty() {
+            let model_rows = match load_cached(provider, DEFAULT_TTL) {
+                // Fresh live cache: each entry's id is both the command token
+                // (resolve_model_choice accepts a literal id) and the resolved
+                // id. Skip an empty snapshot so we fall back to the alias list.
+                Some(cached) if !cached.is_empty() => cached
+                    .into_iter()
+                    .map(|m| ModelRow::Model {
+                        provider,
+                        role: m.id.clone(),
+                        resolved: m.id,
+                    })
+                    .collect::<Vec<_>>(),
+                // No fresh cache (missing/stale/empty): the static alias rows.
+                _ => models_for_provider(provider)
+                    .iter()
+                    .map(|(short, resolved)| {
+                        let role = short.split_once(':').map(|x| x.1).unwrap_or(short);
+                        ModelRow::Model {
+                            provider,
+                            role: role.to_string(),
+                            resolved: (*resolved).to_string(),
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            };
+            if model_rows.is_empty() {
                 continue;
             }
             rows.push(ModelRow::Heading(provider));
-            for (short, resolved) in models {
-                let role = short.split_once(':').map(|x| x.1).unwrap_or(short);
-                rows.push(ModelRow::Model {
-                    provider,
-                    role,
-                    resolved,
-                });
-            }
+            rows.extend(model_rows);
         }
         rows
     }
@@ -164,10 +206,11 @@ impl ModelPickerSurface {
         }
     }
 
-    /// The highlighted model row, if the selection points at one.
-    fn selected_model(&self) -> Option<(&'static str, &'static str)> {
+    /// The highlighted model row, if the selection points at one. Returns the
+    /// provider (`&'static`) and a borrow of the owned role token.
+    fn selected_model(&self) -> Option<(&'static str, &str)> {
         match self.rows.get(self.selected) {
-            Some(ModelRow::Model { provider, role, .. }) => Some((*provider, *role)),
+            Some(ModelRow::Model { provider, role, .. }) => Some((*provider, role.as_str())),
             _ => None,
         }
     }
@@ -604,12 +647,53 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    /// Point `WAYLAND_HOME` at a fresh, empty tempdir for the duration of the
+    /// returned guard, so `build_rows`'s `load_cached` sees NO cache and falls
+    /// back to the static alias catalog — independent of the dev/CI machine's
+    /// real `~/.wayland/cache/models`. Restores the prior value on drop.
+    ///
+    /// Must be used under `#[serial_test::serial]` (it mutates a process-global
+    /// env var shared with the catalog cache tests).
+    struct ModelHomeGuard {
+        _tmp: tempfile::TempDir,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl ModelHomeGuard {
+        fn new() -> Self {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let prior = std::env::var_os("WAYLAND_HOME");
+            // SAFETY: callers are #[serial]; no other thread reads the env
+            // concurrently.
+            unsafe { std::env::set_var("WAYLAND_HOME", tmp.path()) };
+            Self { _tmp: tmp, prior }
+        }
+
+        /// Seed `provider`'s live model cache with `models` so `build_rows`
+        /// renders them instead of the static alias catalog.
+        fn seed(&self, provider: &str, models: &[wcore_providers::ModelInfo]) {
+            wcore_providers::model_catalog::save(provider, models).expect("seed cache");
+        }
+    }
+
+    impl Drop for ModelHomeGuard {
+        fn drop(&mut self) {
+            // SAFETY: serialized; restore the prior value (or clear it).
+            unsafe {
+                match &self.prior {
+                    Some(v) => std::env::set_var("WAYLAND_HOME", v),
+                    None => std::env::remove_var("WAYLAND_HOME"),
+                }
+            }
+        }
+    }
+
     /// The model rows as `(provider, role)` pairs, in display order.
-    fn model_rows(p: &ModelPickerSurface) -> Vec<(&'static str, &'static str)> {
+    fn model_rows(p: &ModelPickerSurface) -> Vec<(&'static str, String)> {
         p.rows
             .iter()
             .filter_map(|r| match r {
-                ModelRow::Model { provider, role, .. } => Some((*provider, *role)),
+                ModelRow::Model { provider, role, .. } => Some((*provider, role.clone())),
                 ModelRow::Heading(_) => None,
             })
             .collect()
@@ -618,7 +702,10 @@ mod tests {
     // ── model picker: row construction ─────────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn model_rows_are_grouped_by_provider_with_headings() {
+        // Empty cache → the static alias catalog is the source of truth.
+        let _home = ModelHomeGuard::new();
         let p = ModelPickerSurface::new("anthropic", "");
         // Every known provider with a catalog yields a heading followed by
         // its models, and every model row sits under its provider heading.
@@ -644,12 +731,14 @@ mod tests {
         assert_eq!(headings, expected);
         // At least anthropic:opus and openai-chatgpt:5.5 are present.
         let pairs = model_rows(&p);
-        assert!(pairs.contains(&("anthropic", "opus")));
-        assert!(pairs.contains(&("openai-chatgpt", "5.5")));
+        assert!(pairs.iter().any(|(p, r)| *p == "anthropic" && r == "opus"));
+        assert!(pairs.iter().any(|(p, r)| *p == "openai-chatgpt" && r == "5.5"));
     }
 
     #[test]
+    #[serial_test::serial]
     fn model_picker_marks_the_active_model_as_selected() {
+        let _home = ModelHomeGuard::new();
         // Seeding with an active provider+model lands the selection on that row.
         let p = ModelPickerSurface::new("anthropic", "opus");
         let (provider, role) = p.selected_model().expect("a model must be selected");
@@ -659,7 +748,9 @@ mod tests {
     // ── model picker: Enter routing ────────────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn enter_on_same_provider_emits_bare_model_command() {
+        let _home = ModelHomeGuard::new();
         // Active provider == the selected model's provider → `/model <role>`
         // (the existing live model-set path, no provider swap).
         let mut app = App::new();
@@ -668,7 +759,12 @@ mod tests {
         let mut p = ModelPickerSurface::new("anthropic", "opus");
         // Move to a different anthropic model (still same provider).
         p.handle_key(key(KeyCode::Down), &mut app);
-        let (provider, role) = p.selected_model().unwrap();
+        // Own the role before the mutable `handle_key` borrow below — the
+        // returned `&str` now borrows `p` (the fields are owned `String`s).
+        let (provider, role) = {
+            let (prov, role) = p.selected_model().unwrap();
+            (prov, role.to_string())
+        };
         assert_eq!(provider, "anthropic");
         match p.handle_key(key(KeyCode::Enter), &mut app) {
             SurfaceAction::Command(line) => assert_eq!(line, format!("/model {role}")),
@@ -677,7 +773,9 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn enter_on_different_provider_emits_qualified_command() {
+        let _home = ModelHomeGuard::new();
         // Active provider differs from the selected model's provider → the
         // two-arg `/model <provider> <role>` form so the dispatch routes the
         // swap through apply_provider_swap (OAuth precheck) before the set.
@@ -703,7 +801,9 @@ mod tests {
     // ── navigation skips headings + clamps ─────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn model_navigation_skips_headings_and_clamps() {
+        let _home = ModelHomeGuard::new();
         let mut app = App::new();
         let mut p = ModelPickerSurface::new("anthropic", "opus");
         // Up to the top: clamps on the first model row.
@@ -729,6 +829,98 @@ mod tests {
             p.handle_key(key(KeyCode::Esc), &mut app),
             SurfaceAction::CloseOverlay
         ));
+    }
+
+    // ── model picker: cache-first row construction ─────────────────────
+
+    #[test]
+    #[serial_test::serial]
+    fn build_rows_uses_live_cache_when_fresh() {
+        // A fresh live snapshot for anthropic replaces its static alias rows
+        // with the live model ids; other providers stay on their alias rows.
+        let home = ModelHomeGuard::new();
+        let live = vec![
+            wcore_providers::ModelInfo {
+                id: "claude-live-1".into(),
+                display: "Claude Live 1".into(),
+            },
+            wcore_providers::ModelInfo {
+                id: "claude-live-2".into(),
+                display: "Claude Live 2".into(),
+            },
+        ];
+        home.seed("anthropic", &live);
+
+        let p = ModelPickerSurface::new("anthropic", "");
+        let pairs = model_rows(&p);
+        // The anthropic rows are exactly the live ids, in order…
+        let anthropic: Vec<String> = pairs
+            .iter()
+            .filter(|(prov, _)| *prov == "anthropic")
+            .map(|(_, role)| role.clone())
+            .collect();
+        assert_eq!(anthropic, vec!["claude-live-1", "claude-live-2"]);
+        // …and the static alias role (`opus`) no longer appears for anthropic.
+        assert!(
+            !pairs.iter().any(|(prov, r)| *prov == "anthropic" && r == "opus"),
+            "a fresh cache must fully replace the static alias rows"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn build_rows_falls_back_to_static_alias_without_cache() {
+        // No cache for anthropic → the static alias rows are rendered.
+        let _home = ModelHomeGuard::new();
+        let p = ModelPickerSurface::new("anthropic", "");
+        let pairs = model_rows(&p);
+        assert!(
+            pairs.iter().any(|(prov, r)| *prov == "anthropic" && r == "opus"),
+            "missing cache must fall back to the static alias catalog"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn cached_live_row_selects_with_id_as_token() {
+        // A live (cache-sourced) row carries the model id as the command token;
+        // selecting it on the SAME provider emits `/model <id>`.
+        let home = ModelHomeGuard::new();
+        home.seed(
+            "anthropic",
+            &[wcore_providers::ModelInfo {
+                id: "claude-live-9".into(),
+                display: "Claude Live 9".into(),
+            }],
+        );
+        let mut app = App::new();
+        app.config.provider = "anthropic".into();
+        app.config.model = "claude-live-9".into();
+
+        let mut p = ModelPickerSurface::new("anthropic", "claude-live-9");
+        // The active live model is marked selected (matched by its id).
+        let (provider, role) = p.selected_model().expect("a model must be selected");
+        assert_eq!((provider, role), ("anthropic", "claude-live-9"));
+        // Enter on the same provider emits the bare `/model <id>` form.
+        match p.handle_key(key(KeyCode::Enter), &mut app) {
+            SurfaceAction::Command(line) => assert_eq!(line, "/model claude-live-9"),
+            other => panic!("expected `/model claude-live-9`, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn empty_cache_snapshot_falls_back_to_static_alias() {
+        // A present-but-empty snapshot must NOT blank the provider — it falls
+        // back to the static alias rows just like a missing cache.
+        let home = ModelHomeGuard::new();
+        home.seed("anthropic", &[]);
+        let p = ModelPickerSurface::new("anthropic", "");
+        let pairs = model_rows(&p);
+        assert!(
+            pairs.iter().any(|(prov, r)| *prov == "anthropic" && r == "opus"),
+            "an empty snapshot must fall back to the static alias catalog"
+        );
     }
 
     // ── provider picker: connection status ─────────────────────────────
@@ -958,7 +1150,11 @@ mod tests {
     // ── render smoke ───────────────────────────────────────────────────
 
     #[test]
+    #[serial_test::serial]
     fn pickers_render_without_panicking() {
+        // Empty cache → the static alias rows render, so the active "opus" row
+        // (and its `●` marker) is present and deterministic.
+        let _home = ModelHomeGuard::new();
         let mut app = App::new();
         app.config.provider = "anthropic".into();
         app.config.model = "opus".into();
