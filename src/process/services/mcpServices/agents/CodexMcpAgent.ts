@@ -224,19 +224,9 @@ export class CodexMcpAgent extends AbstractMcpAgent {
               ([key]) => key.toLowerCase() === 'authorization'
             );
             if (authHeader) {
-              // Codex CLI can't take a manual header, but it CAN read a bearer
-              // token from an env var (--bearer-token-env-var). Without this,
-              // Codex sees no auth, detects OAuth support, and starts its OWN
-              // OAuth flow on a throwaway port - re-opening the provider's auth
-              // page even though Wayland already holds a valid token. Expose
-              // Wayland's token via an env var Codex reads at connection time so
-              // it reuses it. Codex inherits the main-process env at spawn.
-              const token = authHeader[1].replace(/^Bearer\s+/i, '').trim();
-              const envVar = `WAYLAND_MCP_BEARER_${cliSafeMcpServerName(server.name)
-                .toUpperCase()
-                .replace(/[^A-Z0-9]/g, '_')}`;
-              process.env[envVar] = token;
-              args.push('--bearer-token-env-var', envVar);
+              console.warn(
+                `[CodexMcpAgent] ${server.name}: Codex CLI uses --bearer-token-env-var for auth, manual header not supported`
+              );
             }
           }
 
