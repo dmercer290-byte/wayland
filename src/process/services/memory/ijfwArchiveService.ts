@@ -186,11 +186,28 @@ function parseEntriesFromFile(filePath: string, projectPath: string, projectName
         ? fm['summary']
         : block.body.split('\n')[0].replace(/^#+\s*/, '') || 'Untitled';
 
-    const storedStr = typeof fm['stored'] === 'string' ? fm['stored'] : '';
+    // S14: importers (drag-drop/Obsidian/claude-mem) write `created:` for the
+    // date, but the reader historically only read `stored:`. Without the
+    // `created` fallback every imported entry got storedAt=Date.now() on each
+    // reindex, polluting 24h/7d deltas, the sparkline and the streak. Prefer
+    // `created`, fall back to the legacy `stored` key so existing files are
+    // unchanged.
+    const storedStr =
+      (typeof fm['created'] === 'string' && fm['created'] ? fm['created'] : '') ||
+      (typeof fm['stored'] === 'string' ? fm['stored'] : '');
     const storedAt = parseDateToMs(storedStr) || Date.now();
 
     const rawTags = fm['tags'];
     const tags: string[] = Array.isArray(rawTags) ? rawTags : typeof rawTags === 'string' && rawTags ? [rawTags] : [];
+
+    // S14: importers write `scope: global` (with empty tags) instead of a
+    // `global` tag, so scope:global entries never appeared under the Global
+    // filter (which keys off tags.includes('global')). Treat scope:global as
+    // global membership by adding the tag when it is not already present; this
+    // wires the existing Global filter / tag index without touching either.
+    if (typeof fm['scope'] === 'string' && fm['scope'].trim().toLowerCase() === 'global' && !tags.includes('global')) {
+      tags.push('global');
+    }
 
     const id = makeId(filePath, storedStr || String(storedAt), summary);
     const bodyPreview = stripMarkdown(block.body).slice(0, 200);
