@@ -371,7 +371,12 @@ export class McpService {
 
       const results = await Promise.all(promises);
 
-      return { success: true, results };
+      // S12: mirror the sync path (syncMcpToAgents) - a per-agent removal that
+      // failed is captured in results[] with success:false, but returning a
+      // hardcoded `success: true` hid it, so the renderer reported "deleted"
+      // while the server stayed in that agent's CLI config (Claude/Codex/wcore
+      // drift). Reflect overall success from the per-agent results.
+      return { success: results.every((r) => r.success), results };
     });
   }
 }
