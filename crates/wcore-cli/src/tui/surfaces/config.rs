@@ -3014,6 +3014,14 @@ impl ConfigSurface {
                     self.move_providers_focus(1);
                     SurfaceAction::None
                 }
+                // FIX-3 — the headline credential door: `c` opens the
+                // paste-to-detect modal (the same overlay `/connect` opens),
+                // which fingerprints a pasted key, validates it live, and
+                // stores it in the credentials store (applies on rebind — the
+                // legacy env-var write below does NOT). One front door for
+                // connecting an LLM provider; the per-row env-var editor stays
+                // for multi-var / tool credentials (AWS, Vertex, Postgres, …).
+                KeyCode::Char('c') => SurfaceAction::OpenOverlay(SurfaceId::PasteDetect),
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     // Open the credentials modal for the focused entry,
                     // unless it has no env-var-based credentials (e.g.
@@ -3068,10 +3076,19 @@ impl ConfigSurface {
                     "Every tool and provider Wayland can use, with its current status.",
                     Style::default().fg(t.text_dim),
                 )),
-                Line::from(Span::styled(
-                    "Enter on a row → set credentials. `esc` returns to settings.",
-                    Style::default().fg(t.text_muted),
-                )),
+                Line::from(vec![
+                    Span::styled("Press ", Style::default().fg(t.text_muted)),
+                    Span::styled("c", Style::default().fg(t.orange)),
+                    Span::styled(
+                        " to paste an API key (auto-detects the provider) · ",
+                        Style::default().fg(t.text_muted),
+                    ),
+                    Span::styled("⏎", Style::default().fg(t.orange)),
+                    Span::styled(
+                        " edits env vars · esc returns to settings.",
+                        Style::default().fg(t.text_muted),
+                    ),
+                ]),
             ]),
             head_area,
         );
@@ -3150,8 +3167,10 @@ impl ConfigSurface {
             Paragraph::new(Line::from(vec![
                 Span::styled(" ↑↓ ", Style::default().fg(t.orange)),
                 Span::styled("move   ", Style::default().fg(t.text_dim)),
+                Span::styled("c ", Style::default().fg(t.orange)),
+                Span::styled("paste a key   ", Style::default().fg(t.text_dim)),
                 Span::styled("⏎ ", Style::default().fg(t.orange)),
-                Span::styled("set credentials   ", Style::default().fg(t.text_dim)),
+                Span::styled("edit vars   ", Style::default().fg(t.text_dim)),
                 Span::styled("esc ", Style::default().fg(t.orange)),
                 Span::styled("back to settings", Style::default().fg(t.text_dim)),
             ])),
@@ -3393,6 +3412,21 @@ mod tests {
     #[test]
     fn surface_reports_config_id() {
         assert_eq!(ConfigSurface::new().id(), SurfaceId::Config);
+    }
+
+    #[test]
+    fn providers_tier_c_opens_the_paste_detect_modal_fix3() {
+        // FIX-3: in the Tools & Providers tier, `c` opens the paste-to-detect
+        // modal (the superior, live-on-rebind credential door — the same one
+        // `/connect` opens) rather than only the per-row env-var editor.
+        let mut surface = ConfigSurface::new();
+        surface.tier = Tier::Providers;
+        let mut app = App::new();
+        let action = surface.handle_key(key(KeyCode::Char('c')), &mut app);
+        assert!(
+            matches!(action, SurfaceAction::OpenOverlay(SurfaceId::PasteDetect)),
+            "`c` in the Providers tier must open the PasteDetect overlay"
+        );
     }
 
     #[test]
