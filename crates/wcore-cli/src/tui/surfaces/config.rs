@@ -2554,7 +2554,11 @@ impl ConfigSurface {
             };
             let mut spans = vec![
                 Span::styled(marker.to_string(), Style::default().fg(t.orange)),
-                Span::styled(format!("{:<20}", f.label()), label_style),
+                // Pad to 22: the longest label ("Provider cost tuning") is
+                // exactly 20 chars, so a 20-wide pad left its value glued to it
+                // ("Provider cost tuning⏎ open cost tuning"). 22 guarantees a
+                // gap for every label.
+                Span::styled(format!("{:<22}", f.label()), label_style),
             ];
             spans.extend(self.adv_value_spans(f, t));
             lines.push(Line::from(spans));
