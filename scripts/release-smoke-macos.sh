@@ -54,6 +54,32 @@ if [[ ${#DMGS[@]} -eq 0 ]]; then
   exit 1
 fi
 
+# Arch completeness (release mode only). The per-dmg checks below validate
+# whatever dmgs are present but never assert that BOTH macOS arches shipped. The
+# build matrix is fail-fast:false and the artifact upload is if-no-files-found:
+# warn, so a silently-dropped arch (OOM, hdiutil flake, missed upload) would let
+# a release pass this gate with only one arch and publish to Latest, breaking
+# every Apple-Silicon (or every Intel) user's first download and in-app update.
+# A published tag MUST carry one arm64 dmg AND one x64 dmg. Skipped for local
+# single-dmg (--dmg) runs, which intentionally test one artifact at a time.
+if [[ -n "$TAG" ]]; then
+  have_arm64=0
+  have_x64=0
+  for d in "${DMGS[@]}"; do
+    case "$(basename "$d")" in
+      *arm64*.dmg) have_arm64=1 ;;
+      *x64*.dmg | *x86_64*.dmg) have_x64=1 ;;
+    esac
+  done
+  if [[ $have_arm64 -eq 0 || $have_x64 -eq 0 ]]; then
+    echo "FAIL: release $TAG is missing a macOS arch dmg (arm64=$have_arm64 x64=$have_x64)." >&2
+    echo "      A published release must ship BOTH arm64 and x64. Found dmgs:" >&2
+    for d in "${DMGS[@]}"; do echo "        $(basename "$d")" >&2; done
+    exit 1
+  fi
+  echo "==> macOS arch completeness: arm64 + x64 dmgs both present."
+fi
+
 QUARANTINE_VALUE="0083;00000000;Safari;F1A2B3C4-0000-0000-0000-000000000000"
 overall_fail=0
 

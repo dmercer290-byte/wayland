@@ -41,4 +41,54 @@ function runBounded(file, args, { timeoutMs, label }) {
   }
 }
 
-module.exports = { runBounded };
+/**
+ * Fraction of a notarize `--timeout` window past which a FAILED attempt is read
+ * as a stalled Apple queue (the submission sat "In Progress" to the cap) rather
+ * than a fast connection blip (NSURLErrorDomain -1001) worth retrying.
+ */
+const NOTARY_STALL_FRACTION = 0.8;
+
+/**
+ * Shared across afterSign (the .app ticket) and notarizeDmg (the .dmg ticket),
+ * which run in the SAME electron-builder process and require() this module, so
+ * the flag is shared via Node's require cache. When the app notarize burns most
+ * of its window, the dmg notarize seconds later hits the SAME stalled queue —
+ * this lets it skip straight to a single attempt instead of re-discovering the
+ * stall over another full window. That is what keeps a notary stall from
+ * stacking two ~full-window waits and approaching the 120-min job timeout.
+ */
+let notaryStalled = false;
+
+/**
+ * True when a notarize attempt ran >= NOTARY_STALL_FRACTION of its --timeout.
+ * @param {number} elapsedMs how long the failed attempt actually ran
+ * @param {number} timeoutMs the notarytool --timeout window in ms
+ * @returns {boolean}
+ */
+function isNotaryStall(elapsedMs, timeoutMs) {
+  return elapsedMs >= timeoutMs * NOTARY_STALL_FRACTION;
+}
+
+/** Record that this build hit a notary stall (see `notaryStalled`). */
+function markNotaryStalled() {
+  notaryStalled = true;
+}
+
+/** Whether an earlier notarize call in this build already hit a stall. */
+function notaryStallSeen() {
+  return notaryStalled;
+}
+
+/** Test-only: reset the shared stall flag between cases. */
+function resetNotaryStalled() {
+  notaryStalled = false;
+}
+
+module.exports = {
+  runBounded,
+  NOTARY_STALL_FRACTION,
+  isNotaryStall,
+  markNotaryStalled,
+  notaryStallSeen,
+  resetNotaryStalled,
+};
