@@ -28,9 +28,11 @@ pub mod debug;
 // v0.9.0 W4 E1 / S-H3: atomic .env writer with strict key/value validation.
 pub mod env_file;
 pub mod file_cache;
+pub mod forge_discovery;
 pub mod hooks;
 // v0.7.0 Task 1.B.1: convenience facade over `keyring` for `wayland init` + channels.
 pub mod keychain;
+pub mod mcp_cred_refs;
 pub mod plan;
 pub mod plugins_config;
 pub mod shell;

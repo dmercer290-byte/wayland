@@ -652,6 +652,7 @@ fn mcp_config_from_target(target: &str) -> Result<wcore_config::config::McpServe
             url: Some(target.to_string()),
             headers: None,
             deferred: Some(false),
+            allow_local: false,
         });
     }
     let mut parts = target.split_whitespace();
@@ -669,6 +670,7 @@ fn mcp_config_from_target(target: &str) -> Result<wcore_config::config::McpServe
         url: None,
         headers: None,
         deferred: Some(false),
+        allow_local: false,
     })
 }
 
@@ -1526,115 +1528,343 @@ impl TuiEngine {
                 return;
             }
         };
-        let engine = self.engine.clone();
-        let tx = self.tx.clone();
-        tokio::spawn(async move {
-            let mut single = std::collections::HashMap::new();
-            single.insert(name.clone(), config.clone());
-            let manager = match wcore_mcp::manager::McpManager::connect_all(&single).await {
-                Ok(mgr) => std::sync::Arc::new(mgr),
-                Err(e) => {
-                    let reason = format!("{e}");
-                    let _ = tx.send(ProtocolEvent::McpFailed {
-                        name: name.clone(),
-                        reason: reason.clone(),
-                    });
-                    let _ = tx.send(ProtocolEvent::Error {
-                        msg_id: None,
-                        error: ErrorInfo {
-                            code: "mcp_add".to_string(),
-                            message: format!("Couldn't connect MCP server '{name}': {reason}"),
-                            retryable: false,
-                        },
-                    });
-                    return;
-                }
-            };
-            // `connect_all` is non-fatal per-server: a server that failed or
-            // timed out still returns `Ok` with the cause recorded in
-            // `health()`, not `Err`. Surface that honestly instead of falling
-            // through and reporting "connected, 0 tools".
-            use wcore_mcp::manager::McpServerHealth;
-            match manager.health().get(&name) {
-                Some(McpServerHealth::Ready { .. }) => {}
-                other => {
-                    let reason = match other {
-                        Some(McpServerHealth::Failed { reason }) => reason.clone(),
-                        Some(McpServerHealth::TimedOut { after }) => {
-                            format!("connect timed out after {after:?}")
-                        }
-                        _ => "server did not connect".to_string(),
-                    };
-                    let _ = tx.send(ProtocolEvent::McpFailed {
-                        name: name.clone(),
-                        reason: reason.clone(),
-                    });
-                    let _ = tx.send(ProtocolEvent::Error {
-                        msg_id: None,
-                        error: ErrorInfo {
-                            code: "mcp_add".to_string(),
-                            message: format!("MCP server '{name}' failed to connect: {reason}"),
-                            retryable: false,
-                        },
-                    });
-                    return;
-                }
+        tokio::spawn(Self::connect_and_register_mcp(
+            self.engine.clone(),
+            self.tx.clone(),
+            name,
+            config,
+        ));
+    }
+
+    /// Slice 3, Piece 2 — connect a discovered Forge MCP server after a
+    /// successful loopback grant. The bearer `token` is stored in the
+    /// credentials store (NEVER `config.toml`); the persisted
+    /// `[mcp.servers.<name>]` entry carries only a `${cred:KEY}` reference in
+    /// its `Authorization` header, which is resolved back to the real token at
+    /// connect time by [`Self::connect_and_register_mcp`]. The server is then
+    /// connected + registered live (no restart). The TUI (Piece 3) calls this
+    /// once [`wcore_mcp::forge_grant::request_grant`] returns `Granted`.
+    pub fn connect_forge_server(&self, name: String, url: String, token: String) {
+        match Self::store_and_persist_forge(&name, &url, &token) {
+            Ok(server) => {
+                // Connect + register live (the `${cred:}` header is resolved inside).
+                tokio::spawn(Self::connect_and_register_mcp(
+                    self.engine.clone(),
+                    self.tx.clone(),
+                    name,
+                    server,
+                ));
             }
-            // Register the freshly discovered tools onto the LIVE registry.
-            // `registry_mut` only hands out a `&mut` when the registry Arc is
-            // uncontended — a turn in flight holds a clone, so we report busy
-            // instead of dropping the add. The MCP proxies clone the manager
-            // Arc internally, so it stays alive after this scope.
-            let mut guard = engine.lock().await;
-            let builtin_names = guard.tool_names();
-            let message = match guard.registry_mut() {
-                Some(reg) => {
-                    wcore_mcp::tool_proxy::register_single_server_tools(
-                        reg,
-                        &manager,
-                        &name,
-                        &builtin_names,
-                        config.deferred.unwrap_or(true),
-                    );
-                    let tool_names: Vec<String> = manager
-                        .all_tools()
-                        .iter()
-                        .filter(|(sn, _)| *sn == name.as_str())
-                        .map(|(_, t)| t.name.clone())
-                        .collect();
-                    let tool_count = tool_names.len();
-                    // Update the TUI's live mcp_status (so /doctor reflects the
-                    // add) — the bridge's McpReady arm records Ready{tool_count}.
-                    // Previously this path emitted only Info, leaving mcp_status
-                    // stale after a live `/mcp add`.
-                    let _ = tx.send(ProtocolEvent::McpReady {
-                        name: name.clone(),
-                        tools: tool_names,
-                    });
-                    format!(
-                        "MCP server '{name}' connected. {tool_count} tool(s) available now. \
-                         Type /mcp to see all servers."
-                    )
-                }
-                None => {
-                    let _ = tx.send(ProtocolEvent::Error {
-                        msg_id: None,
-                        error: ErrorInfo {
-                            code: "mcp_add".to_string(),
-                            message: format!(
-                                "Can't add '{name}' while a turn is running. Try /mcp add again \
-                                 once it's idle."
-                            ),
-                            retryable: true,
-                        },
-                    });
-                    return;
-                }
-            };
+            Err(e) => {
+                let _ = self.tx.send(ProtocolEvent::Error {
+                    msg_id: None,
+                    error: ErrorInfo {
+                        code: "mcp_connect".to_string(),
+                        message: e,
+                        retryable: false,
+                    },
+                });
+            }
+        }
+    }
+
+    /// Slice 3, Piece 3 — the full one-command Forge connect: discover → live
+    /// probe → grant → connect. `name` selects among discovered servers (or
+    /// picks the sole one). The grant `POST` triggers the human **Approve**
+    /// prompt in the producer's GUI, so this runs entirely off-thread and
+    /// reports progress/outcome as turns on the bridge channel. Recoverable
+    /// grant outcomes (denied / rate-limited / bad-scopes) are surfaced as
+    /// guidance, not hard errors.
+    pub fn connect_forge_discovered(&self, name: Option<String>) {
+        let tx = self.tx.clone();
+        let info = |msg: String| {
             let _ = tx.send(ProtocolEvent::Info {
                 msg_id: String::new(),
-                message,
+                message: msg,
             });
+        };
+
+        // Pick the target server synchronously (a cheap local file read).
+        let servers = wcore_config::forge_discovery::read_discovered_servers();
+        let server = match Self::pick_forge_server(servers, name.as_deref()) {
+            Ok(s) => s,
+            Err(msg) => {
+                info(msg);
+                return;
+            }
+        };
+        let Some(grant_url) = server.auth.grant_url.clone() else {
+            info(format!(
+                "'{}' doesn't use the loopback-grant flow — nothing to authorize.",
+                server.label()
+            ));
+            return;
+        };
+
+        let engine = self.engine.clone();
+        let tx2 = self.tx.clone();
+        let label = server.label().to_string();
+        tokio::spawn(async move {
+            let report_info = |msg: String| {
+                let _ = tx2.send(ProtocolEvent::Info {
+                    msg_id: String::new(),
+                    message: msg,
+                });
+            };
+            let report_err = |msg: String| {
+                let _ = tx2.send(ProtocolEvent::Error {
+                    msg_id: None,
+                    error: ErrorInfo {
+                        code: "mcp_connect".to_string(),
+                        message: msg,
+                        retryable: false,
+                    },
+                });
+            };
+
+            let client = wcore_mcp::forge_grant::loopback_http_client();
+
+            // 1. Liveness: a stale discovery entry must not prompt a grant.
+            if wcore_mcp::forge_grant::probe_metadata(&client, &server.metadata_url, &server.name)
+                .await
+                .is_none()
+            {
+                report_err(format!(
+                    "'{label}' is listed but not responding — it may not be running. \
+                     Start it and try /mcp connect again."
+                ));
+                return;
+            }
+
+            // 2. Grant — this triggers the Approve prompt in the producer's GUI.
+            report_info(format!(
+                "Requesting access to '{label}' — approve the request in its window…"
+            ));
+            match wcore_mcp::forge_grant::request_grant(
+                &client,
+                &grant_url,
+                "Wayland Core",
+                &["read", "write"],
+            )
+            .await
+            {
+                wcore_mcp::forge_grant::GrantOutcome::Granted { token, .. } => {
+                    match Self::store_and_persist_forge(&server.name, &server.url, &token) {
+                        Ok(cfg) => {
+                            Self::connect_and_register_mcp(engine, tx2, server.name, cfg).await
+                        }
+                        Err(e) => report_err(e),
+                    }
+                }
+                wcore_mcp::forge_grant::GrantOutcome::Denied => report_err(format!(
+                    "Access to '{label}' was not approved. Run /mcp connect to try again."
+                )),
+                wcore_mcp::forge_grant::GrantOutcome::RateLimited => report_err(format!(
+                    "'{label}' is rate-limiting grant requests — wait a moment and retry."
+                )),
+                wcore_mcp::forge_grant::GrantOutcome::BadScopes(m) => {
+                    report_err(format!("'{label}' rejected the requested scopes: {m}"))
+                }
+                wcore_mcp::forge_grant::GrantOutcome::Error(m) => {
+                    report_err(format!("Couldn't get access to '{label}': {m}"))
+                }
+            }
+        });
+    }
+
+    /// Pick a discovered Forge server by `name`, or the sole one when no name is
+    /// given. Returns a user-facing message (Err) when the choice is ambiguous,
+    /// absent, or unnamed-but-plural.
+    fn pick_forge_server(
+        servers: Vec<wcore_config::forge_discovery::DiscoveredMcpServer>,
+        name: Option<&str>,
+    ) -> Result<wcore_config::forge_discovery::DiscoveredMcpServer, String> {
+        if servers.is_empty() {
+            return Err(
+                "No Forge MCP servers found. (Looked in the Forge discovery file under your OS \
+                 config dir — start Agent Vault, then try /mcp connect.)"
+                    .to_string(),
+            );
+        }
+        match name {
+            Some(n) => servers
+                .into_iter()
+                .find(|s| s.name == n)
+                .ok_or_else(|| format!("No discovered Forge server named '{n}'.")),
+            None => {
+                if servers.len() == 1 {
+                    Ok(servers.into_iter().next().expect("len == 1"))
+                } else {
+                    let names: Vec<&str> = servers.iter().map(|s| s.name.as_str()).collect();
+                    Err(format!(
+                        "Multiple Forge servers discovered ({}). Pick one: /mcp connect <name>.",
+                        names.join(", ")
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Store a granted bearer `token` in the credentials store and persist a
+    /// `[mcp.servers.<name>]` entry whose `Authorization` header is a `${cred:}`
+    /// reference (so the token never lands in `config.toml`). Returns the built
+    /// server config (ready to connect), or a user-facing error string. Shared
+    /// by [`Self::connect_forge_server`] and [`Self::connect_forge_discovered`].
+    fn store_and_persist_forge(
+        name: &str,
+        url: &str,
+        token: &str,
+    ) -> Result<wcore_config::config::McpServerConfig, String> {
+        let cred_key = wcore_config::mcp_cred_refs::mcp_token_cred_key(name);
+        let cfg = wcore_config::config::Config::resolve(&wcore_config::config::CliArgs::default())
+            .map_err(|e| format!("Couldn't load config to store the grant token: {e}"))?;
+        let store = cfg
+            .open_credentials_store()
+            .map_err(|e| format!("Credentials store unavailable: {e}"))?;
+        store
+            .put(&cred_key, token)
+            .map_err(|e| format!("Couldn't store the grant token securely: {e}"))?;
+
+        let server = wcore_config::mcp_cred_refs::build_forge_mcp_server_config(url, &cred_key);
+        wcore_config::config::patch_global_config({
+            let name = name.to_string();
+            let server = server.clone();
+            move |f| {
+                f.mcp.servers.insert(name, server);
+            }
+        })
+        .map_err(|e| format!("Couldn't persist the MCP server config: {e}"))?;
+
+        Ok(server)
+    }
+
+    /// Connect a single MCP server and register its tools onto the live engine
+    /// registry, reporting progress/failure on the bridge channel. Shared by the
+    /// `/mcp add` path and the Forge connect flow. `${cred:KEY}` references in
+    /// the server's headers are resolved against the credentials store here, at
+    /// the connect boundary — `config.toml` keeps the literal reference.
+    async fn connect_and_register_mcp(
+        engine: Arc<tokio::sync::Mutex<wcore_agent::engine::AgentEngine>>,
+        tx: UnboundedSender<ProtocolEvent>,
+        name: String,
+        mut config: wcore_config::config::McpServerConfig,
+    ) {
+        // Resolve `${cred:KEY}` header references just before connecting.
+        // Best-effort: if the store can't be opened, the literal header is left
+        // in place and the connect fails honestly below (no silent empty bearer).
+        // A no-reference header (the plain `/mcp add` path) never touches the store.
+        if let Ok(cfg) =
+            wcore_config::config::Config::resolve(&wcore_config::config::CliArgs::default())
+            && let Ok(store) = cfg.open_credentials_store()
+        {
+            let _ = wcore_config::mcp_cred_refs::resolve_server_headers(&mut config, &*store);
+        }
+
+        let mut single = std::collections::HashMap::new();
+        single.insert(name.clone(), config.clone());
+        let manager = match wcore_mcp::manager::McpManager::connect_all(&single).await {
+            Ok(mgr) => std::sync::Arc::new(mgr),
+            Err(e) => {
+                let reason = format!("{e}");
+                let _ = tx.send(ProtocolEvent::McpFailed {
+                    name: name.clone(),
+                    reason: reason.clone(),
+                });
+                let _ = tx.send(ProtocolEvent::Error {
+                    msg_id: None,
+                    error: ErrorInfo {
+                        code: "mcp_add".to_string(),
+                        message: format!("Couldn't connect MCP server '{name}': {reason}"),
+                        retryable: false,
+                    },
+                });
+                return;
+            }
+        };
+        // `connect_all` is non-fatal per-server: a server that failed or
+        // timed out still returns `Ok` with the cause recorded in
+        // `health()`, not `Err`. Surface that honestly instead of falling
+        // through and reporting "connected, 0 tools".
+        use wcore_mcp::manager::McpServerHealth;
+        match manager.health().get(&name) {
+            Some(McpServerHealth::Ready { .. }) => {}
+            other => {
+                let reason = match other {
+                    Some(McpServerHealth::Failed { reason }) => reason.clone(),
+                    Some(McpServerHealth::TimedOut { after }) => {
+                        format!("connect timed out after {after:?}")
+                    }
+                    _ => "server did not connect".to_string(),
+                };
+                let _ = tx.send(ProtocolEvent::McpFailed {
+                    name: name.clone(),
+                    reason: reason.clone(),
+                });
+                let _ = tx.send(ProtocolEvent::Error {
+                    msg_id: None,
+                    error: ErrorInfo {
+                        code: "mcp_add".to_string(),
+                        message: format!("MCP server '{name}' failed to connect: {reason}"),
+                        retryable: false,
+                    },
+                });
+                return;
+            }
+        }
+        // Register the freshly discovered tools onto the LIVE registry.
+        // `registry_mut` only hands out a `&mut` when the registry Arc is
+        // uncontended — a turn in flight holds a clone, so we report busy
+        // instead of dropping the add. The MCP proxies clone the manager
+        // Arc internally, so it stays alive after this scope.
+        let mut guard = engine.lock().await;
+        let builtin_names = guard.tool_names();
+        let message = match guard.registry_mut() {
+            Some(reg) => {
+                wcore_mcp::tool_proxy::register_single_server_tools(
+                    reg,
+                    &manager,
+                    &name,
+                    &builtin_names,
+                    config.deferred.unwrap_or(true),
+                );
+                let tool_names: Vec<String> = manager
+                    .all_tools()
+                    .iter()
+                    .filter(|(sn, _)| *sn == name.as_str())
+                    .map(|(_, t)| t.name.clone())
+                    .collect();
+                let tool_count = tool_names.len();
+                // Update the TUI's live mcp_status (so /doctor reflects the
+                // add) — the bridge's McpReady arm records Ready{tool_count}.
+                // Previously this path emitted only Info, leaving mcp_status
+                // stale after a live `/mcp add`.
+                let _ = tx.send(ProtocolEvent::McpReady {
+                    name: name.clone(),
+                    tools: tool_names,
+                });
+                format!(
+                    "MCP server '{name}' connected. {tool_count} tool(s) available now. \
+                     Type /mcp to see all servers."
+                )
+            }
+            None => {
+                let _ = tx.send(ProtocolEvent::Error {
+                    msg_id: None,
+                    error: ErrorInfo {
+                        code: "mcp_add".to_string(),
+                        message: format!(
+                            "Can't add '{name}' while a turn is running. Try /mcp add again \
+                             once it's idle."
+                        ),
+                        retryable: true,
+                    },
+                });
+                return;
+            }
+        };
+        let _ = tx.send(ProtocolEvent::Info {
+            msg_id: String::new(),
+            message,
         });
     }
 
@@ -2090,6 +2320,51 @@ mod tests {
             ProtocolEvent::StreamStart { msg_id } => assert_eq!(msg_id, "m1"),
             other => panic!("expected StreamStart, got {other:?}"),
         }
+    }
+
+    fn disc(name: &str) -> wcore_config::forge_discovery::DiscoveredMcpServer {
+        wcore_config::forge_discovery::DiscoveredMcpServer {
+            name: name.to_string(),
+            display_name: None,
+            transport: "streamable-http".to_string(),
+            url: format!("http://127.0.0.1:3456/{name}"),
+            auth: wcore_config::forge_discovery::DiscoveredAuth {
+                scheme: "loopback-grant".to_string(),
+                grant_url: Some("http://127.0.0.1:3456/grant".to_string()),
+            },
+            metadata_url: "http://127.0.0.1:3456/.well-known/mcp".to_string(),
+        }
+    }
+
+    #[test]
+    fn pick_forge_server_errors_when_none_discovered() {
+        let got = TuiEngine::pick_forge_server(vec![], None);
+        assert!(got.unwrap_err().contains("No Forge MCP servers"));
+    }
+
+    #[test]
+    fn pick_forge_server_returns_sole_server_without_a_name() {
+        let got = TuiEngine::pick_forge_server(vec![disc("agent-vault")], None).unwrap();
+        assert_eq!(got.name, "agent-vault");
+    }
+
+    #[test]
+    fn pick_forge_server_requires_a_name_when_plural() {
+        let err = TuiEngine::pick_forge_server(vec![disc("a"), disc("b")], None).unwrap_err();
+        assert!(err.contains("Multiple Forge servers"));
+        assert!(err.contains("a") && err.contains("b"));
+    }
+
+    #[test]
+    fn pick_forge_server_selects_by_name() {
+        let got = TuiEngine::pick_forge_server(vec![disc("a"), disc("b")], Some("b")).unwrap();
+        assert_eq!(got.name, "b");
+    }
+
+    #[test]
+    fn pick_forge_server_reports_unknown_name() {
+        let err = TuiEngine::pick_forge_server(vec![disc("a")], Some("nope")).unwrap_err();
+        assert!(err.contains("nope"));
     }
 
     #[test]
