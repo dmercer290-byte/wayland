@@ -1697,6 +1697,16 @@ impl Surface for ConfigSurface {
         SurfaceId::Config
     }
 
+    /// FIX-2 — own `/` only while an inline text editor is live, so a typed
+    /// `/` lands in the buffer instead of opening the command palette. In every
+    /// navigation tier (no editor active) `/` is free for the global palette.
+    fn consumes_slash(&self, _app: &App) -> bool {
+        self.editor.is_some()
+            || self.expert_editor.is_some()
+            || self.list_editor.is_some()
+            || self.credentials_modal.is_some()
+    }
+
     fn on_enter(&mut self, app: &mut App) {
         // Seed both copies from the live config snapshot so the surface
         // opens reflecting the resolved engine config, and a fresh `esc`
@@ -3383,6 +3393,30 @@ mod tests {
     #[test]
     fn surface_reports_config_id() {
         assert_eq!(ConfigSurface::new().id(), SurfaceId::Config);
+    }
+
+    #[test]
+    fn consumes_slash_only_while_an_inline_editor_is_active() {
+        // FIX-2: in any navigation tier (no editor) `/` is free for the global
+        // command palette; while a text editor is live it must stay literal so
+        // a typed `/` lands in the buffer (e.g. a base_url or fallback model).
+        let app = App::new();
+        let mut surface = ConfigSurface::new();
+        assert!(
+            !surface.consumes_slash(&app),
+            "nav mode must release `/` to the palette"
+        );
+        surface.list_editor = Some(Input::default());
+        assert!(
+            surface.consumes_slash(&app),
+            "an active list editor must keep `/` literal"
+        );
+        surface.list_editor = None;
+        surface.editor = Some((Row::ALL[0], Input::default()));
+        assert!(
+            surface.consumes_slash(&app),
+            "an active field editor must keep `/` literal"
+        );
     }
 
     #[test]

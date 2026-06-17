@@ -320,6 +320,21 @@ pub trait Surface {
     fn consumes_help_key(&self, _app: &App) -> bool {
         false
     }
+
+    /// FIX-2 — true when this surface owns `/` for its own input and the Router
+    /// must NOT pre-empt it with the global command palette.
+    ///
+    /// Default `false`: most surfaces (Diagnostics, Plugins, SubAgents, …) have
+    /// no `/` binding and no live text field, so the Router opens the command
+    /// palette on `/` there — making slash commands reachable from anywhere,
+    /// not only the Workspace composer. Surfaces that DO capture `/` override
+    /// this: `WorkspaceSurface` (composer-aware `/`), `AgentNav` (filter),
+    /// `Onboarding` (key entry), and `ConfigSurface` while any inline text
+    /// editor is active. When the override returns `true` the key falls through
+    /// to the surface's own `handle_key`.
+    fn consumes_slash(&self, _app: &App) -> bool {
+        false
+    }
 }
 
 /// A placeholder surface used to prove the trait + router wiring.
@@ -1066,6 +1081,20 @@ impl Router {
                 // into the Workspace switch; a returned `None` means the
                 // surface consumed `Esc` for its own state and is left
                 // be.
+                // FIX-2 — `/` opens the command palette from ANY surface, not
+                // only the Workspace composer. Before this, a user inside
+                // Config / Diagnostics / etc. who typed `/doctor` got nothing
+                // (the key was unhandled) and had to Esc home first — yet those
+                // surfaces even advertise `/provider` / `/model` hints. The
+                // Workspace owns its own composer-aware `/` (literal mid-message,
+                // palette on an empty line) so it is excluded; every other
+                // surface gets the global palette door unless it is actively
+                // capturing text (`consumes_slash`), where `/` stays literal.
+                KeyCode::Char('/')
+                    if here != SurfaceId::Workspace && !self.active.consumes_slash(app) =>
+                {
+                    return self.apply(SurfaceAction::OpenOverlay(SurfaceId::Palette), app);
+                }
                 KeyCode::Esc if here == SurfaceId::Diagnostics => {
                     return self.apply(SurfaceAction::Switch(SurfaceId::Workspace), app);
                 }
@@ -3911,6 +3940,24 @@ mod tests {
         let mut router = Router::new(&app);
         router.apply(SurfaceAction::Command("/doctor".into()), &mut app);
         assert_eq!(app.surface, SurfaceId::Diagnostics);
+    }
+
+    #[test]
+    fn slash_opens_the_palette_from_a_non_workspace_surface() {
+        // FIX-2: `/` must reach the command palette from any surface, not just
+        // the Workspace composer. From Diagnostics (no text field, no `/`
+        // binding) pressing `/` opens the palette overlay.
+        let mut app = App::new();
+        let mut router = Router::new(&app);
+        router.apply(SurfaceAction::Switch(SurfaceId::Diagnostics), &mut app);
+        assert_eq!(app.surface, SurfaceId::Diagnostics);
+        assert_eq!(app.overlay, None, "no overlay before `/`");
+        router.handle_key(key(KeyCode::Char('/')), &mut app);
+        assert_eq!(
+            app.overlay,
+            Some(SurfaceId::Palette),
+            "`/` from Diagnostics must open the command palette"
+        );
     }
 
     #[test]
