@@ -170,9 +170,8 @@ impl HealthCheck {
 
 /// The `/doctor` report: system dependency + environment health.
 ///
-/// Built from a live [`crate::doctor::collect`] run by [`run_doctor`];
-/// `Default` is the empty report shown for the one frame before the first
-/// `on_enter` collection lands.
+/// Built from a live [`crate::doctor::collect`] run by [`spawn_health_probe`];
+/// `Default` is the empty report shown while the first probe is in flight.
 #[derive(Debug, Clone, Default)]
 pub struct DoctorReport {
     /// The individual check rows, in display order.
@@ -289,47 +288,75 @@ pub struct TokenBudgetView {
     pub last_turn_output: u64,
 }
 
-/// Run the real [`crate::doctor::collect`] probe and convert its result
-/// into a [`DoctorReport`] of [`HealthCheck`] rows.
-///
-/// `doctor::collect` is async (its `which` probes spawn subprocesses),
-/// but the surface's `on_enter` / `handle_key` hooks are synchronous and
-/// run inside the TUI's tokio runtime — so `block_on` cannot be called
-/// here. The probe is therefore driven on a short-lived worker thread
-/// with its own current-thread runtime, and this fn blocks joining it.
-/// The probe is a handful of `which` calls, so the stall is sub-100ms.
-fn run_doctor() -> DoctorReport {
-    let raw = std::thread::spawn(|| {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("doctor probe runtime");
-        rt.block_on(doctor::collect())
-    })
-    .join()
-    .expect("doctor probe thread");
+/// How long the surface waits for the provider-health probe before it stops
+/// showing "probing…" and reports a timeout. Set above the underlying 5s
+/// per-request cap (plus slack for the concurrent set) so a healthy-but-slow
+/// network still lands normally; only a genuinely stalled probe trips it.
+const HEALTH_PROBE_UI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
-    DoctorReport {
-        checks: raw.checks.iter().map(health_check_from).collect(),
-    }
+/// One result from the off-thread `/doctor` probe. The two probes are
+/// **independent** — the fast system-dependency scan (`which` subprocesses)
+/// is delivered the instant it finishes, without waiting for the slow live
+/// provider-health HTTP probes — so SYSTEM/DISCOVERED fill in immediately
+/// while PROVIDERS is still in flight.
+enum ProbeMsg {
+    /// The converted system-dependency report (`which` checks).
+    Doctor(DoctorReport),
+    /// The live provider-health rows (real HTTP probes).
+    Health(Vec<AgentProviderHealth>),
 }
 
-/// Run the live provider-health probes on a short-lived worker thread,
-/// using the same thread-per-call pattern as [`run_doctor`].
+/// Start the two slow `/doctor` probes on a **detached** worker thread and
+/// return a receiver that delivers each result as it lands.
 ///
-/// The async [`wcore_agent::health::provider_health_check_all`] races
-/// four 5-second-capped HTTP probes in parallel, so the worst-case
-/// stall on the calling (sync) `on_enter` is one timeout, ~5s.
-fn run_provider_health() -> Vec<AgentProviderHealth> {
-    std::thread::spawn(|| {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("provider-health probe runtime");
-        rt.block_on(health::provider_health_check_all())
-    })
-    .join()
-    .expect("provider-health probe thread")
+/// This is the fix for the `on_enter` UI-thread freeze: `doctor::collect`
+/// (which spawns subprocesses) and `health::provider_health_check_all`
+/// (live HTTP) are async, but the surface's `on_enter`/`handle_key` hooks
+/// are synchronous and run inside the TUI's tokio runtime. The previous
+/// implementation drove them on a worker thread but then **joined** it,
+/// blocking the render loop — and when the HTTP probes stalled (a
+/// restrictive egress layer, or many connected providers exceeding the
+/// per-probe cap), the entire TUI froze and the Diagnostics surface never
+/// painted. Here the thread is left running; the surface renders a
+/// "probing…" state immediately and `tick`→[`DiagnosticsSurface::poll_health`]
+/// fills in SYSTEM/PROVIDERS/DISCOVERED as each result lands (the same
+/// async-poll pattern as the paste-detect modal). The two probes are
+/// dispatched concurrently and each sends on its own, so the fast system
+/// scan is never held hostage by the slow provider HTTP probe.
+fn spawn_health_probe() -> std::sync::mpsc::Receiver<ProbeMsg> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    // If the thread fails to spawn, both senders drop and the receiver
+    // resolves to `Disconnected` — the surface treats that as "no result"
+    // and stops waiting rather than hanging on a perpetual "probing…".
+    let _ = std::thread::Builder::new()
+        .name("wld-doctor-probe".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(_) => return,
+            };
+            rt.block_on(async {
+                let tx_doctor = tx.clone();
+                let doctor_task = async move {
+                    let raw = doctor::collect().await;
+                    let report = DoctorReport {
+                        checks: raw.checks.iter().map(health_check_from).collect(),
+                    };
+                    // A dropped receiver (surface left the screen) is an
+                    // expected no-op, not an error.
+                    let _ = tx_doctor.send(ProbeMsg::Doctor(report));
+                };
+                let health_task = async move {
+                    let health = health::provider_health_check_all().await;
+                    let _ = tx.send(ProbeMsg::Health(health));
+                };
+                tokio::join!(doctor_task, health_task);
+            });
+        });
+    rx
 }
 
 /// Build the per-tool backend-status snapshot by walking [`TOOL_GATES`]
@@ -776,6 +803,24 @@ pub struct DiagnosticsSurface {
     /// on this machine (ambient cloud creds, local Ollama, Claude Desktop MCP)
     /// the user could wire up. Rendered as the DISCOVERED section of `/doctor`.
     discovered: Vec<Discovery>,
+    /// In-flight handle for the async system + provider-health probe. `Some`
+    /// while either probe is running (started by `on_enter` / the `r` key);
+    /// `tick` polls it and clears it back to `None` once both results land.
+    /// Keeping the probe off the synchronous `on_enter` path is what stops the
+    /// live HTTP probes from freezing the whole TUI (see [`spawn_health_probe`]).
+    health_pending: Option<std::sync::mpsc::Receiver<ProbeMsg>>,
+    /// Whether the live provider-health rows have landed for the current probe.
+    /// Distinct from `doctor_collected` (the system scan) because the two
+    /// probes resolve independently — the fast system scan should not gate the
+    /// PROVIDERS "probing…" state on the slow HTTP probe, and vice-versa.
+    health_collected: bool,
+    /// When the current probe was started, for the UI-side health timeout.
+    probe_started: Option<std::time::Instant>,
+    /// Set when the provider-health probe exceeded [`HEALTH_PROBE_UI_TIMEOUT`]
+    /// without landing. The HTTP probe carries its own per-request cap, but a
+    /// hostile egress layer can stall it beyond that; rather than show
+    /// "probing…" forever we give up waiting and say so honestly.
+    health_timed_out: bool,
 }
 
 impl Default for DiagnosticsSurface {
@@ -804,6 +849,10 @@ impl DiagnosticsSurface {
             effective_scroll: 0,
             channels: Vec::new(),
             discovered: Vec::new(),
+            health_pending: None,
+            health_collected: false,
+            probe_started: None,
+            health_timed_out: false,
         }
     }
 
@@ -812,25 +861,101 @@ impl DiagnosticsSurface {
         self.mode
     }
 
-    /// Run the live `doctor` probe and store its report. Also refreshes
-    /// the v0.9.0 W4 E2 provider-health probes (real HTTP) + the cheap
-    /// env-driven tool-status snapshot.
+    /// Refresh the `/doctor` data. The cheap, local scans (tool gates, config
+    /// posture, channel configs) run synchronously here; the two slow live
+    /// probes (system `which` checks + provider HTTP health) are started on a
+    /// detached worker thread and filled in later by `tick`→[`Self::poll_health`].
+    ///
+    /// Splitting the work this way is the fix for the `on_enter` freeze: the
+    /// surface paints immediately with the local sections (CONFIG / TOOLS /
+    /// CHANNELS) and a "probing…" placeholder for SYSTEM / PROVIDERS /
+    /// DISCOVERED, instead of blocking the render loop on uncapped HTTP probes.
     fn refresh_doctor(&mut self, app: &App) {
-        self.doctor = run_doctor();
-        self.provider_health = run_provider_health();
+        // Instant, local, non-blocking scans — safe on the UI thread.
         self.tool_status = scan_tool_status();
         self.config_checks = scan_config_health(app);
         // S10: surface the on-disk channel configs (read-only, secret-free).
         self.channels = wcore_channels_registry::scan_user_channels();
-        // S11: "here's what I found" — reuse the just-collected Ollama doctor
-        // signal so we don't re-probe it asynchronously here.
-        let ollama_available = self
-            .doctor
-            .checks
-            .iter()
-            .any(|c| c.label == "ollama" && c.state == HealthState::Ok);
-        self.discovered = scan_environment(ollama_available);
-        self.doctor_collected = true;
+        // Slow live probes run off-thread; DISCOVERED (S11) is computed in
+        // `poll_health` once the doctor report (its Ollama signal) lands.
+        self.start_health_probe();
+    }
+
+    /// Start the async system + provider-health probe (idempotent: replacing
+    /// any in-flight handle). Marks both results not-yet-collected so the
+    /// render shows the "probing…" state until [`Self::poll_health`] applies
+    /// each. The prior rows are kept until then, so a re-run (`r`) updates in
+    /// place rather than flashing to empty.
+    fn start_health_probe(&mut self) {
+        self.doctor_collected = false;
+        self.health_collected = false;
+        self.health_timed_out = false;
+        self.probe_started = Some(std::time::Instant::now());
+        self.health_pending = Some(spawn_health_probe());
+    }
+
+    /// Poll the in-flight health probe; apply any results that have landed.
+    /// Returns `true` when something was applied (so the caller knows a
+    /// repaint is due). Drains every queued message per call so a fast and a
+    /// slow result that arrive together are both picked up. The receiver is
+    /// cleared once both probes have resolved (or the thread dropped without a
+    /// result), so the surface never hangs on a perpetual "probing…". Called
+    /// from `tick` every loop iteration.
+    fn poll_health(&mut self) -> bool {
+        let Some(rx) = self.health_pending.as_ref() else {
+            return false;
+        };
+        let mut changed = false;
+        loop {
+            match rx.try_recv() {
+                Ok(ProbeMsg::Doctor(report)) => {
+                    self.doctor = report;
+                    // S11: "here's what I found" — reuse the just-landed Ollama
+                    // doctor signal rather than re-probing it.
+                    let ollama_available = self
+                        .doctor
+                        .checks
+                        .iter()
+                        .any(|c| c.label == "ollama" && c.state == HealthState::Ok);
+                    self.discovered = scan_environment(ollama_available);
+                    self.doctor_collected = true;
+                    changed = true;
+                }
+                Ok(ProbeMsg::Health(rows)) => {
+                    self.provider_health = rows;
+                    self.health_collected = true;
+                    changed = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // The probe thread is gone — stop waiting on anything that
+                    // never arrived and render whatever we have.
+                    self.doctor_collected = true;
+                    self.health_collected = true;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        // UI-side timeout: a stalled provider-health probe (egress layer
+        // holding the connection past its own cap) must not show "probing…"
+        // forever. Give up waiting on it and report a timeout. The detached
+        // probe thread is left to finish on its own; a re-run (`r`) starts a
+        // fresh one.
+        if !self.health_collected
+            && self
+                .probe_started
+                .is_some_and(|t| t.elapsed() >= HEALTH_PROBE_UI_TIMEOUT)
+        {
+            self.health_collected = true;
+            self.health_timed_out = true;
+            changed = true;
+        }
+        // Stop polling once both probes have settled.
+        if self.doctor_collected && self.health_collected {
+            self.health_pending = None;
+        }
+        changed
     }
 
     /// S9: render the redacted effective config into `effective_toml` and reset
@@ -969,6 +1094,14 @@ impl Surface for DiagnosticsSurface {
         self.refresh_doctor(app);
         self.refresh_memory();
         self.refresh_effective();
+    }
+
+    /// Per-tick poll for the async health probe started by `on_enter`/`r`.
+    /// Applies the result when it lands so SYSTEM/PROVIDERS/DISCOVERED fill in
+    /// without blocking the UI thread. Emits no action.
+    fn tick(&mut self, _app: &mut App) -> SurfaceAction {
+        self.poll_health();
+        SurfaceAction::None
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -1162,29 +1295,49 @@ impl DiagnosticsSurface {
             return;
         }
 
-        // The empty report shown for the single frame before the first
-        // `on_enter` probe lands.
-        if !self.doctor_collected && self.doctor.checks.is_empty() {
-            render_empty(frame, inner, t, "Running system checks…");
-            return;
-        }
+        // The two live probes (SYSTEM + PROVIDERS) run off-thread and resolve
+        // independently; until each lands its section (and DISCOVERED, derived
+        // from SYSTEM) shows a "probing…" line. The local sections (CONFIG /
+        // TOOLS / CHANNELS) always render immediately — the whole point of not
+        // blocking `on_enter`.
+        let system_probing = self.health_pending.is_some() && !self.doctor_collected;
+        let providers_probing = self.health_pending.is_some() && !self.health_collected;
+        let probing_line = || {
+            Line::from(Span::styled(
+                "  probing…",
+                Style::default().fg(t.text_muted),
+            ))
+        };
 
         let mut lines: Vec<Line> = Vec::new();
 
         // ── 1. System dependency rows ───────────────────────────────
         push_section_header(&mut lines, t, "SYSTEM");
-        for check in &self.doctor.checks {
-            lines.push(status_row(check.state, &check.label, &check.detail, t));
+        if self.doctor.checks.is_empty() && system_probing {
+            lines.push(probing_line());
+        } else {
+            for check in &self.doctor.checks {
+                lines.push(status_row(check.state, &check.label, &check.detail, t));
+            }
         }
 
         // ── 2. Provider health rows ─────────────────────────────────
         lines.push(Line::from(""));
         push_section_header(&mut lines, t, "PROVIDERS");
         if self.provider_health.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "  no provider probes yet",
-                Style::default().fg(t.text_muted),
-            )));
+            lines.push(if providers_probing {
+                probing_line()
+            } else if self.health_timed_out {
+                Line::from(Span::styled(
+                    "  health probe timed out — check network / egress policy",
+                    Style::default().fg(t.warning),
+                ))
+            } else {
+                Line::from(Span::styled(
+                    "  no provider probes yet",
+                    Style::default().fg(t.text_muted),
+                ))
+            });
         } else {
             for ph in &self.provider_health {
                 lines.push(status_row(
@@ -1304,6 +1457,9 @@ impl DiagnosticsSurface {
         // dim line with the how-to hint (absence is not a problem, so no Warn).
         lines.push(Line::from(""));
         push_section_header(&mut lines, t, "DISCOVERED");
+        if self.discovered.is_empty() && system_probing {
+            lines.push(probing_line());
+        }
         for d in &self.discovered {
             let (glyph, glyph_color, label_color) = if d.available {
                 ("● ", t.success, t.text)
@@ -1635,6 +1791,23 @@ mod tests {
         out
     }
 
+    /// Drive the async health probe (started by `on_enter`/`r`) to full
+    /// settlement by polling `tick`, the way the live render loop does. Both
+    /// the system scan and the provider-health rows must land (the receiver is
+    /// cleared only when both do). Bounded so a hung/slow probe fails the test
+    /// rather than spinning forever. Returns whether it settled in budget.
+    fn drive_health_probe(s: &mut DiagnosticsSurface) -> bool {
+        let mut app = App::new();
+        for _ in 0..400 {
+            s.tick(&mut app);
+            if s.health_pending.is_none() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        s.health_pending.is_none()
+    }
+
     // -- OSC-9 / bell helpers ----------------------------------------------
 
     #[test]
@@ -1793,14 +1966,15 @@ mod tests {
 
     #[test]
     fn doctor_renders_live_probe_rows_after_on_enter() {
-        // `on_enter` runs the real `doctor::collect` probe. Every doctor
-        // run includes the structural `binary version` row, so the live
+        // `on_enter` starts the real `doctor::collect` probe off-thread; the
+        // render loop's `tick` applies it once it lands. Every doctor run
+        // includes the structural `binary version` row, so the collected
         // report must show it — and no placeholder banner.
         let mut s = DiagnosticsSurface::new();
         s.on_enter(&mut App::new());
         assert!(
-            s.doctor_collected,
-            "on_enter must collect the doctor report"
+            drive_health_probe(&mut s),
+            "the async probe must collect the doctor report"
         );
         assert!(
             !s.doctor.checks.is_empty(),
@@ -1816,16 +1990,77 @@ mod tests {
     }
 
     #[test]
+    fn doctor_on_enter_does_not_block_and_shows_probing() {
+        // The freeze fix: `on_enter` must NOT block on the live probes. It
+        // returns immediately with a probe in flight, and the first render
+        // shows the local sections plus a "probing…" placeholder for the
+        // async ones — never a frozen/blank screen.
+        let mut s = DiagnosticsSurface::new();
+        s.on_enter(&mut App::new());
+        assert!(
+            s.health_pending.is_some(),
+            "on_enter must start the probe without blocking"
+        );
+        assert!(
+            !s.doctor_collected,
+            "the report is still in flight right after on_enter"
+        );
+        let out = render_to_string(&mut s);
+        // Local sections render instantly; the async sections show probing.
+        assert!(out.contains("CONFIG"), "local CONFIG section must render");
+        assert!(
+            out.contains("probing"),
+            "async sections must show a probing state"
+        );
+    }
+
+    #[test]
     fn doctor_re_run_key_refreshes_in_place() {
         let mut s = DiagnosticsSurface::new();
         let mut app = App::new();
-        // `r` runs the probe directly and consumes the key (no command).
+        // `r` starts the probe directly and consumes the key (no command).
         match s.handle_key(key(KeyCode::Char('r')), &mut app) {
             SurfaceAction::None => {}
             other => panic!("expected re-run to be inert, got {other:?}"),
         }
-        assert!(s.doctor_collected, "the `r` key must run the probe");
+        assert!(
+            s.health_pending.is_some(),
+            "the `r` key must start the probe"
+        );
+        assert!(drive_health_probe(&mut s), "the `r` probe must resolve");
         assert!(!s.doctor.checks.is_empty(), "re-run must populate rows");
+    }
+
+    #[test]
+    fn provider_health_probe_times_out_in_the_ui_after_the_cap() {
+        // A stalled provider-health probe (egress layer holding the connection
+        // past its own cap) must not show "probing…" forever. Once the UI
+        // timeout elapses the surface gives up waiting and renders an honest
+        // "timed out" line. Drive it with a never-resolving channel and a
+        // start time pushed past the cap (no real network, fully hermetic).
+        let mut s = DiagnosticsSurface::new();
+        let (_tx, rx) = std::sync::mpsc::channel::<ProbeMsg>();
+        s.health_pending = Some(rx); // _tx kept alive: not Disconnected, just Empty
+        s.doctor_collected = true; // pretend the fast system scan already landed
+        s.health_collected = false;
+        s.probe_started = Some(
+            std::time::Instant::now()
+                - (HEALTH_PROBE_UI_TIMEOUT + std::time::Duration::from_secs(1)),
+        );
+
+        let mut app = App::new();
+        s.tick(&mut app);
+
+        assert!(s.health_timed_out, "the probe must be marked timed out");
+        assert!(
+            s.health_pending.is_none(),
+            "a timed-out probe must stop being polled"
+        );
+        let out = render_to_string(&mut s);
+        assert!(
+            out.contains("timed out"),
+            "PROVIDERS must render the timeout copy:\n{out}"
+        );
     }
 
     // -- /cost screen ------------------------------------------------------
@@ -2545,6 +2780,7 @@ mod tests {
 
         let mut s = DiagnosticsSurface::new();
         s.on_enter(&mut App::new());
+        assert!(drive_health_probe(&mut s), "probe must resolve");
 
         // All four probes must report Yellow.
         assert_eq!(s.provider_health.len(), 4);
@@ -2580,12 +2816,14 @@ mod tests {
 
     #[test]
     fn doctor_provider_health_times_out_at_5s() {
-        // A wedged provider must NOT stall /doctor past the configured
-        // 5s health-check cap. We point `ANTHROPIC_API_BASE` at a TCP
-        // listener that accepts and never replies, set the api key so
-        // the probe is exercised (not skipped as Yellow), then assert
-        // the whole `on_enter` returns inside 10s (5s cap + slack for
-        // CI noise + the other three probes' connect-failures).
+        // A wedged provider must NOT stall /doctor. We point
+        // `ANTHROPIC_API_BASE` at a TCP listener that accepts and never
+        // replies, set the api key so the probe is exercised (not skipped as
+        // Yellow), then assert two things: (1) `on_enter` returns IMMEDIATELY
+        // — the probe runs off-thread, so a wedged provider can never freeze
+        // the UI (the on_enter-freeze fix); (2) once the probe is driven to
+        // completion the Anthropic row is Red/unreachable, proving the
+        // underlying health cap still fired.
         use std::time::Instant;
         use tokio::io::AsyncReadExt;
         use tokio::net::TcpListener;
@@ -2632,10 +2870,18 @@ mod tests {
         s.on_enter(&mut App::new());
         let elapsed = started.elapsed();
 
-        // The 5s cap holds — generous slack for slow CI.
+        // on_enter must NOT block on the (wedged) probe — it only starts the
+        // worker thread and returns. Generous slack for thread-spawn on slow CI.
         assert!(
-            elapsed < std::time::Duration::from_secs(15),
-            "/doctor on_enter must respect the 5s health-probe cap (took {elapsed:?})"
+            elapsed < std::time::Duration::from_secs(2),
+            "/doctor on_enter must not block on the health probe (took {elapsed:?})"
+        );
+
+        // Drive the off-thread probe to completion (the wedged provider hits
+        // the underlying 5s cap), then check the result.
+        assert!(
+            drive_health_probe(&mut s),
+            "probe must resolve within budget"
         );
 
         // The Anthropic row must be Red with an unreachable detail.
