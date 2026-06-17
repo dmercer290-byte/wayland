@@ -73,10 +73,29 @@ index 2bdb1c5..80918be 100644
          return params;
      }
 diff --git a/node_modules/@office-ai/aioncli-core/dist/src/mcp/oauth-provider.js b/node_modules/@office-ai/aioncli-core/dist/src/mcp/oauth-provider.js
-index 51ed849..0a64681 100644
+index 51ed849..df00348 100644
 --- a/node_modules/@office-ai/aioncli-core/dist/src/mcp/oauth-provider.js
 +++ b/node_modules/@office-ai/aioncli-core/dist/src/mcp/oauth-provider.js
-@@ -168,16 +168,46 @@ export class MCPOAuthProvider {
+@@ -147,6 +147,18 @@ export class MCPOAuthProvider {
+      * @returns Object containing the port (available immediately) and a promise for the auth response
+      */
+     startCallbackServer(expectedState, port) {
++        // Wayland: the callback server is pinned to a single port (57000), so a
++        // retried or concurrent OAuth login would collide with EADDRINUSE and
++        // wedge the port for 5 minutes ("Authorization failed: address already
++        // in use"). Close any prior in-flight login's server before binding so a
++        // new attempt always supersedes a stale one.
++        if (this._activeCallbackServer) {
++            try {
++                this._activeCallbackServer.close();
++            }
++            catch (e) { /* already closed */ }
++            this._activeCallbackServer = null;
++        }
+         let portResolve;
+         let portReject;
+         const portPromise = new Promise((resolve, reject) => {
+@@ -168,16 +180,46 @@ export class MCPOAuthProvider {
                      const error = url.searchParams.get('error');
                      if (error) {
                          res.writeHead(HTTP_OK, { 'Content-Type': 'text/html' });
@@ -133,7 +152,7 @@ index 51ed849..0a64681 100644
                          server.close();
                          reject(new Error(`OAuth error: ${error}`));
                          return;
-@@ -196,15 +226,49 @@ export class MCPOAuthProvider {
+@@ -196,15 +238,49 @@ export class MCPOAuthProvider {
                      }
                      // Send success response to browser
                      res.writeHead(HTTP_OK, { 'Content-Type': 'text/html' });
@@ -192,3 +211,11 @@ index 51ed849..0a64681 100644
                      server.close();
                      resolve({ code, state });
                  }
+@@ -213,6 +289,7 @@ export class MCPOAuthProvider {
+                     reject(error);
+                 }
+             });
++            this._activeCallbackServer = server;
+             server.on('error', (error) => {
+                 portReject(error);
+                 reject(error);
