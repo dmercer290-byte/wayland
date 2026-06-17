@@ -16,6 +16,7 @@ import { OpencodeMcpAgent } from './agents/OpencodeMcpAgent';
 import { WCoreMcpAgent } from './agents/WCoreMcpAgent';
 import type { IMcpProtocol, DetectedMcpServer, McpConnectionTestResult, McpSyncResult, McpSource } from './McpProtocol';
 import { validateMcpServer, sanitizeMcpServerName } from './validateMcpServer';
+import { mcpOAuthService } from './McpOAuthService';
 
 /**
  * MCP service - coordinates the MCP operation protocol across agents
@@ -286,6 +287,15 @@ export class McpService {
       // Ensure native Gemini CLI is also in the sync list
       const allAgents = this.addNativeGeminiIfNeeded(agents);
 
+      // Attach the OAuth bearer for already-authorized servers so the agent
+      // CLIs reuse Wayland's token instead of starting their OWN ephemeral-port
+      // OAuth flow. That second flow's callback server is torn down before the
+      // user finishes authorizing in the browser, so the redirect hits a dead
+      // port (ERR_CONNECTION_REFUSED) and the MCP never connects even though
+      // Wayland's own login succeeded. Injecting the token we already hold makes
+      // the engine skip its OAuth entirely.
+      const authedServers = await this.attachOAuthTokens(enabledServers);
+
       // Run MCP sync across all agents concurrently
       const promises = allAgents.map(async (agent) => {
         try {
@@ -299,7 +309,7 @@ export class McpService {
             };
           }
 
-          const result = await agentInstance.installMcpServers(enabledServers);
+          const result = await agentInstance.installMcpServers(authedServers);
           return {
             agent: agent.name,
             success: result.success,
@@ -320,6 +330,38 @@ export class McpService {
 
       return { success: allSuccess, results };
     });
+  }
+
+  /**
+   * Attach the stored OAuth bearer to http/sse/streamable_http servers that
+   * Wayland has already authorized, so the agent CLIs reuse it instead of
+   * starting their own OAuth. Servers with no stored token, and servers that
+   * already carry an explicit Authorization header (BYO), are returned
+   * unchanged. The original server objects are never mutated.
+   */
+  private async attachOAuthTokens(servers: IMcpServer[]): Promise<IMcpServer[]> {
+    return Promise.all(
+      servers.map(async (server) => {
+        const transport = server.transport;
+        if (
+          transport.type !== 'http' &&
+          transport.type !== 'sse' &&
+          transport.type !== 'streamable_http'
+        ) {
+          return server;
+        }
+        const headers = transport.headers ?? {};
+        if (Object.keys(headers).some((k) => k.toLowerCase() === 'authorization')) {
+          return server;
+        }
+        const token = await mcpOAuthService.getValidToken(server).catch((): string | null => null);
+        if (!token) return server;
+        return {
+          ...server,
+          transport: { ...transport, headers: { ...headers, Authorization: `Bearer ${token}` } },
+        };
+      })
+    );
   }
 
   /**
