@@ -194,7 +194,10 @@ impl AzureOpenAIProvider {
     fn select_key(&self) -> Result<Option<String>, ProviderError> {
         match &self.auth {
             AzureAuth::ApiKey(pool) => {
-                let mut pool = pool.lock().expect("key pool mutex poisoned");
+                // F19: recover the guard on poison instead of cascade-panicking —
+                // KeyPool stays valid across a prior panic, so a transient fault
+                // must not become a permanent provider-family DoS.
+                let mut pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                 pool.next_key()
                     .map(|k| Some(k.to_string()))
                     .ok_or(ProviderError::MissingApiKey)
@@ -208,7 +211,7 @@ impl AzureOpenAIProvider {
     fn mark_key_success(&self, key: &str) {
         if let AzureAuth::ApiKey(pool) = &self.auth {
             pool.lock()
-                .expect("key pool mutex poisoned")
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .mark_success(key);
         }
     }
@@ -218,7 +221,7 @@ impl AzureOpenAIProvider {
     fn mark_key_failure(&self, key: &str) {
         if let AzureAuth::ApiKey(pool) = &self.auth {
             pool.lock()
-                .expect("key pool mutex poisoned")
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .mark_failure(key);
         }
     }

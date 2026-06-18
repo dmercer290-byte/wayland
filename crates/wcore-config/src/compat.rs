@@ -140,6 +140,19 @@ pub struct ProviderCompat {
     /// the default `None` already does the right thing for native OpenAI.
     pub uses_responses_api: Option<bool>,
 
+    /// F27: Force whether the request body uses `max_completion_tokens` instead
+    /// of `max_tokens` for this provider, overriding the per-model family
+    /// default (`openai_compat::wants_max_completion_tokens`'s prefix heuristic).
+    ///
+    /// - `Some(true)` — always send `max_completion_tokens` (e.g. a gateway that
+    ///   serves only reasoning-family models behind a custom id).
+    /// - `Some(false)` — always send `max_tokens` (e.g. an openai-compat backend
+    ///   that doesn't understand `max_completion_tokens`).
+    /// - `None` (default) — defer to the model-family prefix heuristic: the
+    ///   `o1*`/`o3*` reasoning families and the `gpt-5*` family use
+    ///   `max_completion_tokens`, everything else uses `max_tokens`.
+    pub uses_max_completion_tokens: Option<bool>,
+
     /// Azure OpenAI authentication mode (R77). Only consulted for the
     /// `AzureOpenAI` provider at bootstrap. `None`/`api-key` sends the Azure
     /// `api-key` header from the configured key; `aad-bearer` switches to an
@@ -535,6 +548,9 @@ impl ProviderCompat {
                 .include_usage_in_stream
                 .or(defaults.include_usage_in_stream),
             uses_responses_api: user.uses_responses_api.or(defaults.uses_responses_api),
+            uses_max_completion_tokens: user
+                .uses_max_completion_tokens
+                .or(defaults.uses_max_completion_tokens),
             azure_auth_mode: user.azure_auth_mode.or(defaults.azure_auth_mode),
         }
     }
@@ -623,6 +639,14 @@ impl ProviderCompat {
     /// (`wcore_providers::openai_compat::model_uses_responses_api`).
     pub fn uses_responses_api(&self) -> Option<bool> {
         self.uses_responses_api
+    }
+
+    /// F27: optional override for whether the request body uses
+    /// `max_completion_tokens` instead of `max_tokens`. `None` (default)
+    /// defers to the per-model family prefix heuristic
+    /// (`wcore_providers::openai_compat::wants_max_completion_tokens`).
+    pub fn uses_max_completion_tokens(&self) -> Option<bool> {
+        self.uses_max_completion_tokens
     }
 }
 

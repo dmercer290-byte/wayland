@@ -49,7 +49,13 @@ impl OpenAIProvider {
     /// failure, skips keys in cooldown). Returns [`ProviderError::MissingApiKey`]
     /// when no key is configured or every key is cooling.
     fn select_key(&self) -> Result<String, ProviderError> {
-        let mut pool = self.keys.lock().expect("key pool mutex poisoned");
+        // F19: recover the guard on poison instead of cascade-panicking —
+        // KeyPool stays valid across a prior panic, so a transient fault must
+        // not become a permanent provider-family DoS.
+        let mut pool = self
+            .keys
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         pool.next_key()
             .map(str::to_string)
             .ok_or(ProviderError::MissingApiKey)
@@ -59,7 +65,7 @@ impl OpenAIProvider {
     fn mark_key_success(&self, key: &str) {
         self.keys
             .lock()
-            .expect("key pool mutex poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .mark_success(key);
     }
 
@@ -68,7 +74,7 @@ impl OpenAIProvider {
     fn mark_key_failure(&self, key: &str) {
         self.keys
             .lock()
-            .expect("key pool mutex poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .mark_failure(key);
     }
 
@@ -364,7 +370,10 @@ impl OpenAIProvider {
         // non-OpenAI deployments that need a custom field name; the
         // detector only overrides it when the request targets a model
         // family that REQUIRES `max_completion_tokens`.
-        let max_tokens_field = if openai_compat::wants_max_completion_tokens(&request.model) {
+        let max_tokens_field = if openai_compat::max_completion_tokens_override(
+            &request.model,
+            self.compat.uses_max_completion_tokens(),
+        ) {
             "max_completion_tokens"
         } else {
             self.compat

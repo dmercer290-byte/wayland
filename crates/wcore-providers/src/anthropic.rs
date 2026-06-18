@@ -53,7 +53,13 @@ impl AnthropicProvider {
     /// pre-rotation behavior of surfacing a clear error rather than a blank
     /// credential that would produce an opaque 401.
     fn select_key(&self) -> Result<String, ProviderError> {
-        let mut pool = self.keys.lock().expect("key pool mutex poisoned");
+        // F19: recover the guard on poison instead of cascade-panicking —
+        // KeyPool stays valid across a prior panic, so a transient fault must
+        // not become a permanent provider-family DoS.
+        let mut pool = self
+            .keys
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         pool.next_key()
             .map(str::to_string)
             .ok_or(ProviderError::MissingApiKey)
@@ -63,7 +69,7 @@ impl AnthropicProvider {
     fn mark_key_success(&self, key: &str) {
         self.keys
             .lock()
-            .expect("key pool mutex poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .mark_success(key);
     }
 
@@ -72,7 +78,7 @@ impl AnthropicProvider {
     fn mark_key_failure(&self, key: &str) {
         self.keys
             .lock()
-            .expect("key pool mutex poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .mark_failure(key);
     }
 

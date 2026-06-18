@@ -27,9 +27,29 @@ fn lower(model: &str) -> String {
 /// True when the request body must use `max_completion_tokens` instead of
 /// `max_tokens`. Matches the OpenAI reasoning families (`o1*`, `o3*`) and
 /// the `gpt-5*` family.
+///
+/// This is the model-family **prefix heuristic** default. Callers that have a
+/// `ProviderCompat` should prefer [`max_completion_tokens_override`], which
+/// threads the `[compat] uses_max_completion_tokens` flag over this default —
+/// keeping the provider-quirk decision in config rather than hardcoded here.
 pub fn wants_max_completion_tokens(model: &str) -> bool {
     let m = lower(model);
     is_o_series(&m) || is_gpt5(&m)
+}
+
+/// F27: resolve the `max_completion_tokens`-vs-`max_tokens` decision, honoring
+/// an optional per-deployment `ProviderCompat.uses_max_completion_tokens`
+/// override before falling back to the model-family default in
+/// [`wants_max_completion_tokens`].
+///
+/// `Some(true)` / `Some(false)` force `max_completion_tokens` / `max_tokens`
+/// respectively; `None` defers to the prefix heuristic. Mirrors
+/// [`responses_api_override`].
+pub fn max_completion_tokens_override(model: &str, override_flag: Option<bool>) -> bool {
+    match override_flag {
+        Some(forced) => forced,
+        None => wants_max_completion_tokens(model),
+    }
 }
 
 /// True when the model accepts a `reasoning_effort` field. R78: forwards to the
@@ -175,6 +195,26 @@ mod tests {
         // o-series predicate.
         assert!(!wants_max_completion_tokens("octo-7b"));
         assert!(!wants_max_completion_tokens("ollama-llama3"));
+    }
+
+    // --- max_completion_tokens_override (F27) -----------------------------
+
+    #[test]
+    fn max_completion_tokens_override_none_uses_prefix_heuristic() {
+        // None defers to the model-family default — behavior identical to the
+        // bare heuristic.
+        assert!(max_completion_tokens_override("gpt-5", None));
+        assert!(max_completion_tokens_override("o1-mini", None));
+        assert!(!max_completion_tokens_override("gpt-4o", None));
+    }
+
+    #[test]
+    fn max_completion_tokens_override_forces_field() {
+        // Some(true) forces max_completion_tokens even for a classic chat model;
+        // Some(false) forces max_tokens even for a reasoning-family model.
+        assert!(max_completion_tokens_override("gpt-4o", Some(true)));
+        assert!(!max_completion_tokens_override("gpt-5", Some(false)));
+        assert!(!max_completion_tokens_override("o1-mini", Some(false)));
     }
 
     // --- accepts_reasoning_effort -----------------------------------------
