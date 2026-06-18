@@ -1125,6 +1125,9 @@ type CleanupModules = {
   // L16 (AUDIT-05 F18): shut down cron timers from before-quit so scheduled
   // work cannot outlive the app's quit sequence.
   cron: typeof import('@process/services/cron/cronServiceSingleton');
+  // #139: reap webhook tunnel CLIs (cloudflared/ngrok/tailscale) on quit so
+  // their long-lived child processes don't orphan past the app.
+  tunnel: typeof import('@process/channels/tunnel');
 };
 let _cleanupModulesPromise: Promise<CleanupModules> | undefined;
 
@@ -1139,17 +1142,21 @@ const prefetchCleanupModules = (): Promise<CleanupModules> => {
     import('@process/services/database/export'),
     import('@process/services/cron/cronServiceSingleton'),
     import('@process/bridge/fileWatchBridge'),
-  ]).then(([ambient, channels, webuiBridge, webserverAdapter, officeWatch, pptPreview, database, cron, fileWatch]) => ({
-    ambient,
-    channels,
-    webuiBridge,
-    webserverAdapter,
-    officeWatch,
-    pptPreview,
-    database,
-    cron,
-    fileWatch,
-  }));
+    import('@process/channels/tunnel'),
+  ]).then(
+    ([ambient, channels, webuiBridge, webserverAdapter, officeWatch, pptPreview, database, cron, fileWatch, tunnel]) => ({
+      ambient,
+      channels,
+      webuiBridge,
+      webserverAdapter,
+      officeWatch,
+      pptPreview,
+      database,
+      cron,
+      fileWatch,
+      tunnel,
+    })
+  );
 };
 
 // Ensure we don't miss the ready event when running in CLI/WebUI mode
@@ -1287,6 +1294,7 @@ app.on('before-quit', async () => {
       safeImport('database', () => import('@process/services/database/export')),
       safeImport('cron', () => import('@process/services/cron/cronServiceSingleton')),
       safeImport('fileWatch', () => import('@process/bridge/fileWatchBridge')),
+      safeImport('tunnel', () => import('@process/channels/tunnel')),
     ]);
     const out: Partial<CleanupModules> = {};
     for (const [k, v] of entries) {
@@ -1356,6 +1364,19 @@ app.on('before-quit', async () => {
       PER_STEP_TIMEOUT_MS
     );
 
+    // #139: reap webhook tunnel CLIs. ChannelManager.shutdown() does not own
+    // the tunnels (the WebhookExposureService singleton does), so they must be
+    // torn down explicitly here or the cloudflared/ngrok/tailscale process
+    // orphans past the app.
+    const tunnelStep = withTimeout(
+      'stopAllTunnels',
+      (async () => {
+        if (!mods.tunnel) return;
+        await mods.tunnel.stopAllTunnels();
+      })(),
+      PER_STEP_TIMEOUT_MS
+    );
+
     const webServerStep = withTimeout(
       'webServer.close',
       (async () => {
@@ -1412,6 +1433,7 @@ app.on('before-quit', async () => {
       ambientStep,
       teamStep,
       channelsStep,
+      tunnelStep,
       webServerStep,
       officeWatchStep,
       pptPreviewStep,
