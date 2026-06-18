@@ -10,10 +10,14 @@ import { loadBaselineProviderCatalog } from '@process/providers/catalog/provider
 import { getEnhancedEnv } from '@process/utils/shellEnv';
 
 /**
- * The four wcore providers Wayland configures natively (each carries its own
- * auth + base-url handling in {@link buildSpawnConfig}).
+ * The wcore providers Wayland configures natively (each carries its own auth +
+ * base-url handling in {@link buildSpawnConfig}). `xai` is the engine's native
+ * Grok provider (0.12.2+): it owns api.x.ai as its base URL and refreshes a Grok
+ * OAuth bearer itself, so it must be spawned as `--provider xai` (not the
+ * generic openai+base-url path) to get the token refresh + the grok-4.3
+ * stop-param fix.
  */
-type NativeWCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex';
+type NativeWCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex' | 'xai';
 
 /**
  * A wcore `--provider` value. Either a {@link NativeWCoreProvider} literal or a
@@ -86,6 +90,17 @@ function catalogIdFor(model: TProviderWithModel): string | undefined {
 }
 
 /**
+ * Whether a model is xAI / Grok, so it routes to the engine's native `xai`
+ * provider. xAI is stored as a generic `openai-compatible` provider (api.x.ai),
+ * so its identity survives only in the registry bridge tag `v2:xai`. The
+ * `platform === 'xai'` arm is forward-compat for a future direct-platform store.
+ */
+function isXaiModel(model: TProviderWithModel): boolean {
+  const tag = (model as unknown as Record<string, unknown>).__waylandModelRegistryBridge;
+  return tag === 'v2:xai' || model.platform === 'xai';
+}
+
+/**
  * Map provider name to wcore provider name.
  *
  * Platform values: 'custom' | 'new-api' | 'gemini' | 'gemini-vertex-ai' | 'anthropic' | 'bedrock'
@@ -96,6 +111,14 @@ function mapProvider(model: TProviderWithModel): WCoreProvider {
   // Takes precedence over the native platform mapping below.
   const catalogId = catalogIdFor(model);
   if (catalogId) return catalogId;
+
+  // xAI / Grok: route to the engine's NATIVE `xai` provider (0.12.2+) instead of
+  // the generic openai+base-url path. Only `--provider xai` gets the engine's
+  // Grok OAuth token refresh, the grok-4.3 stop-param fix, and the
+  // auth_required/auth_invalid codes. xAI is persisted as platform
+  // 'openai-compatible' (api.x.ai), so the only surviving identity carrier here
+  // is the registry bridge tag `v2:xai`.
+  if (isXaiModel(model)) return 'xai';
 
   // Special handling for new-api: respect per-model protocol setting
   if (model.platform === 'new-api' && model.useModel && model.modelProtocols) {
@@ -282,6 +305,15 @@ export function buildSpawnConfig(
       if (baseUrl) args.push('--base-url', stripTrailingV1(baseUrl));
       break;
     }
+
+    case 'xai':
+      // Native xAI/Grok provider (engine 0.12.2+). The engine owns api.x.ai as
+      // its default base URL and, when a Grok OAuth credential exists (its own
+      // store or ~/.grok/auth.json), drives a self-refreshing bearer - so pass
+      // NO `--base-url`. `XAI_API_KEY` carries the plain-key case; the engine
+      // ignores it when an OAuth credential is present and refreshes instead.
+      if (model.apiKey) env.XAI_API_KEY = model.apiKey;
+      break;
 
     case 'bedrock': {
       const bc = (model as TProviderWithModel & { bedrockConfig?: any }).bedrockConfig;

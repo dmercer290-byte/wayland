@@ -125,6 +125,38 @@ describe('buildSpawnConfig - catalog provider dispatch (T3.5)', () => {
     expect(env.TOTALLY_MADE_UP_PROVIDER_API_KEY).toBeUndefined();
   });
 
+  it('routes xAI / Grok to the native --provider xai with XAI_API_KEY and NO --base-url', () => {
+    // xAI is persisted like a generic openai-compatible provider (api.x.ai); its
+    // identity survives only in the `v2:xai` bridge tag. It must reach the engine
+    // as `--provider xai` (native Grok provider, 0.12.2+) so the OAuth refresh +
+    // grok-4.3 stop-param fix apply - NOT the openai+base-url path.
+    const model: TProviderWithModel = {
+      id: 'random-uuid-xai',
+      platform: 'openai-compatible',
+      name: 'xAI',
+      baseUrl: 'https://api.x.ai/v1',
+      apiKey: 'xai-secret',
+      useModel: 'grok-4.3',
+      __waylandModelRegistryBridge: 'v2:xai',
+    } as TProviderWithModel;
+    const { args, env } = buildSpawnConfig(model, OPTS);
+
+    expect(providerArg(args)).toBe('xai');
+    // The engine owns api.x.ai as its default base URL - we must NOT pass one.
+    expect(hasBaseUrl(args)).toBe(false);
+    // Scoped XAI_API_KEY (engine ignores it when an OAuth credential is present).
+    expect(env.XAI_API_KEY).toBe('xai-secret');
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it('routes xAI whose platform was stored directly as xai (forward-compat)', () => {
+    const { args, env } = buildSpawnConfig(makeNativeModel('xai', 'xai-key', 'grok-4.3'), OPTS);
+
+    expect(providerArg(args)).toBe('xai');
+    expect(hasBaseUrl(args)).toBe(false);
+    expect(env.XAI_API_KEY).toBe('xai-key');
+  });
+
   it('routes a catalog provider whose platform was stored directly as the catalog id (forward-compat)', () => {
     // Forward-compat: if a future connect path stores the catalog id directly in
     // `platform` (no bridge tag), it must still route as a catalog provider.
