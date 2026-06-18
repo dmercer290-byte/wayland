@@ -58,14 +58,56 @@ Be helpful.`;
     expect(config.context).toBe('Be helpful.');
   });
 
-  it('reads presetAgentType as an alias for main-agent', () => {
+  it('reads presetAgentType as an alias for main-agent when value is valid', () => {
     const body = `---
 name: Alias Bot
-presetAgentType: qwen
+presetAgentType: gemini
 ---
 
 x`;
-    expect(buildAssistantFromSkillMd({ name: 'Alias Bot' }, body, 1).presetAgentType).toBe('qwen');
+    expect(buildAssistantFromSkillMd({ name: 'Alias Bot' }, body, 1).presetAgentType).toBe('gemini');
+  });
+
+  // FIX 3: presetAgentType validation
+  it('falls back to DEFAULT_PRESET_AGENT_TYPE when main-agent is a path traversal', () => {
+    const body = `---
+name: Evil Bot
+main-agent: ../../evil
+---
+
+x`;
+    expect(buildAssistantFromSkillMd({ name: 'Evil Bot' }, body, 1).presetAgentType).toBe('claude');
+  });
+
+  it('falls back to DEFAULT_PRESET_AGENT_TYPE when presetAgentType is an unknown value', () => {
+    const body = `---
+name: Bad Bot
+presetAgentType: rm-rf
+---
+
+x`;
+    expect(buildAssistantFromSkillMd({ name: 'Bad Bot' }, body, 1).presetAgentType).toBe('claude');
+  });
+
+  // FIX 3: avatar validation
+  it('falls back to lucide:Bot when avatar is a bogus value', () => {
+    const body = `---
+name: Bogus Bot
+avatar: javascript:alert(1)
+---
+
+x`;
+    expect(buildAssistantFromSkillMd({ name: 'Bogus Bot' }, body, 1).avatar).toBe('lucide:Bot');
+  });
+
+  it('accepts a valid lucide: avatar', () => {
+    const body = `---
+name: Icon Bot
+avatar: lucide:Telescope
+---
+
+x`;
+    expect(buildAssistantFromSkillMd({ name: 'Icon Bot' }, body, 1).avatar).toBe('lucide:Telescope');
   });
 });
 

@@ -40,8 +40,8 @@ export type SkillImportIo = {
   readFile: (p: string) => Promise<Buffer>;
   /** Copy a file (src → dest). */
   copyFile: (src: string, dest: string) => Promise<void>;
-  /** Ensure a directory exists (recursive). */
-  mkdir: (p: string) => Promise<void>;
+  /** Ensure a directory exists (recursive). MUST create parent dirs. */
+  mkdir: (p: string, opts?: { recursive?: boolean }) => Promise<void>;
   /** Write a Buffer to a file. */
   writeFile: (p: string, data: Buffer | string) => Promise<void>;
   /** Clone a git repo to destDir. */
@@ -75,7 +75,7 @@ export const defaultSkillImportIo: SkillImportIo = {
   readdir,
   readFile,
   copyFile,
-  mkdir,
+  mkdir: (p, opts) => mkdir(p, opts),
   writeFile,
   gitClone: async (url, destDir) => {
     await execAsync(`git clone --depth 1 -- ${JSON.stringify(url)} ${JSON.stringify(destDir)}`);
@@ -327,7 +327,7 @@ export class SkillImport {
     }
     const skillName = path.basename(path.dirname(srcPath));
     const destDir = path.join(IMPORTED_DIR, skillName);
-    await this.io.mkdir(destDir);
+    await this.io.mkdir(destDir, { recursive: true });
     const destFile = path.join(destDir, 'SKILL.md');
     await this.io.copyFile(srcPath, destFile);
     // Read body for scan.
@@ -343,7 +343,7 @@ export class SkillImport {
   private async _copyAndScan(srcDir: string): Promise<ImportResult> {
     const basename = path.basename(srcDir);
     const destDir = path.join(IMPORTED_DIR, basename);
-    await this.io.mkdir(destDir);
+    await this.io.mkdir(destDir, { recursive: true });
 
     const files = await this.io.readdir(srcDir);
     let body = '';
@@ -384,6 +384,7 @@ export class SkillImport {
 
     const imported: ImportedSkillResult[] = [];
     const quarantined: string[] = [];
+    const warnings: string[] = [];
 
     for (let i = 0; i < skills.length; i++) {
       const skill = skills[i];
@@ -397,7 +398,7 @@ export class SkillImport {
         // Register clean and review skills into the library under the type
         // declared in the SKILL.md frontmatter (default 'skill'). This is what
         // surfaces imported `type:'workflow'` entries on the Workflows page.
-        SkillLibrary.getInstance().registerSource([
+        const collisions = SkillLibrary.getInstance().registerSource([
           {
             name: skill.name,
             description: '',
@@ -408,6 +409,7 @@ export class SkillImport {
             security: report,
           },
         ]);
+        warnings.push(...collisions);
         imported.push({
           name: skill.name,
           destPath: skill.destDir,
@@ -418,6 +420,6 @@ export class SkillImport {
       }
     }
 
-    return { imported, quarantined, warnings: [] };
+    return { imported, quarantined, warnings };
   }
 }

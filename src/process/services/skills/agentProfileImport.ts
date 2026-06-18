@@ -18,6 +18,7 @@
  */
 
 import type { AcpBackendConfig } from '@/common/types/acpTypes';
+import { PRESET_AGENT_TYPES } from '@process/extensions/types';
 
 // IO seam - injected by the bridge with real ConfigStorage + rule writers,
 // stubbed in unit tests. Keeps this module free of Electron/fs coupling.
@@ -65,8 +66,35 @@ function slugify(name: string): string {
 
 /** Default presetAgentType when frontmatter omits `main-agent`/`presetAgentType`. */
 const DEFAULT_PRESET_AGENT_TYPE = 'claude';
-/** Default avatar when frontmatter omits `avatar`. */
+/** Default avatar when frontmatter omits `avatar` or provides an unsafe value. */
 const DEFAULT_AVATAR = 'lucide:Bot';
+
+/**
+ * Safe set of presetAgentType values. Anything from untrusted frontmatter that
+ * isn't in this set falls back to DEFAULT_PRESET_AGENT_TYPE so a malicious
+ * `main-agent: ../../evil` value can never route to an unexpected backend.
+ */
+const VALID_PRESET_AGENT_TYPES: ReadonlySet<string> = new Set(PRESET_AGENT_TYPES);
+
+/**
+ * Regex that matches safe avatar values:
+ *  - lucide:<IconName>  (lucide icon)
+ *  - a single emoji character
+ *  - data: URI (inline image)
+ *  - asset: or app: scheme (internal asset references)
+ * Anything else falls back to DEFAULT_AVATAR.
+ */
+const SAFE_AVATAR_RE = /^(lucide:[A-Za-z][A-Za-z0-9]*|data:[a-z]+\/[a-z0-9+.-]+;base64,[A-Za-z0-9+/=]+|(asset|app):\/\/[^\s]+|\p{Emoji_Presentation}|\p{Extended_Pictographic})$/u;
+
+function sanitizePresetAgentType(raw: string | undefined): string {
+  if (raw && VALID_PRESET_AGENT_TYPES.has(raw)) return raw;
+  return DEFAULT_PRESET_AGENT_TYPE;
+}
+
+function sanitizeAvatar(raw: string | undefined): string {
+  if (raw && SAFE_AVATAR_RE.test(raw)) return raw;
+  return DEFAULT_AVATAR;
+}
 
 /**
  * Map a parsed agent-profile SKILL.md into an AcpBackendConfig.
@@ -82,11 +110,10 @@ export function buildAssistantFromSkillMd(
 ): AcpBackendConfig {
   const slug = slugify(frontmatter.name) || 'assistant';
   const id = `imported-${slug}-${now}`;
-  const avatar = frontmatterField(body, 'avatar') ?? DEFAULT_AVATAR;
-  const presetAgentType =
-    frontmatterField(body, 'main-agent') ??
-    frontmatterField(body, 'presetAgentType') ??
-    DEFAULT_PRESET_AGENT_TYPE;
+  const avatar = sanitizeAvatar(frontmatterField(body, 'avatar'));
+  const presetAgentType = sanitizePresetAgentType(
+    frontmatterField(body, 'main-agent') ?? frontmatterField(body, 'presetAgentType')
+  );
   const systemPrompt = stripFrontmatter(body);
 
   return {

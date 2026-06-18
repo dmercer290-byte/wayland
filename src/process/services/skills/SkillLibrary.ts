@@ -255,21 +255,40 @@ export class SkillLibrary {
 
   /**
    * Merge additional skill entries into the library.
-   * On name collision the later registration wins; a warning is logged.
+   *
+   * Collision policy:
+   *  - Imported entries CANNOT overwrite trusted sources ('wayland-library',
+   *    'team'). The incoming entry is skipped and a warning is returned so the
+   *    caller can surface "skipped — name collides with a built-in" to the user.
+   *  - All other collisions: later registration wins (existing behavior).
+   *
+   * @returns Array of human-readable warning strings for any skipped entries.
    */
-  registerSource(incoming: SkillIndexEntry[]): void {
+  registerSource(incoming: SkillIndexEntry[]): string[] {
+    const collisionWarnings: string[] = [];
+    const TRUSTED_SOURCES: ReadonlySet<SkillSource> = new Set(['wayland-library', 'team']);
+
     for (const entry of incoming) {
       if (this.byName.has(entry.name)) {
-        const prev = this.byName.get(entry.name)?.source;
+        const existing = this.byName.get(entry.name)!;
+        // Imported entry must not shadow a trusted built-in/vendor entry.
+        if (entry.source === 'imported' && TRUSTED_SOURCES.has(existing.source)) {
+          const warning = `Skipped '${entry.name}': name collides with a built-in (${existing.source}) — import not applied`;
+          collisionWarnings.push(warning);
+          console.warn(`${TAG} ${warning}`);
+          continue;
+        }
         console.warn(
           `${TAG} Skill name collision on registerSource - '${entry.name}' overwritten`,
-          { prev, next: entry.source }
+          { prev: existing.source, next: entry.source }
         );
         this.entries = this.entries.filter((e) => e.name !== entry.name);
       }
       this.entries.push(entry);
       this.byName.set(entry.name, entry);
     }
+
+    return collisionWarnings;
   }
 
   /**
