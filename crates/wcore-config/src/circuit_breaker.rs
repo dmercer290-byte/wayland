@@ -76,6 +76,12 @@ struct Inner {
     state: BreakerState,
     /// When the breaker transitioned to Open.
     opened_at: Option<Instant>,
+    /// F10: whether the single HalfOpen trial permit is currently held. Set
+    /// when admitting the one trial caller; while held, further callers are
+    /// treated as Open (rejected) until the trial resolves (success → Closed,
+    /// failure → Open). Prevents the post-cooldown stampede where every
+    /// concurrent caller was admitted at once.
+    half_open_trial_taken: bool,
 }
 
 impl Inner {
@@ -84,6 +90,7 @@ impl Inner {
             failures: vec![],
             state: BreakerState::Closed,
             opened_at: None,
+            half_open_trial_taken: false,
         }
     }
 }
@@ -118,12 +125,24 @@ impl CircuitBreaker {
     pub fn is_open(&self) -> bool {
         let mut s = self.inner.lock();
         match s.state {
-            BreakerState::Closed | BreakerState::HalfOpen => false,
+            BreakerState::Closed => false,
+            // F10: in HalfOpen, admit exactly ONE trial. The first caller takes
+            // the permit (returns false); any concurrent caller while the trial
+            // is in flight is treated as Open until the trial resolves.
+            BreakerState::HalfOpen => {
+                if s.half_open_trial_taken {
+                    true
+                } else {
+                    s.half_open_trial_taken = true;
+                    false
+                }
+            }
             BreakerState::Open => {
                 if let Some(opened) = s.opened_at
                     && opened.elapsed() >= self.cfg.cooldown
                 {
                     s.state = BreakerState::HalfOpen;
+                    s.half_open_trial_taken = true; // this caller takes the single trial permit
                     return false; // allow trial call
                 }
                 true
@@ -145,6 +164,7 @@ impl CircuitBreaker {
         s.failures.clear();
         s.opened_at = None;
         s.state = BreakerState::Closed;
+        s.half_open_trial_taken = false; // trial resolved; release the permit
     }
 
     /// Record a failed call outcome.
@@ -163,6 +183,7 @@ impl CircuitBreaker {
         if s.state == BreakerState::HalfOpen {
             s.state = BreakerState::Open;
             s.opened_at = Some(now);
+            s.half_open_trial_taken = false; // trial resolved; a fresh trial may be admitted after the next cooldown
             return Some(BreakerState::Open);
         }
 
@@ -266,6 +287,59 @@ mod tests {
         assert_eq!(t, Some(BreakerState::Open));
         assert_eq!(b.state(), BreakerState::Open);
         assert!(b.is_open());
+    }
+
+    #[test]
+    fn half_open_admits_only_one_trial() {
+        // F10: after cooldown elapses, exactly ONE caller is admitted in
+        // HalfOpen; subsequent callers are rejected (treated as Open) until the
+        // trial resolves.
+        let b = CircuitBreaker::new(CircuitBreakerConfig {
+            fail_threshold: 1,
+            window: Duration::from_secs(30),
+            cooldown: Duration::from_millis(1),
+        });
+        b.record_failure();
+        assert_eq!(b.state(), BreakerState::Open);
+        std::thread::sleep(Duration::from_millis(5));
+
+        // First post-cooldown caller takes the single trial permit.
+        assert!(!b.is_open(), "first caller must be admitted as the trial");
+        assert_eq!(b.state(), BreakerState::HalfOpen);
+
+        // Every concurrent caller while the trial is in flight is rejected.
+        assert!(b.is_open(), "second concurrent caller must be rejected");
+        assert!(b.is_open(), "third concurrent caller must be rejected");
+        assert_eq!(b.state(), BreakerState::HalfOpen);
+
+        // Trial succeeds → Closed; the permit is released.
+        b.record_success();
+        assert_eq!(b.state(), BreakerState::Closed);
+        assert!(!b.is_open());
+    }
+
+    #[test]
+    fn half_open_trial_failure_allows_fresh_trial_after_cooldown() {
+        // F10: after a failed trial re-opens the breaker, the next cooldown
+        // must again admit exactly one fresh trial (permit was released).
+        let b = CircuitBreaker::new(CircuitBreakerConfig {
+            fail_threshold: 1,
+            window: Duration::from_secs(30),
+            cooldown: Duration::from_millis(1),
+        });
+        b.record_failure();
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(!b.is_open()); // first trial admitted
+        assert!(b.is_open()); // concurrent caller rejected
+        b.record_failure(); // trial fails → re-Open
+        assert_eq!(b.state(), BreakerState::Open);
+
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(
+            !b.is_open(),
+            "a fresh trial must be admitted after cooldown"
+        );
+        assert!(b.is_open(), "but still only one at a time");
     }
 
     #[test]

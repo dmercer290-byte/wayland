@@ -82,8 +82,14 @@ impl SseTransport {
         for (k, v) in headers {
             let name = reqwest::header::HeaderName::from_bytes(k.as_bytes())
                 .map_err(|e| McpError::Transport(format!("Invalid header name '{}': {}", k, e)))?;
-            let value = HeaderValue::from_str(v)
-                .map_err(|e| McpError::Transport(format!("Invalid header value '{}': {}", v, e)))?;
+            // F15: report only the header NAME — `${cred:...}` refs are resolved
+            // to real secrets before connect, so the value must never reach an
+            // error string or log.
+            let value = HeaderValue::from_str(v).map_err(|e| {
+                McpError::Transport(format!(
+                    "invalid value for header '{k}' (value redacted): {e}"
+                ))
+            })?;
             header_map.insert(name, value);
         }
 

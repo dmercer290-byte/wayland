@@ -123,24 +123,48 @@ impl Resolver for GitHubReleasesResolver {
         // the invariant explicit at the trait boundary.
         validate_plugin_name(name)?;
         let url = self.release_api_url(name)?;
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(concat!("wayland-core/", env!("CARGO_PKG_VERSION")))
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| PluginCliError::Network(e.to_string()))?;
-        let resp = client
-            .get(url)
-            .send()
-            .map_err(|e| PluginCliError::Network(e.to_string()))?;
-        if !resp.status().is_success() {
+        // F14: route the GitHub release fetch through `wcore_egress` so the
+        // request inherits the SSRF policy (host allowlist, redirect handling)
+        // instead of a raw `reqwest::blocking::Client` that bypasses it.
+        //
+        // `EgressClient` is async, but `resolve_manifest` is a sync trait method
+        // that runs INSIDE the ambient tokio runtime (`plugin::run` is called
+        // from the async `run()` future). Driving a nested `Runtime` from there
+        // would panic ("Cannot start a runtime from within a runtime"). The
+        // bridge that is safe in both contexts is a fresh OS thread owning its
+        // own runtime — outside any ambient runtime, so `block_on` is always
+        // legal (mirrors `provider_keys::egress_get_status`).
+        let status = std::thread::spawn(move || -> Result<(u16, serde_json::Value)> {
+            let runtime = tokio::runtime::Runtime::new()
+                .map_err(|e| PluginCliError::Network(e.to_string()))?;
+            runtime.block_on(async move {
+                let client = wcore_egress::EgressClient::builder()
+                    .user_agent(concat!("wayland-core/", env!("CARGO_PKG_VERSION")))
+                    .timeout(std::time::Duration::from_secs(15))
+                    .build()
+                    .map_err(|e| PluginCliError::Network(e.to_string()))?;
+                let resp = client
+                    .get(url.as_str())
+                    .send()
+                    .await
+                    .map_err(|e| PluginCliError::Network(e.to_string()))?;
+                let code = resp.status().as_u16();
+                let json: serde_json::Value = resp
+                    .json()
+                    .await
+                    .map_err(|e| PluginCliError::Network(e.to_string()))?;
+                Ok((code, json))
+            })
+        })
+        .join()
+        .map_err(|_| PluginCliError::Network("plugin fetch thread panicked".into()))?;
+        let (code, json) = status?;
+        if !(200..300).contains(&code) {
             return Err(PluginCliError::NoReleaseAsset {
                 plugin: name.to_string(),
                 host: "github.com".into(),
             });
         }
-        let json: serde_json::Value = resp
-            .json()
-            .map_err(|e| PluginCliError::Network(e.to_string()))?;
         // `tag_name` is GitHub's release tag (e.g. `v0.6.0`); strip the
         // leading `v` so consumers see a SemVer string. If absent we
         // record `0.0.0` rather than failing — a release without a tag

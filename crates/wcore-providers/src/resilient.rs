@@ -47,6 +47,26 @@ fn should_trip_breaker(err: &ProviderError) -> bool {
     !matches!(reason.cooldown_class(), CooldownClass::Semantic)
 }
 
+/// F20: True only for REQUEST-SEMANTIC errors — the ones that would fail
+/// identically on EVERY provider in the chain, so trying a fallback is
+/// pointless and the chain must abort immediately.
+///
+/// This is the abort set: `PromptTooLong` and the request-shape `Api` errors
+/// (413 payload/context too large, 400 malformed request). These are properties
+/// of the request itself, not of any one provider.
+///
+/// Deliberately EXCLUDED (these are provider/model-specific — a different
+/// fallback may succeed, so the chain must CONTINUE): 401/403 (bad credential
+/// for this provider), 404 (`ModelNotFound` on this provider), and
+/// `MissingApiKey`. A misconfigured first fallback must not abort the chain.
+fn is_request_fatal(err: &ProviderError) -> bool {
+    match err {
+        ProviderError::PromptTooLong(_) => true,
+        ProviderError::Api { status, .. } => *status == 400 || *status == 413,
+        _ => false,
+    }
+}
+
 /// Alias for the shared `CircuitBreakerConfig`; keeps callers in `wcore-agent` stable.
 pub type CircuitConfig = CircuitBreakerConfig;
 
@@ -118,7 +138,10 @@ pub struct ResilientProvider {
     primary: Arc<dyn LlmProvider>,
     primary_name: String,
     fallbacks: Vec<(String, Arc<dyn LlmProvider>)>,
-    breaker: CircuitBreaker,
+    // F32: `Arc` so the stream-terminal forwarder task can record the breaker
+    // verdict (success on `Done`, failure on a terminal mid-stream `Error`)
+    // after `stream()` has already returned the channel.
+    breaker: Arc<CircuitBreaker>,
     reporter: Arc<dyn CircuitReporter>,
 }
 impl ResilientProvider {
@@ -133,9 +156,58 @@ impl ResilientProvider {
             primary_name: primary_name.into(),
             primary,
             fallbacks,
-            breaker: CircuitBreaker::new(cfg),
+            breaker: Arc::new(CircuitBreaker::new(cfg)),
             reporter,
         }
+    }
+
+    /// F32: forward every event from the primary's stream onto a fresh channel,
+    /// recording the breaker verdict only when the stream terminates:
+    /// `Done` → success (closes a HalfOpen trial), a terminal `Error` (or the
+    /// channel closing with no `Done`) → failure. This prevents a provider that
+    /// always accepts headers then dies mid-body from looking permanently
+    /// healthy. Events are passed through unmodified.
+    fn spawn_breaker_forwarder(
+        &self,
+        mut rx: mpsc::Receiver<LlmEvent>,
+    ) -> mpsc::Receiver<LlmEvent> {
+        let (tx, out_rx) = mpsc::channel(32);
+        let breaker = Arc::clone(&self.breaker);
+        let reporter = Arc::clone(&self.reporter);
+        let primary_name = self.primary_name.clone();
+        tokio::spawn(async move {
+            // `saw_done` distinguishes a clean completion from a stream that
+            // closed without a terminal Done (treated as a mid-stream failure).
+            let mut saw_done = false;
+            let mut saw_error = false;
+            while let Some(event) = rx.recv().await {
+                match &event {
+                    LlmEvent::Done { .. } => saw_done = true,
+                    LlmEvent::Error(_) => saw_error = true,
+                    _ => {}
+                }
+                if tx.send(event).await.is_err() {
+                    // Consumer dropped the receiver — stop forwarding. We do not
+                    // record a verdict here: an abandoned read is not a provider
+                    // health signal.
+                    return;
+                }
+            }
+            if saw_done && !saw_error {
+                if let Some(new) = breaker.on_success() {
+                    reporter.report(&primary_name, None, new, None);
+                }
+            } else if let Some(new) = breaker.on_failure() {
+                // Mid-stream death (terminal Error or channel closed without Done).
+                reporter.report(
+                    &primary_name,
+                    None,
+                    new,
+                    Some("stream terminated without success"),
+                );
+            }
+        });
+        out_rx
     }
 }
 
@@ -163,10 +235,15 @@ impl LlmProvider for ResilientProvider {
         if self.breaker.before_call().is_some() {
             match self.primary.stream(request).await {
                 Ok(rx) => {
-                    if let Some(new) = self.breaker.on_success() {
-                        self.reporter.report(&self.primary_name, None, new, None);
-                    }
-                    return Ok(rx);
+                    // F32: header acceptance is NOT yet a success. stream() returns
+                    // Ok(rx) once headers arrive, but the request can still die
+                    // mid-body (surfaced as a terminal LlmEvent::Error on the
+                    // channel, never as Err here). Recording success now would keep
+                    // a provider that always dies mid-stream looking "healthy".
+                    // Instead, defer the breaker verdict to the stream's terminal
+                    // event by forwarding through a wrapper channel: Done → success,
+                    // terminal Error → failure.
+                    return Ok(self.spawn_breaker_forwarder(rx));
                 }
                 Err(e) if e.is_retryable() => {
                     // Only count provider-side (transient/permanent) failures
@@ -186,7 +263,21 @@ impl LlmProvider for ResilientProvider {
                     }
                     // fall through to fallbacks
                 }
-                Err(other) => return Err(other),
+                // F20: a NON-retryable primary error must distinguish
+                // request-semantic faults (abort — they would fail on every
+                // provider) from provider/model-specific ones (401/403/404/
+                // MissingApiKey — a misconfigured primary). The latter must
+                // fall through to the fallback chain rather than abort before
+                // it is ever tried; otherwise fallbacks never run for the most
+                // common misconfiguration, defeating their entire purpose
+                // (same policy the fallback loop below applies).
+                Err(e) if is_request_fatal(&e) => return Err(e),
+                Err(e) => {
+                    if self.fallbacks.is_empty() {
+                        return Err(e);
+                    }
+                    // fall through to fallbacks
+                }
             }
         } else {
             // Circuit open + cooldown not elapsed → skip primary, log the skip.
@@ -205,8 +296,15 @@ impl LlmProvider for ResilientProvider {
                         .report(&self.primary_name, Some(name), CircuitState::Open, None);
                     return Ok(rx);
                 }
+                // Retryable failures move on to the next fallback.
                 Err(e) if e.is_retryable() => continue,
-                Err(other) => return Err(other),
+                // F20: only REQUEST-SEMANTIC errors (would fail on every
+                // provider too) abort the chain. A provider/model-specific
+                // non-retryable error (401/403/404/MissingApiKey — e.g. a
+                // misconfigured first fallback) must NOT abort: continue to the
+                // next fallback. The last entry's error surfaces below.
+                Err(e) if is_request_fatal(&e) => return Err(e),
+                Err(_) => continue,
             }
         }
         Err(ProviderError::Connection(
@@ -237,6 +335,24 @@ mod tests {
             }
         }
     }
+    /// Emit a terminal `Done` so the breaker forwarder (F32) classifies the
+    /// stream as a real success — a stream that closes WITHOUT a `Done` is now
+    /// (correctly) treated as a mid-stream failure.
+    fn ok_done_channel() -> mpsc::Receiver<LlmEvent> {
+        use wcore_types::message::{FinishReason, StopReason, TokenUsage};
+        let (tx, rx) = mpsc::channel(1);
+        tokio::spawn(async move {
+            let _ = tx
+                .send(LlmEvent::Done {
+                    stop_reason: StopReason::EndTurn,
+                    finish_reason: FinishReason::Stop,
+                    usage: TokenUsage::default(),
+                })
+                .await;
+        });
+        rx
+    }
+
     struct AlwaysOk;
     #[async_trait]
     impl LlmProvider for AlwaysOk {
@@ -245,8 +361,7 @@ mod tests {
             "openai-chatgpt"
         }
         async fn stream(&self, _: &LlmRequest) -> Result<mpsc::Receiver<LlmEvent>, ProviderError> {
-            let (_tx, rx) = mpsc::channel(1);
-            Ok(rx)
+            Ok(ok_done_channel())
         }
     }
     struct AlwaysFail;
@@ -327,6 +442,64 @@ mod tests {
         let _ = resilient.stream(&dummy_request()).await.unwrap();
         // No transitions emitted (start Closed → still Closed).
         assert!(rep.events.lock().is_empty());
+    }
+
+    /// F32: a provider that accepts headers (returns `Ok(rx)`) but then dies
+    /// mid-stream (terminal `LlmEvent::Error`) must NOT be recorded as healthy.
+    /// Enough such mid-stream deaths must trip the breaker — proving the verdict
+    /// is deferred to the stream's terminal event, not header acceptance.
+    #[tokio::test]
+    async fn mid_stream_error_counts_as_failure_not_success() {
+        struct HeadersThenDie;
+        #[async_trait]
+        impl LlmProvider for HeadersThenDie {
+            async fn stream(
+                &self,
+                _: &LlmRequest,
+            ) -> Result<mpsc::Receiver<LlmEvent>, ProviderError> {
+                let (tx, rx) = mpsc::channel(1);
+                tokio::spawn(async move {
+                    // Some output, then a terminal mid-stream error — never a Done.
+                    let _ = tx.send(LlmEvent::TextDelta("partial".into())).await;
+                    let _ = tx.send(LlmEvent::Error("connection reset".into())).await;
+                });
+                Ok(rx)
+            }
+        }
+        let rep = Arc::new(CapReporter {
+            events: Mutex::new(vec![]),
+        });
+        let resilient = ResilientProvider::new(
+            "primary",
+            Arc::new(HeadersThenDie),
+            vec![],
+            CircuitConfig {
+                fail_threshold: 2,
+                window: Duration::from_secs(30),
+                cooldown: Duration::from_secs(60),
+            },
+            rep.clone(),
+        );
+        // Each call: headers accepted (Ok), then mid-stream death. Drain each
+        // returned stream so the forwarder observes the terminal Error and
+        // records the verdict. After 2 such deaths the breaker must open.
+        for _ in 0..3 {
+            if let Ok(mut rx) = resilient.stream(&dummy_request()).await {
+                while rx.recv().await.is_some() {}
+            }
+            // Let the forwarder's spawned task run to completion.
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            rep.events
+                .lock()
+                .iter()
+                .any(|(_, _, s)| *s == CircuitState::Open),
+            "mid-stream deaths must trip the breaker — header acceptance must \
+             not be recorded as a success; got {:?}",
+            rep.events.lock()
+        );
     }
 
     #[tokio::test]
@@ -484,6 +657,141 @@ mod tests {
             calls_after_open,
             "primary must NOT be called once its circuit is open — the open \
              path must route straight to the fallback"
+        );
+    }
+
+    /// F20: a misconfigured FIRST fallback whose error is non-retryable but
+    /// provider/model-specific (404 ModelNotFound / MissingApiKey) must NOT
+    /// abort the chain — the SECOND fallback is still tried and serves the
+    /// request. Before the fix, the first non-retryable error returned early.
+    #[tokio::test]
+    async fn provider_specific_error_in_fallback_continues_chain() {
+        struct NotFound;
+        #[async_trait]
+        impl LlmProvider for NotFound {
+            async fn stream(
+                &self,
+                _: &LlmRequest,
+            ) -> Result<mpsc::Receiver<LlmEvent>, ProviderError> {
+                Err(ProviderError::Api {
+                    status: 404,
+                    message: "model not found".into(),
+                })
+            }
+        }
+        struct MissingKey;
+        #[async_trait]
+        impl LlmProvider for MissingKey {
+            async fn stream(
+                &self,
+                _: &LlmRequest,
+            ) -> Result<mpsc::Receiver<LlmEvent>, ProviderError> {
+                Err(ProviderError::MissingApiKey)
+            }
+        }
+        // Primary down (retryable) → falls into the fallback chain. First two
+        // fallbacks fail with provider-specific non-retryable errors; the third
+        // succeeds and must serve the request.
+        let resilient = ResilientProvider::new(
+            "primary",
+            Arc::new(AlwaysFail),
+            vec![
+                (
+                    "bad-model".into(),
+                    Arc::new(NotFound) as Arc<dyn LlmProvider>,
+                ),
+                ("no-key".into(), Arc::new(MissingKey)),
+                ("good".into(), Arc::new(AlwaysOk)),
+            ],
+            CircuitConfig::default(),
+            Arc::new(NoOpCircuitReporter),
+        );
+        assert!(
+            resilient.stream(&dummy_request()).await.is_ok(),
+            "a 404/MissingApiKey first fallback must not abort the chain — \
+             the later working fallback must still be reached"
+        );
+    }
+
+    /// F20 (primary boundary): a NON-retryable provider/model-specific error
+    /// from the PRIMARY (here MissingApiKey — a misconfigured primary) must fall
+    /// through to the fallback chain, not abort before any fallback runs. Before
+    /// the fix the primary's `Err(other) => return Err(other)` arm aborted here,
+    /// so fallbacks never ran for the most common misconfiguration.
+    #[tokio::test]
+    async fn provider_specific_error_in_primary_falls_through_to_fallback() {
+        struct PrimaryMissingKey;
+        #[async_trait]
+        impl LlmProvider for PrimaryMissingKey {
+            async fn stream(
+                &self,
+                _: &LlmRequest,
+            ) -> Result<mpsc::Receiver<LlmEvent>, ProviderError> {
+                Err(ProviderError::MissingApiKey)
+            }
+        }
+        let resilient = ResilientProvider::new(
+            "primary",
+            Arc::new(PrimaryMissingKey),
+            vec![("good".into(), Arc::new(AlwaysOk) as Arc<dyn LlmProvider>)],
+            CircuitConfig::default(),
+            Arc::new(NoOpCircuitReporter),
+        );
+        assert!(
+            resilient.stream(&dummy_request()).await.is_ok(),
+            "a non-retryable primary (MissingApiKey) must fall through to the \
+             working fallback, not abort before the chain is tried"
+        );
+    }
+
+    /// F20: a REQUEST-SEMANTIC error (413/400/PromptTooLong) from a fallback
+    /// WOULD fail on every provider, so the chain aborts immediately rather
+    /// than wasting calls on the remaining fallbacks.
+    #[tokio::test]
+    async fn request_fatal_error_in_fallback_aborts_chain() {
+        struct TooLarge {
+            calls: AtomicUsize,
+        }
+        #[async_trait]
+        impl LlmProvider for TooLarge {
+            async fn stream(
+                &self,
+                _: &LlmRequest,
+            ) -> Result<mpsc::Receiver<LlmEvent>, ProviderError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Err(ProviderError::Api {
+                    status: 413,
+                    message: "context length exceeded".into(),
+                })
+            }
+        }
+        let never = Arc::new(TooLarge {
+            calls: AtomicUsize::new(0),
+        });
+        let resilient = ResilientProvider::new(
+            "primary",
+            Arc::new(AlwaysFail),
+            vec![
+                (
+                    "too-large".into(),
+                    Arc::new(TooLarge {
+                        calls: AtomicUsize::new(0),
+                    }) as Arc<dyn LlmProvider>,
+                ),
+                ("never".into(), never.clone()),
+            ],
+            CircuitConfig::default(),
+            Arc::new(NoOpCircuitReporter),
+        );
+        let err = resilient.stream(&dummy_request()).await.unwrap_err();
+        assert!(
+            matches!(err, ProviderError::Api { status: 413, .. }),
+            "the request-fatal 413 must surface and abort the chain"
+        );
+        assert_eq!(
+            never.calls.load(Ordering::SeqCst),
+            0,
+            "the chain must abort on the request-fatal error — later fallbacks must NOT be called"
         );
     }
 
