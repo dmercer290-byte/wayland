@@ -161,6 +161,28 @@ pub struct ProviderCompat {
     /// Set via `[compat] azure_auth_mode = "aad-bearer"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub azure_auth_mode: Option<crate::config::AzureAuthMode>,
+
+    /// Alternate API base URL to retry against when the primary `base_url`
+    /// rejects the credential with a 401. Some providers run two region-locked
+    /// platforms that share the wire protocol but NOT the key namespace, so a
+    /// valid key issued on one platform 401s on the other's host. MiniMax is the
+    /// motivating case (`api.minimax.io` vs `api.minimaxi.com` — a key works on
+    /// exactly one, verified live 2026-06-18). When set, a 401 on the primary
+    /// transparently retries the same key against this host and pins whichever
+    /// authenticates for the rest of the session, so the user never has to know
+    /// which region issued their key. `None` (the default) disables failover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_fallback_base_url: Option<String>,
+
+    /// Whether the provider accepts the OpenAI `stop` parameter. The engine
+    /// attaches "fluff" stop sequences as an output token-optimization on
+    /// client-optimized routes; some providers' reasoning models reject the
+    /// `stop` parameter outright with a 400 (xAI's `grok-4.3`: *"Model grok-4.3
+    /// does not support parameter stop"*, verified live 2026-06-18). Set
+    /// `false` to suppress the optimization so those models work. `None`
+    /// defaults to `true` — every existing provider keeps sending `stop`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_stop_param: Option<bool>,
 }
 
 impl ProviderCompat {
@@ -239,6 +261,11 @@ impl ProviderCompat {
             cost_per_output_token: Some(0.0),
             cost_per_cache_read_token: None,
             cost_per_cache_write_token: None,
+            // MiniMax runs two region-locked platforms with separate key
+            // namespaces. The default `base_url` targets `api.minimax.io`; a key
+            // issued on the other platform 401s there, so on a 401 retry the same
+            // key against `api.minimaxi.com` and pin whichever authenticates.
+            auth_fallback_base_url: Some("https://api.minimaxi.com/anthropic".into()),
             ..Self::anthropic_defaults()
         }
     }
@@ -465,6 +492,10 @@ impl ProviderCompat {
         // Base URL ends in `/v1`; pin `api_path` to avoid `/v1/v1`.
         Self {
             api_path: Some("/chat/completions".into()),
+            // grok-4.3 (a reasoning model) 400s on the `stop` parameter, which
+            // the engine otherwise attaches as a client-side output
+            // optimization — suppress it so Grok models actually run.
+            supports_stop_param: Some(false),
             ..Self::openai_compat_provider("xai")
         }
     }
@@ -479,6 +510,11 @@ impl ProviderCompat {
         // Base URL ends in `/v1`; pin `api_path` to avoid `/v1/v1`.
         Self {
             api_path: Some("/chat/completions".into()),
+            // Moonshot (Kimi) runs two region-locked platforms with separate key
+            // namespaces, like MiniMax. The default base URL targets the
+            // international host (`api.moonshot.ai`); a mainland-China key 401s
+            // there, so on a 401 retry the same key against `api.moonshot.cn`.
+            auth_fallback_base_url: Some("https://api.moonshot.cn/v1".into()),
             ..Self::openai_compat_provider("moonshot")
         }
     }
@@ -578,6 +614,10 @@ impl ProviderCompat {
                 .uses_max_completion_tokens
                 .or(defaults.uses_max_completion_tokens),
             azure_auth_mode: user.azure_auth_mode.or(defaults.azure_auth_mode),
+            auth_fallback_base_url: user
+                .auth_fallback_base_url
+                .or(defaults.auth_fallback_base_url),
+            supports_stop_param: user.supports_stop_param.or(defaults.supports_stop_param),
         }
     }
 
@@ -613,6 +653,12 @@ impl ProviderCompat {
 
     pub fn api_path(&self) -> &str {
         self.api_path.as_deref().unwrap_or("/v1/chat/completions")
+    }
+
+    /// Whether to send the OpenAI `stop` parameter. Defaults to `true`; xAI
+    /// sets it `false` because `grok-4.3` (a reasoning model) 400s on `stop`.
+    pub fn supports_stop_param(&self) -> bool {
+        self.supports_stop_param.unwrap_or(true)
     }
 
     pub fn supports_thinking(&self) -> bool {
@@ -763,6 +809,13 @@ mod tests {
         assert_eq!(compat.cost_per_input_token, Some(0.0));
         assert_eq!(compat.cost_per_output_token, Some(0.0));
         assert_eq!(compat.cost_per_cache_read_token, None);
+        // Region-locked-key failover: a 401 on the default `api.minimax.io`
+        // host retries `api.minimaxi.com` so a key from either MiniMax platform
+        // works without the user knowing which region issued it.
+        assert_eq!(
+            compat.auth_fallback_base_url.as_deref(),
+            Some("https://api.minimaxi.com/anthropic")
+        );
     }
 
     #[test]
@@ -807,6 +860,45 @@ mod tests {
         ] {
             assert_eq!(compat.api_path(), "/chat/completions");
         }
+    }
+
+    #[test]
+    fn xai_suppresses_stop_param_but_others_keep_it() {
+        // grok-4.3 400s on `stop`, so xAI must report supports_stop_param=false;
+        // every other provider keeps the default true (engine still attaches the
+        // fluff-stop output optimization on client-optimized routes).
+        assert!(
+            !ProviderCompat::xai_defaults().supports_stop_param(),
+            "xAI must suppress the stop parameter (grok-4.3 rejects it)"
+        );
+        assert!(ProviderCompat::openai_defaults().supports_stop_param());
+        assert!(ProviderCompat::anthropic_defaults().supports_stop_param());
+        assert!(ProviderCompat::groq_defaults().supports_stop_param());
+    }
+
+    #[test]
+    fn dual_region_providers_set_auth_fallback() {
+        // Moonshot (Kimi) and MiniMax both run two region-locked platforms with
+        // separate key namespaces, so a key from the other region 401s on the
+        // default host and must fail over.
+        assert_eq!(
+            ProviderCompat::moonshot_defaults()
+                .auth_fallback_base_url
+                .as_deref(),
+            Some("https://api.moonshot.cn/v1")
+        );
+        assert_eq!(
+            ProviderCompat::minimax_defaults()
+                .auth_fallback_base_url
+                .as_deref(),
+            Some("https://api.minimaxi.com/anthropic")
+        );
+        // Single-region providers leave it unset.
+        assert!(
+            ProviderCompat::openai_defaults()
+                .auth_fallback_base_url
+                .is_none()
+        );
     }
 
     #[test]
