@@ -91,6 +91,10 @@ export class PromptExecutor {
     this.host.messageTranslator.onTurnEnd();
     this.host.setStatus('active');
     this.host.callbacks.onSignal({ type: 'turn_finished' });
+    // Drain any follow-up the user queued mid-turn (sendMessage during
+    // 'prompting' calls setPending). flush() is a no-op unless a prompt is
+    // pending and the session is active, which it now is.
+    this.flush();
   }
 
   private handlePromptError(err: unknown, content: PromptContent): void {

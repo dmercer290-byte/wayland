@@ -207,6 +207,13 @@ export class AcpSession {
         this.promptExecutor.setPending(content);
         this.lifecycle.resume();
         return;
+      case 'prompting':
+        // The agent is mid-turn. Queue the follow-up instead of rejecting it -
+        // `PromptExecutor.execute` flushes the pending prompt the moment the
+        // current turn finishes (status → active). This is what stops a fast
+        // second message from hitting a "Cannot send in prompting state" error.
+        this.promptExecutor.setPending(content);
+        return;
       default:
         throw new AcpError('INVALID_STATE', `Cannot send in ${this._status} state`);
     }

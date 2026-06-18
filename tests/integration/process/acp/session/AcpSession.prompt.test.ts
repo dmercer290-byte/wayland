@@ -92,4 +92,28 @@ describe('AcpSession prompt flow', () => {
     session.sendMessage('after suspend');
     await vi.waitFor(() => expect(['resuming', 'active', 'prompting'].includes(session.status)).toBe(true));
   });
+
+  it('sendMessage during prompting queues the follow-up and flushes it after the turn', async () => {
+    const session = await startSession();
+
+    // Hold the first turn open so the session stays in 'prompting'.
+    let releaseFirstTurn: (value: { stopReason: string }) => void = () => {};
+    (client.prompt as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirstTurn = resolve;
+        })
+    );
+
+    session.sendMessage('first');
+    await vi.waitFor(() => expect(session.status).toBe('prompting'));
+
+    // A second message arriving mid-turn must NOT throw "Cannot send in prompting state".
+    await expect(session.sendMessage('second')).resolves.toBeUndefined();
+    expect(client.prompt).toHaveBeenCalledTimes(1); // queued, not sent yet
+
+    // Finishing the first turn flushes the queued follow-up automatically.
+    releaseFirstTurn({ stopReason: 'end_turn' });
+    await vi.waitFor(() => expect(client.prompt).toHaveBeenCalledTimes(2));
+  });
 });
