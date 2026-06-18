@@ -42,8 +42,20 @@ export const resolveSelectedProvider = (
   if (isFluxModelId(modelId)) {
     return providers.find((p) => (p.model ?? []).some((m) => isFluxModelId(m)));
   }
+  // Resolve in priority order: exact legacy id → the registry bridge tag
+  // (`v2:<providerId>`) → the membership fallback. The bridge-tag match is the
+  // deterministic owner of the selection: it stops an OpenRouter model id that
+  // overlaps another provider from binding to the WRONG legacy row (#167 false
+  // 401), and it resolves a ChatGPT-subscription row even when getAvailableModels
+  // filters that row's models out of the function-calling set (#168/#158). The
+  // membership fallback remains only for untagged (non-bridge) providers.
+  const bridgeTagMatch = providers.find((p) => {
+    const tag = (p as unknown as Record<string, unknown>)[BRIDGE_TAG_KEY];
+    return typeof tag === 'string' && tag === `${V2_TAG_PREFIX}${providerId}`;
+  });
   return (
     providers.find((p) => p.id === providerId) ??
+    bridgeTagMatch ??
     providers.find((p) => getAvailableModels(p).includes(modelId))
   );
 };
