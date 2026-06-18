@@ -1909,8 +1909,24 @@ export async function connectModelRegistryProvider(
     console.error('[modelRegistry] connectModelRegistryProvider called before IPC init');
     return { ok: false, error: 'unknown' };
   }
+  // Detect a FIRST-TIME Flux connection before the upsert so a later rekey - or a
+  // reconnect after the user turned routing off (#160) - never silently re-enables
+  // routing. Connecting Flux Router at all IS the intent to route through it.
+  const isFreshFluxConnect = providerId === FLUX_PROVIDER_ID && !!_repo && !_repo.getRegistryProvider(providerId);
   const result = await _handlers.connect({ providerId, creds });
   if (result.ok && _repo) void mirrorConnectOrRekey(_repo, providerId);
+  // Enable Flux routing once on first connect so the home/chat default resolves
+  // flux-auto instead of a tiny local model (e.g. Ollama smollm2:135m) that
+  // happens to sort first in the safe-default fallback. Mirrors the headless
+  // env-import path (importEnvKeys); the fresh-connect guard preserves a user's
+  // later decision to turn routing off.
+  if (result.ok && isFreshFluxConnect) {
+    try {
+      await ProcessConfig.set('system.routeThroughFlux', true);
+    } catch (routeError) {
+      console.warn('[modelRegistry] Failed to enable Flux routing on first connect:', routeError);
+    }
+  }
   // Live-update any open picker / the Models page after a connect, the same way
   // the manual refresh handler does. On failure the provider's `error` state
   // must surface too, so emit always.
