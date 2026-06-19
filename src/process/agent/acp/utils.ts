@@ -283,13 +283,38 @@ export const CLAUDE_SLOT_MODELS: ReadonlyArray<{ id: string; label: string }> = 
 ];
 
 /**
+ * Normalize any Claude model id to its Claude Code slot (`sonnet`/`opus`/`haiku`),
+ * or `undefined` if it is not a Claude model.
+ *
+ * The in-chat picker offers the registry catalog ids (`claude-opus-4-8`,
+ * `claude-sonnet-4-6`, ...), but Claude Code's ACP backend has no
+ * `session/set_model` and only honors the three slot aliases via
+ * `ANTHROPIC_MODEL`. So a registry pick MUST be mapped to its slot before it can
+ * take effect — without this the pick falls through to an in-place `set_model`
+ * the CLI rejects with -32601 and the switch silently no-ops (#184).
+ *
+ * Accepts a bare slot id (returned as-is) or a catalog id whose name contains
+ * the slot keyword.
+ */
+export function claudeSlotForModelId(modelId?: string | null): string | undefined {
+  if (!modelId) return undefined;
+  if (CLAUDE_SLOT_MODELS.some((m) => m.id === modelId)) return modelId;
+  const lower = modelId.toLowerCase();
+  for (const { id } of CLAUDE_SLOT_MODELS) {
+    if (lower.includes(id)) return id;
+  }
+  return undefined;
+}
+
+/**
  * Build the static Claude slot model catalog (Sonnet / Opus / Haiku) used as a
  * fallback when the bridge advertises no models. `currentModelId` reflects the
- * user's pick; unknown/absent values default to Sonnet.
+ * user's pick; unknown/absent values default to Sonnet. A registry catalog id
+ * (`claude-opus-4-8`) is normalized to its slot so the picker's pick resolves to
+ * a real slot label instead of falling back to Sonnet (#184).
  */
 export function buildClaudeSlotModelInfo(currentModelId?: string | null): AcpModelInfo {
-  const current =
-    currentModelId && CLAUDE_SLOT_MODELS.some((m) => m.id === currentModelId) ? currentModelId : 'sonnet';
+  const current = claudeSlotForModelId(currentModelId) ?? 'sonnet';
   const label = CLAUDE_SLOT_MODELS.find((m) => m.id === current)?.label ?? current;
   return {
     currentModelId: current,

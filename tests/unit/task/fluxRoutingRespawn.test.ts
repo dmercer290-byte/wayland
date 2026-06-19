@@ -131,6 +131,22 @@ describe('AcpAgentManager.setModel - Flux routing-boundary detection', () => {
     expect(setModelByConfigOption).not.toHaveBeenCalled();
   });
 
+  it('normalizes a registry Claude id to its slot and respawns (#184)', async () => {
+    // The in-chat picker offers registry catalog ids (`claude-opus-4-8`), not the
+    // bare slot. Claude Code only honors the slot via ANTHROPIC_MODEL, so the id
+    // must be normalized to `opus` and carried by a respawn — otherwise it falls
+    // through to set_model and the CLI rejects it with -32601 (the live bug).
+    const { manager, setModelByConfigOption, respawnSpy } = makeManager({
+      lastRouting: 'native',
+      nextRouting: 'native',
+    });
+
+    await manager.setModel('claude-opus-4-8');
+
+    expect(respawnSpy).toHaveBeenCalledWith('opus');
+    expect(setModelByConfigOption).not.toHaveBeenCalled();
+  });
+
   it('never re-spawns a non-routable backend (next routing unknown)', async () => {
     const { manager, setModelByConfigOption, respawnSpy } = makeManager({
       lastRouting: 'native',

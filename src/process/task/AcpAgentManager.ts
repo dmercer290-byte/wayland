@@ -13,7 +13,7 @@ import type { IConfigStorageRefer } from '@/common/config/storage';
 import { WAYLAND_FILES_MARKER } from '@/common/config/constants';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import { parseError, uuid } from '@/common/utils';
-import { CLAUDE_SLOT_MODELS } from '@process/agent/acp/utils';
+import { claudeSlotForModelId } from '@process/agent/acp/utils';
 import type {
   AcpBackend,
   AcpModelInfo,
@@ -688,8 +688,8 @@ ${collectedResponses.join('\n')}`;
     // unreliable. Back the pick with ANTHROPIC_MODEL at spawn so the chosen slot
     // actually runs (#184). Flux routing already injected its own model above.
     if (data.backend === 'claude' && decision.routing !== 'flux') {
-      const slot = data.currentModelId;
-      if (slot && CLAUDE_SLOT_MODELS.some((m) => m.id === slot)) {
+      const slot = claudeSlotForModelId(data.currentModelId);
+      if (slot) {
         mergedEnv.ANTHROPIC_MODEL = slot;
       }
     }
@@ -1840,13 +1840,15 @@ ${collectedResponses.join('\n')}`;
     // A native claude slot pick is carried by ANTHROPIC_MODEL at spawn (see
     // resolveAgentCliConfig), so it only takes effect on a respawn — the bridge's
     // in-place set_model is unreliable when it advertises no model list (#184).
-    const nativeClaudeSlotChange =
-      this.options.backend === 'claude' &&
-      nextRouting !== 'flux' &&
-      CLAUDE_SLOT_MODELS.some((m) => m.id === modelId);
+    // The picker offers registry catalog ids (`claude-opus-4-8`), so normalize to
+    // the slot the CLI actually accepts; respawn (and persist) with that slot, or
+    // the pick falls through to set_model and the CLI rejects it with -32601.
+    const claudeSlot =
+      this.options.backend === 'claude' && nextRouting !== 'flux' ? claudeSlotForModelId(modelId) : undefined;
+    const nativeClaudeSlotChange = claudeSlot !== undefined;
 
     if (crossesRoutingBoundary || nativeClaudeSlotChange) {
-      return this.respawnForRoutingChange(modelId);
+      return this.respawnForRoutingChange(claudeSlot ?? modelId);
     }
 
     // Same-routing switch TO a Flux id (e.g. the chat is already flux-routed and
