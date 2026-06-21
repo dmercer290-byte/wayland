@@ -2028,6 +2028,7 @@ export type I18nKey =
   | 'projects.wizard.constraints.q'
   | 'projects.wizard.continue'
   | 'projects.wizard.draft.failed'
+  | 'projects.wizard.draft.failedReason'
   | 'projects.wizard.draft.generating'
   | 'projects.wizard.draft.modelNote'
   | 'projects.wizard.draft.noModel'

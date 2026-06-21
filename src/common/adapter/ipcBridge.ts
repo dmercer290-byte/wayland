@@ -2699,7 +2699,7 @@ export const project = {
    * takes name/description directly rather than a project id. Never rejects.
    */
   generateKnowledgeDraft: buildProvider<
-    { draft: string; error?: 'no-model' | 'failed' },
+    { draft: string; error?: 'no-model' | 'failed'; detail?: string },
     {
       name?: string;
       description?: string;

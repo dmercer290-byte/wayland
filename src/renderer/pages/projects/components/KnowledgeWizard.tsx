@@ -49,6 +49,9 @@ const KnowledgeWizard: React.FC<{
   const [draft, setDraft] = useState('');
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<'no-model' | 'failed' | null>(null);
+  // Underlying provider cause for a 'failed' draft (e.g. '401: invalid key'), so
+  // the user sees WHY instead of a dead-end message (#221).
+  const [genDetail, setGenDetail] = useState<string | null>(null);
 
   const AUDIENCE_CHIPS = useMemo(
     () => [
@@ -104,9 +107,10 @@ const KnowledgeWizard: React.FC<{
   const generate = useCallback(async () => {
     setGenerating(true);
     setGenError(null);
+    setGenDetail(null);
     try {
       const constraintText = [...constraints, extra.trim()].filter(Boolean).join('; ');
-      const { draft: out, error } = await ipcBridge.project.generateKnowledgeDraft.invoke({
+      const { draft: out, error, detail } = await ipcBridge.project.generateKnowledgeDraft.invoke({
         name: projectName,
         description: projectDescription,
         kind,
@@ -116,8 +120,10 @@ const KnowledgeWizard: React.FC<{
         audience: audience.length > 0 ? audience.join(', ') : undefined,
         constraints: constraintText || undefined,
       });
-      if (error) setGenError(error);
-      else if (out) setDraft(out);
+      if (error) {
+        setGenError(error);
+        setGenDetail(detail ?? null);
+      } else if (out) setDraft(out);
       else setGenError('failed');
     } catch {
       setGenError('failed');
@@ -286,6 +292,11 @@ const KnowledgeWizard: React.FC<{
                         ? t('projects.wizard.draft.noModel')
                         : t('projects.wizard.draft.failed')}
                     </span>
+                    {genError === 'failed' && genDetail && (
+                      <span className='max-w-340px text-11px text-t-tertiary'>
+                        {t('projects.wizard.draft.failedReason', { detail: genDetail })}
+                      </span>
+                    )}
                     {genError === 'failed' && (
                       <Button size='small' icon={<RefreshCw size={13} />} onClick={() => void generate()}>
                         {t('projects.wizard.draft.retry')}

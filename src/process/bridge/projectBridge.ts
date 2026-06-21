@@ -265,7 +265,10 @@ export function initProjectBridge(): void {
       } catch (err) {
         console.error('[projectBridge] generateKnowledgeDraft failed:', err);
         const msg = err instanceof Error ? err.message : '';
-        return { draft: '', error: msg === 'no-usable-model' ? 'no-model' : 'failed' };
+        if (msg === 'no-usable-model') return { draft: '', error: 'no-model' };
+        // Surface the real cause (provider status + message, or an abort/timeout)
+        // so the wizard can tell the user WHY instead of a dead-end 'failed' (#221).
+        return { draft: '', error: 'failed', detail: msg || undefined };
       }
     }
   );
