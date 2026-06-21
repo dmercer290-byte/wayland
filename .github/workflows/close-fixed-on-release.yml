@@ -1,19 +1,18 @@
 name: Close fixed-pending-release on stable
 
-# Closes every open issue labeled state:fixed-pending-release with a "shipped in
-# <tag>" comment when a STABLE version ships.
+# Closes open issues labeled state:fixed-pending-release when a STABLE release ships
+# — but ONLY the issues whose fix THIS release actually delivers (per-carrier match),
+# so a release can never false-close an issue that is waiting on a DIFFERENT release.
 #
-# Three triggers, because the plain `release: published` event is unreliable here
-# (it did NOT fire for the v0.11.0 stable publish, though it fires for RCs):
-#   1. workflow_run  — fires when "Build and Release" completes for a stable tag.
-#                      This is the dependable path, immune to how the release is
-#                      published (GITHUB_TOKEN-published releases don't re-trigger
-#                      `release` events in other workflows).
-#   2. release        — belt-and-suspenders for when the event DOES propagate.
-#   3. workflow_dispatch — manual fallback, attribute to a chosen tag.
+# How "delivered by release $TAG" is decided, per issue (from its wl:pending-release
+# "fixed-in=<repo>@<ver>" marker):
+#   - wayland-desktop@<ver> / FerroxLabs/wayland@<ver> / bare <ver>  -> ver == $TAG (exact)
+#   - wayland-core@<ver>  -> this desktop build BUNDLES engine >= <ver>
+#                            (read from scripts/prepareWaylandCore.js at the release tag)
+#   - no fixed-in marker, or any other carrier  -> LEFT OPEN (fail safe; never false-close)
 #
-# Prereleases (rc/beta — any tag containing "-") never trigger it. The job is
-# idempotent: it only touches OPEN labeled issues, so double-firing is harmless.
+# Triggers: workflow_run (dependable), release (belt+suspenders), workflow_dispatch (manual).
+# Prereleases (tags containing "-") never trigger. Idempotent: only touches OPEN labeled issues.
 
 on:
   workflow_run:
@@ -24,10 +23,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to attribute the fix to (e.g. v0.11.0)'
+        description: 'Release tag to attribute fixes to (e.g. v0.11.1)'
         required: true
 
 permissions:
+  contents: read
   issues: write
 
 jobs:
@@ -40,22 +40,57 @@ jobs:
        startsWith(github.event.workflow_run.head_branch, 'v') &&
        !contains(github.event.workflow_run.head_branch, '-'))
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.event.workflow_run.head_branch }}
     steps:
-      - name: Close fixed-pending-release issues
+      - name: Check out the release tag (to read the bundled engine version)
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name || github.event.workflow_run.head_branch }}
+
+      - name: Close only the issues this release actually delivers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name || github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
-          echo "Closing state:fixed-pending-release issues, attributing to $TAG"
-          gh issue list -R "$REPO" --state open \
-            --label 'state:fixed-pending-release' --limit 200 \
+          norm(){ echo "${1#v}"; }
+          gte(){ [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }   # is $1 >= $2 ?
+          TAGV="$(norm "$TAG")"
+
+          # bundled engine version shipped by THIS desktop release (read at the tag)
+          BUNDLED=""
+          if [ -f scripts/prepareWaylandCore.js ]; then
+            BUNDLED="$(grep -oE "DEFAULT_WCORE_VERSION *= *'[^']+'" scripts/prepareWaylandCore.js \
+                       | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+            BUNDLED="$(norm "${BUNDLED:-}")"
+          fi
+          echo "Release $TAG delivers: wayland-desktop@$TAGV ; bundled wayland-core@${BUNDLED:-unknown}"
+
+          gh issue list -R "$REPO" --state open --label 'state:fixed-pending-release' --limit 200 \
             --json number --jq '.[].number' | while read -r n; do
             [ -z "$n" ] && continue
-            echo "Closing #$n"
-            gh issue comment "$n" -R "$REPO" \
-              --body "Shipped in **$TAG**. Closing — please update and reopen if you still hit this on that build or later."
-            gh issue edit "$n" -R "$REPO" --remove-label 'state:fixed-pending-release' || true
-            gh issue close "$n" -R "$REPO" --reason completed
+            fixed="$(gh issue view "$n" -R "$REPO" --json comments \
+                      --jq '[.comments[].body]|join("\n")' \
+                      | grep -oE 'fixed-in=[^ >]+' | tail -1 | sed 's/fixed-in=//' || true)"
+            if [ -z "$fixed" ]; then
+              echo "#$n: no fixed-in marker -> leaving OPEN (manual close)"; continue
+            fi
+            repo="${fixed%@*}"; ver="$(norm "${fixed#*@}")"; deliver=false
+            case "$repo" in
+              wayland-core) { [ -n "$BUNDLED" ] && gte "$BUNDLED" "$ver"; } && deliver=true ;;
+              wayland-desktop|FerroxLabs/wayland|wayland) [ "$ver" = "$TAGV" ] && deliver=true ;;
+              *) [ "$ver" = "$TAGV" ] && deliver=true ;;
+            esac
+            if [ "$deliver" = true ]; then
+              echo "#$n: $fixed delivered by $TAG -> closing"
+              note="Shipped in **$TAG**"
+              { [ -n "$BUNDLED" ] && [ "$repo" = "wayland-core" ]; } && note="$note (bundles wayland-core $BUNDLED)"
+              gh issue comment "$n" -R "$REPO" --body "$note. Closing — update and reopen if you still hit this."
+              gh issue edit "$n" -R "$REPO" --remove-label 'state:fixed-pending-release' || true
+              gh issue close "$n" -R "$REPO" --reason completed
+            else
+              echo "#$n: $fixed NOT delivered by $TAG (bundled wayland-core@${BUNDLED:-?}) -> leaving OPEN"
+            fi
           done
