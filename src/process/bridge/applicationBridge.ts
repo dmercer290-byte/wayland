@@ -20,19 +20,14 @@ import type { IStartOnBootStatus } from '@/common/adapter/ipcBridge';
 
 let mainWindowRef: BrowserWindow | null = null;
 
-const START_ON_BOOT_UNSUPPORTED_MESSAGE =
-  'Start on boot requires a packaged macOS, Windows, or Linux app.';
+const START_ON_BOOT_UNSUPPORTED_MESSAGE = 'Start on boot requires a packaged macOS, Windows, or Linux app.';
 export const START_ON_BOOT_WINDOWS_ARG = '--start-on-boot';
 const START_ON_BOOT_LINUX_ARG = '--start-on-boot';
 const LINUX_DESKTOP_FILE_NAME = 'wayland.desktop';
 
 const isStartOnBootSupported = (): boolean => {
   if (!app.isPackaged) return false;
-  return (
-    process.platform === 'darwin' ||
-    process.platform === 'win32' ||
-    process.platform === 'linux'
-  );
+  return process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux';
 };
 
 const getStartOnBootWindowsArgs = (): string[] => [START_ON_BOOT_WINDOWS_ARG];

@@ -171,8 +171,17 @@ const OperationsView: React.FC = () => {
   const { t } = useTranslation();
   const { snapshot, loading, refresh } = useMissionControl();
   const entries = snapshot?.entries ?? [];
-  const counts: LedgerCounts =
-    snapshot?.counts ?? { running: 0, verifying: 0, pending: 0, blocked: 0, failed: 0, zombie: 0, done: 0, idle: 0, total: 0 };
+  const counts: LedgerCounts = snapshot?.counts ?? {
+    running: 0,
+    verifying: 0,
+    pending: 0,
+    blocked: 0,
+    failed: 0,
+    zombie: 0,
+    done: 0,
+    idle: 0,
+    total: 0,
+  };
 
   return (
     <>
