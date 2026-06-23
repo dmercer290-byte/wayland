@@ -470,3 +470,83 @@ describe('composeMessage - cron_trigger', () => {
     expect(messageHandler).toHaveBeenCalledWith('insert', cronTriggerMsg);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #252 activity card: transformMessage normalization + composeMessage merge
+// ---------------------------------------------------------------------------
+
+describe('transformMessage - activity (#252)', () => {
+  it('normalizes a tool_chunk into an activity card node with detail', () => {
+    const msg = transformMessage({
+      type: 'tool_chunk',
+      msg_id: 'turn-1',
+      conversation_id: 'c1',
+      data: { callId: 'call-1', toolName: 'Bash', chunk: 'partial-output' },
+    } as unknown as IResponseMessage);
+    expect(msg).toBeDefined();
+    expect(msg!.type).toBe('activity');
+    expect(msg!.msg_id).toBe('turn-1');
+    const content = (msg as Extract<TMessage, { type: 'activity' }>).content;
+    expect(content.nodes).toHaveLength(1);
+    expect(content.nodes[0].detail).toBe('partial-output');
+    expect(content.nodes[0].callId).toBe('call-1');
+  });
+
+  it('normalizes session_cost into per-turn cost rows', () => {
+    const msg = transformMessage({
+      type: 'session_cost',
+      msg_id: 'turn-1',
+      conversation_id: 'c1',
+      data: { perTurn: [{ turn: 1, model: 'm', provider: 'openai', cost_usd: 0.5 }] },
+    } as unknown as IResponseMessage);
+    expect(msg!.type).toBe('activity');
+    const content = (msg as Extract<TMessage, { type: 'activity' }>).content;
+    expect(content.perTurnCost).toEqual([{ turn: 1, model: 'm', provider: 'openai', costUsd: 0.5 }]);
+  });
+});
+
+describe('composeMessage - activity merge (#252)', () => {
+  it('merges two tool_chunk deltas for the same turn into one card (fail-on-old)', () => {
+    const first = transformMessage({
+      type: 'tool_chunk',
+      msg_id: 'turn-1',
+      conversation_id: 'c1',
+      data: { callId: 'call-1', toolName: 'Bash', chunk: 'aaa' },
+    } as unknown as IResponseMessage)!;
+    const second = transformMessage({
+      type: 'tool_chunk',
+      msg_id: 'turn-1',
+      conversation_id: 'c1',
+      data: { callId: 'call-1', toolName: 'Bash', chunk: 'bbb' },
+    } as unknown as IResponseMessage)!;
+
+    let list = composeMessage(first, []);
+    list = composeMessage(second, list);
+
+    // Old code (no 'activity' type) would drop these in transformMessage and
+    // never produce a single merged card; new code merges into ONE card.
+    const activityCards = list.filter((m) => m.type === 'activity');
+    expect(activityCards).toHaveLength(1);
+    const content = (activityCards[0] as Extract<TMessage, { type: 'activity' }>).content;
+    expect(content.nodes).toHaveLength(1);
+    expect(content.nodes[0].detail).toBe('aaabbb');
+  });
+
+  it('keeps separate cards for different turns', () => {
+    const t1 = transformMessage({
+      type: 'tool_chunk',
+      msg_id: 'turn-1',
+      conversation_id: 'c1',
+      data: { callId: 'a', toolName: 'Bash', chunk: 'x' },
+    } as unknown as IResponseMessage)!;
+    const t2 = transformMessage({
+      type: 'tool_chunk',
+      msg_id: 'turn-2',
+      conversation_id: 'c1',
+      data: { callId: 'b', toolName: 'Bash', chunk: 'y' },
+    } as unknown as IResponseMessage)!;
+    let list = composeMessage(t1, []);
+    list = composeMessage(t2, list);
+    expect(list.filter((m) => m.type === 'activity')).toHaveLength(2);
+  });
+});

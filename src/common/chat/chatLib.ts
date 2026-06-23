@@ -26,6 +26,8 @@ import type {
 } from '@/common/types/acpTypes';
 import type { IResponseMessage } from '../adapter/ipcBridge';
 import { uuid } from '../utils';
+import { addOrUpdateNode, emptyActivityContent, mergeActivityContent } from './activityTree';
+import type { TurnCost } from '@/process/agent/wcore/protocol';
 
 /**
  * Safe path join function, compatible with Windows and Mac.
@@ -87,7 +89,8 @@ type TMessageType =
   | 'skill_suggest'
   | 'cron_trigger'
   | 'cron_propose'
-  | 'sub_agent';
+  | 'sub_agent'
+  | 'activity';
 
 interface IMessage<T extends TMessageType, Content extends Record<string, any>> {
   /**
@@ -422,6 +425,59 @@ export type IMessageSubAgent = IMessage<
   }
 >;
 
+/**
+ * #252 - one per-turn cost row, mirrors `TurnCost` in
+ * src/process/agent/wcore/protocol.ts. Duplicated here (rather than imported)
+ * because chatLib.ts is common-layer and must not pull in process-only
+ * protocol modules; the shape is small and engine-stable.
+ */
+export type ActivityTurnCost = {
+  turn: number;
+  model: string;
+  provider: string;
+  costUsd: number;
+};
+
+/**
+ * #252 - one node in the live activity tree. Tools, thinking spans and
+ * sub-agents are all nodes; `children` lets a sub-agent carry its own nested
+ * tools/thinking (Phase 2). `detail` accumulates streamed tool stdout
+ * (tool_chunk) or thinking text so a node can be drilled into.
+ */
+export type ActivityNode = {
+  /** Stable merge key. For tools this is the callId; otherwise a synthetic id. */
+  id: string;
+  kind: 'tool' | 'thinking' | 'sub_agent' | 'cost' | 'circuit' | 'browser' | 'cua';
+  /** Tool/sub-agent call id when applicable (same as `id` for tools). */
+  callId?: string;
+  /** Display name (tool name, agent name, etc.). */
+  name: string;
+  status: 'running' | 'done' | 'failed';
+  startTime?: number;
+  endTime?: number;
+  /** Accumulated streamed detail (tool_chunk stdout / thinking text / op trail). */
+  detail?: string;
+  children?: ActivityNode[];
+};
+
+/**
+ * #252 - composite "activity tree" card for one turn. Keyed by `turnId`
+ * (stored as msg_id) so streaming node updates merge into one card, exactly
+ * like the sub_agent card merges by parentCallId. Additive: never replaces
+ * the existing tool_group / thinking / plan rendering, it surfaces the
+ * currently-dropped observability stream (tool_chunk, session_cost, etc.).
+ */
+export type IMessageActivity = IMessage<
+  'activity',
+  {
+    /** Turn id - the stable merge key (stored as msg_id). */
+    turnId: string;
+    nodes: ActivityNode[];
+    perTurnCost?: ActivityTurnCost[];
+    status: 'running' | 'done' | 'failed';
+  }
+>;
+
 // eslint-disable-next-line max-len
 export type TMessage =
   | IMessageText
@@ -439,7 +495,8 @@ export type TMessage =
   | IMessageSkillSuggest
   | IMessageCronTrigger
   | IMessageCronPropose
-  | IMessageSubAgent;
+  | IMessageSubAgent
+  | IMessageActivity;
 
 // Unified type for all user-interaction confirmation prompts
 export interface IConfirmation<Option extends any = any> {
@@ -687,6 +744,91 @@ export const transformMessage = (message: IResponseMessage): TMessage => {
         },
       };
     }
+    // ── #252 observability → live activity tree ──────────────────────
+    // These raw events are already forwarded by wcore/index.ts +
+    // WCoreManager but previously hit the default warn arm (tool_chunk was
+    // silently dropped). Each builds a single-delta activity card keyed by
+    // turnId (= msg_id); composeMessage merges deltas into one card.
+    case 'tool_chunk': {
+      const d = message.data as { callId: string; toolName?: string; chunk: string };
+      const turnId = message.msg_id ?? '';
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: 'tool_chunk',
+        callId: d.callId,
+        name: d.toolName,
+        chunk: d.chunk,
+        ts: Date.now(),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: turnId,
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
+      };
+    }
+    case 'session_cost': {
+      const d = message.data as { perTurn?: TurnCost[] };
+      const turnId = message.msg_id ?? '';
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: 'cost',
+        perTurn: (d.perTurn ?? []).map((p) => ({
+          turn: p.turn,
+          model: p.model,
+          provider: p.provider,
+          costUsd: p.cost_usd,
+        })),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: turnId,
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
+      };
+    }
+    case 'provider_circuit_event': {
+      const d = message.data as { primary: string; fallback?: string; state: string; error?: string };
+      const turnId = message.msg_id ?? '';
+      const detail = `${d.state}${d.fallback ? ` → ${d.fallback}` : ''}${d.error ? `: ${d.error}` : ''}`;
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: 'circuit',
+        id: d.primary,
+        name: d.primary,
+        detail,
+        ts: Date.now(),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: turnId,
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
+      };
+    }
+    case 'browser_event':
+    case 'cua_event': {
+      const d = message.data as { callId: string; op: string; url?: string; summary: string };
+      const turnId = message.msg_id ?? '';
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: message.type === 'browser_event' ? 'browser' : 'cua',
+        callId: d.callId,
+        name: d.op,
+        detail: d.summary + (d.url ? ` (${d.url})` : ''),
+        ts: Date.now(),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: turnId,
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
+      };
+    }
     case 'start':
     case 'finish':
     case 'thought':
@@ -871,6 +1013,20 @@ export const composeMessage = (
             : prevContent.status;
         const mergedBody = prevContent.body + nextContent.body;
         const merged = { ...prevContent, status: mergedStatus, body: mergedBody } as typeof prevContent;
+        return updateMessage(i, { ...msg, content: merged });
+      }
+    }
+    return pushMessage(message);
+  }
+
+  // #252 activity card: merge by turnId (stored as msg_id). Each incoming
+  // message is a single-event delta; fold its nodes/cost into the existing
+  // card. Mirrors the sub_agent branch above.
+  if (message.type === 'activity' && message.msg_id) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const msg = list[i];
+      if (msg.type === 'activity' && msg.msg_id === message.msg_id) {
+        const merged = mergeActivityContent(msg.content, message.content);
         return updateMessage(i, { ...msg, content: merged });
       }
     }
