@@ -73,16 +73,18 @@ const MessageToolbar: React.FC<Props> = ({ text, onRegenerate, onFeedback, revea
         />
       </Tooltip>
 
-      <Tooltip content={t('conversation.toolbar.regenerate', { defaultValue: 'Regenerate' })}>
-        <Button
-          type='text'
-          size='mini'
-          className={styles.button}
-          aria-label={t('conversation.toolbar.regenerate', { defaultValue: 'Regenerate' })}
-          icon={<Refresh size='16' />}
-          onClick={() => onRegenerate?.()}
-        />
-      </Tooltip>
+      {onRegenerate && (
+        <Tooltip content={t('conversation.toolbar.regenerate', { defaultValue: 'Regenerate' })}>
+          <Button
+            type='text'
+            size='mini'
+            className={styles.button}
+            aria-label={t('conversation.toolbar.regenerate', { defaultValue: 'Regenerate' })}
+            icon={<Refresh size='16' />}
+            onClick={onRegenerate}
+          />
+        </Tooltip>
+      )}
 
       <Tooltip content={t('conversation.toolbar.thumbsUp', { defaultValue: 'Good response' })}>
         <Button

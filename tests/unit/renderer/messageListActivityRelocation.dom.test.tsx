@@ -7,14 +7,14 @@
 // @vitest-environment jsdom
 
 /**
- * #252 reframe behavioral guard: rendering the message-list switch for an
- * `activity` turn must produce NO activity-card DOM (the tree moved to the
- * ObservabilityPanel). This renders the real MessageItem switch through
- * MessageList - with the heavy, non-pure deps (Virtuoso layout, auto-scroll,
- * contexts, ipc) stubbed - and asserts the activity message flows through the
- * switch (its wrapper row mounts) yet emits no `activity-card`. A regression
- * that re-introduces the inline card via any code path would fail here, where a
- * source string-grep would not.
+ * #252 rework behavioral guard: rendering the message-list switch for an
+ * `activity` turn must produce the inline ActivityTimeline DOM (the rework
+ * re-enabled inline observability). This renders the real MessageItem switch
+ * through MessageList - with the heavy, non-pure deps (Virtuoso layout,
+ * auto-scroll, contexts, ipc) stubbed - and asserts the activity message flows
+ * through the switch (its wrapper row mounts) AND the unified timeline renders
+ * with a humanized step label. A regression that re-disables the inline card
+ * would fail here, where a source string-grep would not.
  */
 
 import { render, screen } from '@testing-library/react';
@@ -102,16 +102,16 @@ const activity = (id: string): IMessageActivity => ({
   },
 });
 
-describe('MessageList #252 activity relocation (behavioral)', () => {
-  it('renders no activity card for an activity turn (case returns null)', () => {
+describe('MessageList #252 rework: inline activity timeline (behavioral)', () => {
+  it('renders the inline activity timeline for an activity turn', () => {
     messageList = [activity('a1')];
     render(<MessageList />);
 
-    // The activity message flowed through the switch: its wrapper row mounts...
+    // The activity message flows through the switch: its wrapper row mounts...
     expect(screen.getByTestId('message-activity-left')).toBeTruthy();
-    // ...but the big inline activity card is NOT rendered (moved to the panel).
-    expect(screen.queryByTestId('activity-card')).toBeNull();
-    // And no node from the tree leaks into the inline list.
-    expect(screen.queryByText('ReadFile')).toBeNull();
+    // ...AND the unified inline timeline now renders (rework re-enabled it).
+    expect(screen.getByTestId('activity-timeline')).toBeTruthy();
+    // A running node surfaces as a humanized step label ("Reading a file").
+    expect(screen.getByText('Reading a file')).toBeTruthy();
   });
 });

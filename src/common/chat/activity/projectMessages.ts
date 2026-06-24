@@ -1,0 +1,105 @@
+/**
+ * @license
+ * Copyright 2026 Ferrox Labs
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * #252 observability rework - project the per-turn observability MESSAGES
+ * (tool_group, acp_tool_call, sub_agent, activity) into the unified renderer
+ * model (ActivityStep[]) that ActivityTimeline consumes.
+ *
+ * This is where "one timeline, every backend" is realized: a wcore tool_group, a
+ * Claude-Code/Codex/Gemini acp_tool_call, a spawned sub_agent card, and the live
+ * activity tree all collapse onto the same canonical ActivityNode shape and the
+ * same humanized step projection. Pure - no React, no IO; unit-tested.
+ */
+
+import type { IMessageActivity, IMessageAcpToolCall, IMessageSubAgent, IMessageToolGroup, ActivityNode } from '../chatLib';
+import { nodeToStep, nodesToSteps, type ActivitySource, type ActivityStep } from './activityStep';
+
+/** wcore tool_group item status -> canonical node status. */
+const TOOLGROUP_STATUS: Record<string, ActivityNode['status']> = {
+  Executing: 'running',
+  Pending: 'running',
+  Confirming: 'running',
+  Success: 'done',
+  Error: 'failed',
+  Canceled: 'failed',
+};
+
+/** ACP tool_call status -> canonical node status. */
+const ACP_STATUS: Record<string, ActivityNode['status']> = {
+  pending: 'running',
+  in_progress: 'running',
+  completed: 'done',
+  failed: 'failed',
+  error: 'failed',
+};
+
+/** Pull a human-useful detail string from a tool_group resultDisplay (string, file diff, or image). */
+const toolGroupDetail = (rd: IMessageToolGroup['content'][number]['resultDisplay']): string | undefined => {
+  if (rd == null) return undefined;
+  if (typeof rd === 'string') return rd || undefined;
+  if ('fileName' in rd) return rd.fileName;
+  if ('relative_path' in rd) return rd.relative_path;
+  return undefined;
+};
+
+/** Map one wcore tool_group message's items to canonical tool nodes. */
+export const toolGroupToNodes = (content: IMessageToolGroup['content']): ActivityNode[] =>
+  content.map((t) => ({
+    id: t.callId,
+    kind: 'tool',
+    callId: t.callId,
+    name: t.name,
+    status: TOOLGROUP_STATUS[t.status] ?? 'running',
+    ...(toolGroupDetail(t.resultDisplay) ? { detail: toolGroupDetail(t.resultDisplay) } : {}),
+  }));
+
+/** Map one ACP tool_call message to a canonical tool node (fields nest under `.update`). */
+export const acpToolCallToNode = (content: IMessageAcpToolCall['content']): ActivityNode => {
+  const u = content.update;
+  return {
+    id: u.toolCallId,
+    kind: 'tool',
+    callId: u.toolCallId,
+    name: u.title ?? '',
+    status: ACP_STATUS[u.status] ?? 'running',
+  };
+};
+
+/**
+ * Project a grouped tool_summary (mixed wcore tool_group + ACP acp_tool_call)
+ * into one ordered ActivityStep[] - this REPLACES the old clunky "View Steps".
+ */
+export const toolSummaryToSteps = (
+  messages: Array<IMessageToolGroup | IMessageAcpToolCall>,
+  source?: ActivitySource
+): ActivityStep[] => {
+  const nodes: ActivityNode[] = [];
+  for (const m of messages) {
+    if (m.type === 'tool_group') nodes.push(...toolGroupToNodes(m.content));
+    else nodes.push(acpToolCallToNode(m.content));
+  }
+  return nodes.map((n) => nodeToStep(n, source));
+};
+
+/** Project a spawned sub_agent card (parsed inner subtree) into one sub_agent step. */
+export const subAgentToStep = (content: IMessageSubAgent['content'], source?: ActivitySource): ActivityStep =>
+  nodeToStep(
+    {
+      id: content.parentCallId,
+      kind: 'sub_agent',
+      callId: content.parentCallId,
+      name: content.agentName,
+      status: content.status,
+      ...(content.body ? { detail: content.body } : {}),
+      ...(content.nodes?.length ? { children: content.nodes } : {}),
+    },
+    source
+  );
+
+/** Project the live activity-tree card into steps. */
+export const activityToSteps = (content: IMessageActivity['content'], source?: ActivitySource): ActivityStep[] =>
+  nodesToSteps(content.nodes, source);

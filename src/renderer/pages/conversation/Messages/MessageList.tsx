@@ -32,7 +32,9 @@ import MessagePlan from './components/MessagePlan';
 import MessageTips from './components/MessageTips';
 import MessageToolCall from './components/MessageToolCall';
 import MessageToolGroup from './components/MessageToolGroup';
-import MessageToolGroupSummary from './components/MessageToolGroupSummary';
+import ActivityTimeline from '@/renderer/components/chat/observability/ActivityTimeline';
+import MessageToolbar from '@/renderer/components/chat/observability/MessageToolbar';
+import { activityToSteps, subAgentToStep, toolSummaryToSteps } from '@/common/chat/activity/projectMessages';
 import MessageCronTrigger from './components/MessageCronTrigger';
 import CronProposeCard from './components/CronProposeCard';
 import MessageSkillSuggest from './components/MessageSkillSuggest';
@@ -44,14 +46,26 @@ import { useAutoPreviewOfficeFiles } from '@/renderer/hooks/file/useAutoPreviewO
 import SelectionReplyButton from './components/SelectionReplyButton';
 import { computeChatTimeMarkers, splitGap, type ChatTimeMarker } from './utils/chatTimeMarkers';
 
-// 0.11.3: the inline observability UI (activity tree, sub-agent cards, "View Steps"
-// tool summary) is temporarily disabled pending the rework — see
-// app/.planning/handoffs/SESSION-HANDOFF-2026-06-24-OBSERVABILITY-REWORK-AND-JSON-STREAM.md.
-// The StatusFooter "processing" cue stays. Flip to true (and restore the sub_agent
-// case) to re-enable.
-const SHOW_OBSERVABILITY_INLINE = false;
-
 type TurnDiffContent = Extract<CodexToolCallUpdate, { subtype: 'turn_diff' }>;
+
+/**
+ * Assistant text bubble + the per-message action toolbar (copy / feedback). The
+ * toolbar reveals on hover/focus of the bubble (driven here since a
+ * pointer-events:none toolbar can't reveal on its own hover).
+ */
+const AssistantText: React.FC<{ message: Extract<TMessage, { type: 'text' }> }> = ({ message }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      className='min-w-0 flex-1'
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <MessageText message={message} />
+      <MessageToolbar text={message.content.content} revealed={hovered} />
+    </div>
+  );
+};
 
 type IMessageVO =
   | TMessage
@@ -128,7 +142,11 @@ const MessageItem: React.FC<{ message: TMessage; highlighted?: boolean }> = Reac
     const { t } = useTranslation();
     switch (message.type) {
       case 'text':
-        return <MessageText message={message}></MessageText>;
+        return message.position === 'left' ? (
+          <AssistantText message={message} />
+        ) : (
+          <MessageText message={message}></MessageText>
+        );
       case 'tips':
         return <MessageTips message={message}></MessageTips>;
       case 'tool_call':
@@ -157,15 +175,13 @@ const MessageItem: React.FC<{ message: TMessage; highlighted?: boolean }> = Reac
       case 'cron_propose':
         return <CronProposeCard message={message} />;
       case 'sub_agent':
-        // 0.11.3: observability inline cards disabled pending the rework; the
-        // StatusFooter "processing" cue is the live indicator. (Re-enabled by the
-        // observability rework — see the 2026-06-24 handoff.)
-        return null;
+        // #252 rework: a spawned sub-agent renders as one collapsible timeline
+        // step carrying its parsed inner subtree (tools / thinking / nested agents).
+        return <ActivityTimeline steps={[subAgentToStep(message.content)]} />;
       case 'activity':
-        // #252 reframe: the activity tree moved to the opt-in ObservabilityPanel.
-        // The chat center stays calm - the inline StatusFooter pulse is the only
-        // cue here. The message still lives in the list so the panel can read it.
-        return null;
+        // #252 rework: the live activity tree (tool lifecycle, chunks, cost,
+        // circuit/browser/cua) renders inline as the unified timeline.
+        return <ActivityTimeline steps={activityToSteps(message.content)} />;
       case 'available_commands':
         return null;
       default:
@@ -441,9 +457,9 @@ const ConversationMessageList: React.FC<{ className?: string; emptySlot?: React.
           style={highlighted ? highlightStyle : undefined}
         >
           {item.type === 'file_summary' && <MessageFileChanges diffsChanges={item.diffs} />}
-          {/* 0.11.3: the "View Steps" tool summary is disabled with the rest of the
-              observability UI pending the rework; the StatusFooter is the live cue. */}
-          {SHOW_OBSERVABILITY_INLINE && item.type === 'tool_summary' && <MessageToolGroupSummary messages={item.messages}></MessageToolGroupSummary>}
+          {/* #252 rework: grouped tool calls render as the unified collapsible
+              activity timeline (replaces the old raw "View Steps" list). */}
+          {item.type === 'tool_summary' && <ActivityTimeline steps={toolSummaryToSteps(item.messages)} />}
         </div>
       );
     } else {

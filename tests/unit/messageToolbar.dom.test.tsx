@@ -39,9 +39,16 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('MessageToolbar', () => {
-  it('renders four action buttons', () => {
+  it('renders copy + thumbs by default (regenerate hidden without a handler)', () => {
     render(<MessageToolbar text='hello' />);
+    expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.queryByLabelText('Regenerate')).toBeNull();
+  });
+
+  it('renders the regenerate button only when onRegenerate is provided', () => {
+    render(<MessageToolbar text='hello' onRegenerate={() => {}} />);
     expect(screen.getAllByRole('button')).toHaveLength(4);
+    expect(screen.getByLabelText('Regenerate')).toBeTruthy();
   });
 
   it('copies text and shows the success state', async () => {

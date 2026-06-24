@@ -342,7 +342,19 @@
     "close": "Close panel",
     "empty": "Activity from this conversation will appear here.",
     "showCost": "Show cost",
-    "showCostHint": "off by default"
+    "showCostHint": "off by default",
+    "contextLoaded": "Loaded context",
+    "runningHeader": "{{count}} steps",
+    "runningCount": "{{count}} running",
+    "summaryDid": "Did {{count}} things · {{duration}}",
+    "expandRow": "Toggle step detail"
+  },
+  "toolbar": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "regenerate": "Regenerate",
+    "thumbsUp": "Good response",
+    "thumbsDown": "Bad response"
   },
   "skills": {
     "loaded": "Loaded Skills"

@@ -165,11 +165,19 @@ describe('innerEvent.parseInnerEvent - graceful fallback / regression', () => {
     expect(parseInnerEvent(42)).toMatchObject({ nodes: [], text: '' });
   });
 
-  it('still extracts the body text from a malformed-but-text_delta inner via fallback shape', () => {
-    // type present but not a recognized variant we node-ify: text_delta IS
-    // recognized, so this proves the fallback path is only for truly opaque ones.
-    const r = parseInnerEvent({ type: 'some_future_event', text: 'ignored' });
-    expect(r.nodes).toHaveLength(0);
+  it('surfaces an UNRECOGNIZED inner event as one generic node (never a blank card)', () => {
+    // #252 rework, "never blank" principle: a future/unknown inner event type must
+    // not vanish silently - it surfaces as a single generic step keyed by its type.
+    const r = parseInnerEvent({ type: 'some_future_event', call_id: 'c1' });
+    expect(r.nodes).toHaveLength(1);
+    expect(r.nodes[0].name).toBe('some_future_event');
+    expect(r.nodes[0].kind).toBe('tool');
     expect(r.text).toBe('');
+  });
+
+  it('keeps turn FRAMING events (stream_start/end/ready/pong) empty - no noise nodes', () => {
+    expect(parseInnerEvent({ type: 'stream_start', msg_id: 'm1' }).nodes).toHaveLength(0);
+    expect(parseInnerEvent({ type: 'stream_end', msg_id: 'm1' }).nodes).toHaveLength(0);
+    expect(parseInnerEvent({ type: 'pong' }).nodes).toHaveLength(0);
   });
 });

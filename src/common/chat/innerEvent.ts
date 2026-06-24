@@ -59,6 +59,22 @@ const EMPTY: ParsedInner = { nodes: [], text: '' };
 const isEvent = (v: unknown): v is { type: string } & Record<string, unknown> =>
   typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string';
 
+/**
+ * Defensive node for an UNRECOGNIZED inner event - keeps a sub-agent card from
+ * ever silently going blank when the engine adds an event type we don't map yet.
+ */
+const genericNode = (ev: { type: string; call_id?: unknown; msg_id?: unknown }): ActivityNode => {
+  const key = typeof ev.call_id === 'string' ? ev.call_id : typeof ev.msg_id === 'string' ? ev.msg_id : '';
+  return {
+    id: `evt:${ev.type}:${key}`,
+    kind: 'tool',
+    name: ev.type,
+    status: 'done',
+    startTime: Date.now(),
+    endTime: Date.now(),
+  };
+};
+
 /** Build a tool ActivityNode from a child tool_* event. */
 const toolNode = (callId: string, name: string, status: ActivityNode['status'], detail?: string): ActivityNode => ({
   id: callId,
@@ -166,9 +182,24 @@ export const parseInnerEvent = (inner: unknown, depth = 0): ParsedInner => {
       case 'error':
         return { nodes: [], text: '', lifecycle: 'failed' };
 
-      // stream_start / stream_end / ready / etc. carry no drill-down content.
-      default:
+      // stream_start / stream_end / ready / pong / etc. are turn FRAMING - no
+      // drill-down content, so they stay empty (the card falls back to body).
+      case 'stream_start':
+      case 'stream_end':
+      case 'ready':
+      case 'pong':
+      case 'config_changed':
+      case 'mcp_ready':
+      case 'session_cost':
+      case 'trace_event':
         return EMPTY;
+
+      // Defensive (IJFW: never a blank card): an UNRECOGNIZED inner event type -
+      // e.g. a future engine event - still surfaces as one generic step keyed by
+      // its type, instead of silently vanishing. The humanizer renders a clean
+      // label from the type at draw time.
+      default:
+        return { nodes: [genericNode(ev)], text: '' };
     }
   } catch {
     return fallback(inner);

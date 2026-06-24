@@ -21,15 +21,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const messageListPath = path.resolve(here, '../../../src/renderer/pages/conversation/Messages/MessageList.tsx');
 const source = readFileSync(messageListPath, 'utf8');
 
-describe('MessageList #252 activity relocation (source guard)', () => {
-  it('does not render the inline activity card (activity case returns null)', () => {
-    expect(source).not.toContain('<MessageActivity');
+describe('MessageList #252 rework: inline activity timeline (source guard)', () => {
+  it('renders the inline ActivityTimeline for the activity case (not null)', () => {
     const activityCase = source.slice(source.indexOf("case 'activity':"));
-    // The case body up to the next case must be a bare `return null`.
-    expect(activityCase.slice(0, activityCase.indexOf("case '", 5))).toContain('return null');
+    const body = activityCase.slice(0, activityCase.indexOf("case '", 5));
+    expect(body).toContain('<ActivityTimeline');
+    expect(body).not.toContain('return null');
   });
 
-  it('no longer imports MessageActivity into the message list', () => {
-    expect(source).not.toMatch(/import\s+MessageActivity\s+from/);
+  it('imports ActivityTimeline and the projectMessages projectors', () => {
+    expect(source).toMatch(/import\s+ActivityTimeline\s+from/);
+    expect(source).toContain('projectMessages');
   });
 });
