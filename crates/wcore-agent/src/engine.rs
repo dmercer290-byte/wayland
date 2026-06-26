@@ -1032,6 +1032,15 @@ pub struct AgentEngine {
     /// tools — keeping the emitted tool-zone prefix byte-stable (a cache-safe
     /// append) on every union-growth turn instead of a mid-array insert.
     mcp_curation_cache: Option<(u64, Vec<String>)>,
+    /// Cache-stability (token-opt) for the provider tool-CAP path, mirroring
+    /// `mcp_curation_cache` but keyed on the cap's own (inventory, budget). When
+    /// the cap must trim the MCP tail (chiefly in curation-OFF mode, where the
+    /// full MCP inventory reaches the cap), BM25 decides WHICH MCP tools are
+    /// most relevant, but the emitted order is an inventory-keyed APPEND-ONLY
+    /// union so the serialized tool-zone prefix stays byte-stable turn-to-turn
+    /// (a cache READ, not a per-turn prefix rewrite). Reset when the MCP
+    /// inventory or the MCP budget changes.
+    mcp_cap_cache: Option<(u64, Vec<String>)>,
     /// Token-opt (diff-resend): handle to the shared file-state cache (the same
     /// `Arc` the Read/Edit/Write tools hold). Used only to bump the cache's
     /// compaction generation after a compaction pass, so stale read bases stop
@@ -1534,6 +1543,7 @@ impl AgentEngine {
             per_turn_costs: Vec::new(),
             mcp_curation: config.mcp.curation.clone(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -1709,6 +1719,7 @@ impl AgentEngine {
             per_turn_costs: Vec::new(),
             mcp_curation: config.mcp.curation.clone(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -3958,12 +3969,20 @@ impl AgentEngine {
                     .to_tool_defs_filtered(|t| t.name() != "ExitPlanMode")
             };
 
-            // W6 F17: trim MCP tools to a curated top-K. MCP tools are named
-            // `mcp__{server}__{tool}` (verified at wcore-mcp/src/tool_proxy.rs:14);
-            // non-MCP tools (builtins, skills, spawn, plan tools) are always
-            // kept. Off-policy is a no-op. Audit-log recency degrades to
-            // empty/keyword-only when self.audit_log is None.
+            // W6 F17: trim MCP tools to a curated top-K. MCP tools are
+            // identified by real provenance (`ToolDef::server.is_some()`), not
+            // the `mcp__` name prefix — a non-colliding MCP tool keeps its bare
+            // name (wcore-mcp/src/tool_proxy.rs). Non-MCP tools (builtins,
+            // skills, spawn, plan tools) are always kept. Off-policy is a no-op.
+            // Audit-log recency degrades to empty/keyword-only when
+            // self.audit_log is None.
             let tools = self.apply_mcp_curation(tools);
+
+            // #344/#359: enforce the provider's HARD tool-array cap (OpenAI =
+            // 128). MCP servers can push the total past the limit even after
+            // curation; this is the correctness guarantee, separate from the
+            // relevance trim above.
+            let tools = self.apply_provider_tool_cap(tools);
 
             // Build system prompt: append plan mode instructions when active
             let system = if self.plan_state.is_active {
@@ -7008,9 +7027,12 @@ impl AgentEngine {
 
     /// W6 F17: trim MCP tools in the per-turn `ToolDef` list to a curated
     /// top-K. Non-MCP tools (builtins, skills, spawn, plan) are always kept.
-    /// MCP tools are identified by the `mcp__` name prefix (verified at
-    /// `wcore-mcp/src/tool_proxy.rs:14`). Curation source: the most recent
-    /// user message in `self.messages`. `Off` policy is a no-op.
+    /// MCP tools are identified by their REAL provenance (`ToolDef::server`
+    /// is `Some`), NOT the `mcp__` name prefix: a non-colliding MCP tool keeps
+    /// its bare original name (see `wcore-mcp/src/tool_proxy.rs`), so the prefix
+    /// would misclassify it as a built-in and never curate it (#359). Curation
+    /// source: the most recent user message in `self.messages`. `Off` policy is
+    /// a no-op.
     fn apply_mcp_curation(
         &mut self,
         tools: Vec<wcore_types::tool::ToolDef>,
@@ -7019,9 +7041,9 @@ impl AgentEngine {
             wcore_config::config::McpCurationPolicy::Off => return tools,
             wcore_config::config::McpCurationPolicy::TopK { k } => *k,
         };
-        // Partition into MCP and non-MCP slices.
+        // Partition into MCP and non-MCP slices by real provenance.
         let (mcp_tools, mut keep): (Vec<_>, Vec<_>) =
-            tools.into_iter().partition(|t| t.name.starts_with("mcp__"));
+            tools.into_iter().partition(|t| t.server.is_some());
         if mcp_tools.len() <= top_k {
             keep.extend(mcp_tools);
             return keep;
@@ -7051,9 +7073,13 @@ impl AgentEngine {
         let triples: Vec<(String, String, String)> = mcp_tools
             .iter()
             .map(|t| {
-                // Synthesize a server name from the prefix; description from
-                // the ToolDef's description field.
-                let server = t.name.split("__").nth(1).unwrap_or("mcp").to_string();
+                // Real provenance from `ToolDef::server`; this slice is the MCP
+                // partition so `server` is always `Some` here. Fall back to the
+                // prefix-derived name only defensively.
+                let server = t
+                    .server
+                    .clone()
+                    .unwrap_or_else(|| t.name.split("__").nth(1).unwrap_or("mcp").to_string());
                 (server, t.name.clone(), t.description.clone())
             })
             .collect();
@@ -7097,6 +7123,159 @@ impl AgentEngine {
             }
         }
         keep
+    }
+
+    /// #344/#359 — provider-aware HARD cap on the total tool count. A provider
+    /// request's tool array must not exceed the provider's limit (OpenAI = 128);
+    /// MCP servers can push the array past it (222 > 128 -> API 400). Separate
+    /// from `apply_mcp_curation` (a relevance/token optimization): this is the
+    /// correctness guarantee. Keeps ALL non-MCP tools (built-ins, ToolSearch,
+    /// skills, plan) and fills the remaining budget with the most RELEVANT MCP
+    /// tools (BM25 over the current user message), truncating the rest. Dropped
+    /// MCP tools stay DISCOVERABLE via the `ToolSearch` meta-tool (its registry
+    /// is a full bootstrap snapshot). `None` cap = no-op.
+    ///
+    /// Cache-stability (token-opt): when the cap must trim, the kept MCP set is
+    /// emitted in an inventory-keyed APPEND-ONLY UNION order (mirroring
+    /// `apply_mcp_curation`), NOT re-sorted by relevance every turn. BM25 only
+    /// decides which NEW tools to admit when budget allows; a tool, once
+    /// admitted, holds its slot. This keeps the serialized tool-zone prefix
+    /// byte-stable across same-context turns (a cache READ, not a per-turn
+    /// prefix rewrite that would thrash the Anthropic prompt cache).
+    fn apply_provider_tool_cap(
+        &mut self,
+        tools: Vec<wcore_types::tool::ToolDef>,
+    ) -> Vec<wcore_types::tool::ToolDef> {
+        let limit = match self.compat.max_tools() {
+            Some(l) => l,
+            None => return tools,
+        };
+        if tools.len() <= limit {
+            return tools;
+        }
+        // Classify by REAL provenance (`ToolDef::server`), not the `mcp__` name
+        // prefix: a non-colliding MCP tool keeps its bare name, so the prefix
+        // would count it as a built-in and ALWAYS keep it — letting a swarm of
+        // bare-named MCP tools blow past the provider limit (#359).
+        let (mcp_tools, non_mcp): (Vec<_>, Vec<_>) =
+            tools.into_iter().partition(|t| t.server.is_some());
+        let non_mcp_count = non_mcp.len();
+        let mcp_budget = limit.saturating_sub(non_mcp_count);
+        let mcp_total = mcp_tools.len();
+
+        // Under budget after partition — keep every MCP tool, no trim, no churn.
+        if mcp_total <= mcp_budget {
+            let mut kept = non_mcp;
+            kept.extend(mcp_tools);
+            return kept;
+        }
+
+        // No MCP budget at all (built-ins alone meet/exceed the cap): drop the
+        // entire MCP block. Correctness > strict limit for built-ins, matching
+        // the prior behavior. No BM25/union work needed.
+        if mcp_budget == 0 {
+            tracing::info!(
+                target: "wcore_agent::engine",
+                "provider tool cap: {} tools exceeded the provider limit of {}; kept {} \
+                 (incl. all {} non-MCP), {} MCP tools hidden but reachable via ToolSearch",
+                non_mcp_count + mcp_total,
+                limit,
+                non_mcp_count,
+                non_mcp_count,
+                mcp_total
+            );
+            return non_mcp;
+        }
+
+        // Over budget. Rank the MCP tools by BM25 relevance (same scorer the
+        // curator uses), then take this turn's top `mcp_budget` names. The
+        // emitted order, however, is the inventory-keyed append-only union —
+        // not the per-turn relevance order — so the prefix stays byte-stable.
+        let inventory_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut names: Vec<&str> = mcp_tools.iter().map(|t| t.name.as_str()).collect();
+            names.sort_unstable();
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            names.hash(&mut h);
+            // The budget is part of the cache key: a budget change (e.g. a new
+            // built-in shrinking the MCP slots) legitimately resets the union.
+            mcp_budget.hash(&mut h);
+            h.finish()
+        };
+
+        let user_msg = self.most_recent_user_text();
+        let usage = self.recent_mcp_usage();
+        let triples: Vec<(String, String, String)> = mcp_tools
+            .iter()
+            .map(|t| {
+                let server = t
+                    .server
+                    .clone()
+                    .unwrap_or_else(|| t.name.split("__").nth(1).unwrap_or("mcp").to_string());
+                (server, t.name.clone(), t.description.clone())
+            })
+            .collect();
+        // `curate` truncates to the cap's MCP budget = this turn's admit set.
+        let ranked = crate::mcp_curator::McpCurator::new(mcp_budget).curate(
+            &crate::mcp_curator::CurationInput {
+                user_message: &user_msg,
+                tools: &triples,
+                recent_usage: &usage,
+            },
+        );
+        let this_turn: Vec<String> = ranked.into_iter().map(|r| r.tool_name).collect();
+
+        // Union into the (inventory, budget)-keyed cache, APPEND-ONLY: an
+        // already-kept name holds its slot; a newly-admitted name is pushed at
+        // the END (a cache-safe append, not a mid-array insert). Cap the union
+        // length at `mcp_budget` so the kept set never exceeds the provider
+        // limit even as the union grows across turns — once full, no new tool
+        // displaces an admitted one for the life of this inventory/budget.
+        let keep_order: Vec<String> = match self.mcp_cap_cache.as_mut() {
+            Some((hash, order)) if *hash == inventory_hash => {
+                for name in this_turn {
+                    if order.len() >= mcp_budget {
+                        break;
+                    }
+                    if !order.contains(&name) {
+                        order.push(name);
+                    }
+                }
+                order.clone()
+            }
+            _ => {
+                let mut order = this_turn;
+                order.truncate(mcp_budget);
+                self.mcp_cap_cache = Some((inventory_hash, order.clone()));
+                order
+            }
+        };
+
+        // Emit non-MCP tools first (preserving their relative order), then the
+        // kept MCP block in FIRST-ADD union order.
+        let by_name: std::collections::HashMap<&str, &wcore_types::tool::ToolDef> =
+            mcp_tools.iter().map(|t| (t.name.as_str(), t)).collect();
+        let mut kept = non_mcp;
+        for name in &keep_order {
+            if let Some(t) = by_name.get(name.as_str()) {
+                kept.push((*t).clone());
+            }
+        }
+
+        let hidden = mcp_total - keep_order.len();
+        if hidden > 0 {
+            tracing::info!(
+                target: "wcore_agent::engine",
+                "provider tool cap: {} tools exceeded the provider limit of {}; kept {} \
+                 (incl. all {} non-MCP), {} MCP tools hidden but reachable via ToolSearch",
+                non_mcp_count + mcp_total,
+                limit,
+                kept.len(),
+                non_mcp_count,
+                hidden
+            );
+        }
+        kept
     }
 
     /// W6 F17 recency input for `McpCurator`. Reads the M2 audit log via the
@@ -7841,6 +8020,7 @@ mod set_config_tests {
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -7932,6 +8112,9 @@ mod set_config_tests {
                 description: desc.to_string(),
                 input_schema: serde_json::json!({"type": "object"}),
                 deferred: false,
+                // #174 tools are mcp__-prefixed AND carry real provenance —
+                // both signals classify them as MCP.
+                server: Some("srv".to_string()),
             }
         }
         let tools = vec![
@@ -7988,6 +8171,310 @@ mod set_config_tests {
         assert!(after_change.contains(&"mcp__srv__echo".to_string()));
     }
 
+    // --- #344/#359: provider-aware hard cap on the total tool count ---
+
+    /// Build a non-MCP/built-in `ToolDef` (`server: None`).
+    fn builtin_tool(name: &str) -> wcore_types::tool::ToolDef {
+        wcore_types::tool::ToolDef {
+            name: name.to_string(),
+            description: format!("{name} built-in tool"),
+            input_schema: serde_json::json!({"type": "object"}),
+            deferred: false,
+            server: None,
+        }
+    }
+
+    /// Build an MCP `ToolDef` (`mcp__{server}__{tool}`, real provenance set).
+    fn cap_mcp_tool(name: &str) -> wcore_types::tool::ToolDef {
+        wcore_types::tool::ToolDef {
+            name: name.to_string(),
+            description: format!("{name} mcp tool"),
+            input_schema: serde_json::json!({"type": "object"}),
+            deferred: false,
+            server: Some("srv".to_string()),
+        }
+    }
+
+    #[test]
+    fn provider_tool_cap_truncates_total_to_limit() {
+        let mut engine = make_engine("m");
+        engine.compat.max_tools = Some(10);
+
+        let mut tools = vec![
+            builtin_tool("Read"),
+            builtin_tool("Write"),
+            builtin_tool("Bash"),
+            builtin_tool("ToolSearch"),
+        ];
+        for i in 0..20 {
+            tools.push(cap_mcp_tool(&format!("mcp__srv__tool{i:02}")));
+        }
+
+        let capped = engine.apply_provider_tool_cap(tools);
+        assert_eq!(capped.len(), 10, "total must be truncated to the limit");
+
+        let names: Vec<&str> = capped.iter().map(|t| t.name.as_str()).collect();
+        for b in ["Read", "Write", "Bash", "ToolSearch"] {
+            assert!(names.contains(&b), "built-in {b} must be kept");
+        }
+        let mcp_kept = capped
+            .iter()
+            .filter(|t| t.name.starts_with("mcp__"))
+            .count();
+        assert_eq!(mcp_kept, 6, "exactly (limit - non_mcp) MCP tools kept");
+    }
+
+    #[test]
+    fn provider_tool_cap_noop_when_unset() {
+        let mut engine = make_engine("m");
+        engine.compat.max_tools = None;
+
+        let tools: Vec<_> = (0..50)
+            .map(|i| cap_mcp_tool(&format!("mcp__srv__tool{i:02}")))
+            .collect();
+        let capped = engine.apply_provider_tool_cap(tools);
+        assert_eq!(capped.len(), 50, "no cap configured → unchanged");
+    }
+
+    #[test]
+    fn provider_tool_cap_noop_under_limit() {
+        let mut engine = make_engine("m");
+        engine.compat.max_tools = Some(128);
+
+        let tools: Vec<_> = (0..30)
+            .map(|i| cap_mcp_tool(&format!("mcp__srv__tool{i:02}")))
+            .collect();
+        let capped = engine.apply_provider_tool_cap(tools);
+        assert_eq!(capped.len(), 30, "under the limit → unchanged");
+    }
+
+    #[test]
+    fn provider_tool_cap_keeps_all_builtins_even_when_budget_tiny() {
+        let mut engine = make_engine("m");
+        engine.compat.max_tools = Some(3);
+
+        let mut tools = vec![
+            builtin_tool("Read"),
+            builtin_tool("Write"),
+            builtin_tool("Edit"),
+            builtin_tool("Bash"),
+            builtin_tool("Grep"),
+            builtin_tool("ToolSearch"),
+        ];
+        for i in 0..10 {
+            tools.push(cap_mcp_tool(&format!("mcp__srv__tool{i:02}")));
+        }
+
+        let capped = engine.apply_provider_tool_cap(tools);
+        let names: Vec<&str> = capped.iter().map(|t| t.name.as_str()).collect();
+        for b in ["Read", "Write", "Edit", "Bash", "Grep", "ToolSearch"] {
+            assert!(
+                names.contains(&b),
+                "built-in {b} must be kept even when built-ins alone exceed the cap"
+            );
+        }
+        let mcp_kept = capped
+            .iter()
+            .filter(|t| t.name.starts_with("mcp__"))
+            .count();
+        assert_eq!(mcp_kept, 0, "no MCP budget left → 0 MCP tools kept");
+        assert_eq!(capped.len(), 6, "correctness > strict limit for built-ins");
+    }
+
+    // --- #359: provenance-based MCP classification (NOT the `mcp__` prefix) ---
+
+    /// Build a BARE-named MCP `ToolDef`: real provenance (`server: Some`) but a
+    /// name with NO `mcp__` prefix — exactly what `tool_proxy.rs` registers for
+    /// a non-colliding MCP tool (e.g. `execute_sql`, `list_calendar_events`).
+    fn bare_mcp_tool(name: &str) -> wcore_types::tool::ToolDef {
+        wcore_types::tool::ToolDef {
+            name: name.to_string(),
+            description: format!("{name} bare-named mcp tool"),
+            input_schema: serde_json::json!({"type": "object"}),
+            deferred: false,
+            server: Some("db".to_string()),
+        }
+    }
+
+    /// #359 regression — a BARE-named MCP tool (no `mcp__` prefix) must count
+    /// against the provider cap and be DROPPED when over budget. Pre-fix it was
+    /// classified as a pseudo-built-in (name-prefix check) and ALWAYS kept,
+    /// letting a swarm of bare-named MCP tools blow past the provider limit.
+    #[test]
+    fn provider_tool_cap_drops_bare_named_mcp_over_budget() {
+        let mut engine = make_engine("m");
+        engine.compat.max_tools = Some(4);
+
+        // 2 real built-ins (server: None) + 10 bare-named MCP tools (server:
+        // Some, NO `mcp__` prefix). Budget = 4 - 2 = 2 MCP slots.
+        let mut tools = vec![builtin_tool("Read"), builtin_tool("ToolSearch")];
+        for i in 0..10 {
+            tools.push(bare_mcp_tool(&format!("execute_sql_{i:02}")));
+        }
+
+        let capped = engine.apply_provider_tool_cap(tools);
+
+        // Both built-ins kept; exactly (limit - non_mcp) = 2 bare MCP tools kept.
+        let names: Vec<&str> = capped.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"Read"));
+        assert!(names.contains(&"ToolSearch"));
+        let mcp_kept = capped.iter().filter(|t| t.server.is_some()).count();
+        assert_eq!(
+            mcp_kept, 2,
+            "bare-named MCP tools must be budgeted/truncated like prefixed ones"
+        );
+        assert_eq!(
+            capped.len(),
+            4,
+            "total must be capped at the provider limit"
+        );
+        // The dropped bare MCP tools are NOT silently kept as pseudo-builtins.
+        assert!(
+            capped.iter().filter(|t| t.server.is_none()).count() == 2,
+            "only the two real built-ins are server:None"
+        );
+    }
+
+    /// #359 regression — a real built-in (`server: None`) is NEVER classified as
+    /// MCP, so it is always kept by the cap even when it shares a non-prefixed
+    /// snake_case name shape with MCP tools.
+    #[test]
+    fn provider_tool_cap_never_drops_real_builtin() {
+        let mut engine = make_engine("m");
+        engine.compat.max_tools = Some(3);
+
+        // 5 built-ins (server: None) exceed the cap of 3 — but built-ins are
+        // always kept; only MCP tools are ever truncated.
+        let tools = vec![
+            builtin_tool("Read"),
+            builtin_tool("Write"),
+            builtin_tool("execute"), // bare snake_case name, but server: None
+            builtin_tool("Bash"),
+            builtin_tool("ToolSearch"),
+        ];
+
+        let capped = engine.apply_provider_tool_cap(tools);
+        let names: Vec<&str> = capped.iter().map(|t| t.name.as_str()).collect();
+        for b in ["Read", "Write", "execute", "Bash", "ToolSearch"] {
+            assert!(names.contains(&b), "built-in {b} must never be dropped");
+        }
+        assert_eq!(
+            capped.len(),
+            5,
+            "all server:None tools kept (correctness > strict limit for built-ins)"
+        );
+    }
+
+    /// Cap-path relevance + cache-stability: when the provider cap must trim a
+    /// large MCP inventory, BM25 keeps the calendar-relevant tool for a calendar
+    /// request (not array-order tail-truncation), AND the emitted set is
+    /// byte-identical across two same-context turns (no prompt-cache prefix
+    /// churn — the inventory-keyed append-only union holds slots).
+    #[test]
+    fn provider_tool_cap_keeps_relevant_and_is_cache_stable() {
+        use wcore_types::message::{ContentBlock, Message, Role};
+
+        let mut engine = make_engine("m");
+        // Tiny cap so the 200 generic MCP tools must be trimmed hard.
+        engine.compat.max_tools = Some(5);
+        engine.audit_log = None; // BM25-only ranking → deterministic
+        engine.messages = vec![Message::new(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "schedule a calendar meeting".to_string(),
+            }],
+        )];
+
+        let mut tools = vec![builtin_tool("Read"), builtin_tool("ToolSearch")];
+        // The one relevant tool, placed in the MIDDLE of the array so array-order
+        // truncation would drop it — only BM25 can rescue it.
+        for i in 0..100 {
+            tools.push(cap_mcp_tool(&format!("mcp__srv__generic{i:03}")));
+        }
+        tools.push(wcore_types::tool::ToolDef {
+            name: "mcp__gcal__create_calendar_event".to_string(),
+            description: "Create a calendar event to schedule a meeting".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            deferred: false,
+            server: Some("gcal".to_string()),
+        });
+        for i in 100..200 {
+            tools.push(cap_mcp_tool(&format!("mcp__srv__generic{i:03}")));
+        }
+
+        let turn1 = engine.apply_provider_tool_cap(tools.clone());
+        let names1: Vec<&str> = turn1.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(turn1.len(), 5, "total capped to the provider limit");
+        assert!(
+            names1.contains(&"mcp__gcal__create_calendar_event"),
+            "BM25 must retain the calendar tool for a calendar request, \
+             not array-order tail-truncate it"
+        );
+        assert!(names1.contains(&"Read") && names1.contains(&"ToolSearch"));
+
+        // Turn 2, same context: the emitted set must be byte-identical (the
+        // append-only union holds every slot — no prefix churn).
+        let turn2 = engine.apply_provider_tool_cap(tools);
+        let names2: Vec<&str> = turn2.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(
+            names1, names2,
+            "cap emission must be byte-stable across same-context turns"
+        );
+    }
+
+    /// #359 regression — a BARE-named MCP tool is subject to curation. The
+    /// curator must rank/trim it like a prefixed MCP tool; a built-in with the
+    /// same snake_case shape (server: None) must never be curated away.
+    #[test]
+    fn mcp_curation_curates_bare_named_mcp_and_spares_builtin() {
+        use wcore_types::message::{ContentBlock, Message, Role};
+
+        let names = |v: Vec<wcore_types::tool::ToolDef>| -> Vec<String> {
+            v.into_iter().map(|t| t.name).collect()
+        };
+
+        // 1 built-in (server: None) + 4 BARE-named MCP tools (server: Some, no
+        // `mcp__` prefix). With k=2 and 4 MCP tools > k, curation must engage.
+        let tools = vec![
+            builtin_tool("Read"), // server: None → always kept, never curated
+            bare_mcp_tool("query_alpha_database"),
+            bare_mcp_tool("send_bravo_email"),
+            bare_mcp_tool("compile_charlie_report"),
+            bare_mcp_tool("remove_delta_entry"),
+        ];
+
+        let mut engine = make_engine("m");
+        engine.mcp_curation = wcore_config::config::McpCurationPolicy::TopK { k: 2 };
+        engine.audit_log = None; // keyword-only ranking → deterministic
+        engine.messages = vec![Message::new(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "query alpha database".to_string(),
+            }],
+        )];
+
+        let kept = names(engine.apply_mcp_curation(tools));
+
+        // The built-in survives unconditionally (it is NOT an MCP tool).
+        assert!(
+            kept.contains(&"Read".to_string()),
+            "real built-in must never be curated away"
+        );
+        // The keyword-matching bare MCP tool is surfaced...
+        assert!(
+            kept.contains(&"query_alpha_database".to_string()),
+            "keyword-matched bare MCP tool must be curated in"
+        );
+        // ...and curation actually trimmed the bare MCP set (4 MCP > k=2), i.e.
+        // bare-named MCP tools ARE subject to TopK (pre-fix they were treated as
+        // built-ins and ALL kept).
+        let mcp_kept = kept.iter().filter(|n| n.as_str() != "Read").count();
+        assert_eq!(
+            mcp_kept, 2,
+            "bare-named MCP tools must be curated to TopK (k=2), not all kept"
+        );
+    }
+
     /// Cache-stability regression (token-opt, finding #174): when turn 2
     /// unions in a tool that sorts EARLIER in registry-iteration order than an
     /// already-kept tool, the kept set must stay APPEND-ONLY — the new tool
@@ -8009,6 +8496,8 @@ mod set_config_tests {
                 description: desc.to_string(),
                 input_schema: serde_json::json!({"type": "object"}),
                 deferred: false,
+                // #174 tools are mcp__-prefixed AND carry real provenance.
+                server: Some("srv".to_string()),
             }
         }
         // Registry order: alpha sits at index 0, ahead of zulu/yankee. Turn 1
@@ -8665,6 +9154,7 @@ mod phase6_tests {
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -8957,6 +9447,7 @@ mod compact_tests {
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -10279,6 +10770,7 @@ mod plan_mode_tests {
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -10704,6 +11196,7 @@ mod hook_integration_tests {
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -11427,6 +11920,7 @@ mod approval_bridge_engine_tests {
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
@@ -12247,6 +12741,7 @@ mod user_model_writeback_tests {
             per_turn_costs: Vec::new(),
             mcp_curation: wcore_config::config::McpCurationPolicy::default(),
             mcp_curation_cache: None,
+            mcp_cap_cache: None,
             file_cache: None,
             session_state: None,
             audit_log: None,
