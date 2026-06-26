@@ -8,13 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { acpConversation, mcpService } from '@/common/adapter/ipcBridge';
 import { canonicalMcpServerName } from '@/common/mcp';
 import type { IMcpServer } from '@/common/config/storage';
-import {
-  useMcpServers,
-  useMcpAgentStatus,
-  useMcpOperations,
-  useMcpServerCRUD,
-  useMcpOAuth,
-} from '@renderer/hooks/mcp';
+import { useMcpServers, useMcpAgentStatus, useMcpOperations, useMcpServerCRUD, useMcpOAuth } from '@renderer/hooks/mcp';
 import { useMcpConnection } from '@renderer/hooks/mcp/useMcpConnection';
 import { deriveStatus, type UIStatus } from '../status';
 
@@ -70,9 +64,7 @@ export function findStaleServers(
  * removal of stale leftover servers. Touches connection-status/teardown only; it
  * never writes per-tool `allowed_tools` (Lane 2) or `configBridge.allow_list` (Lane 3).
  */
-export function useConnectedMcps(
-  message: ReturnType<typeof import('@arco-design/web-react').Message.useMessage>[0]
-) {
+export function useConnectedMcps(message: ReturnType<typeof import('@arco-design/web-react').Message.useMessage>[0]) {
   const { mcpServers, allMcpServers, saveMcpServers } = useMcpServers();
   const { agentInstallStatus, setAgentInstallStatus, checkSingleServerInstallStatus, checkAgentInstallStatus } =
     useMcpAgentStatus();
@@ -157,10 +149,7 @@ export function useConnectedMcps(
   // Disconnect = disable + tear the config out of every agent (no live socket to
   // close; agents reconnect lazily). Reconnect = enable + re-probe. Remove =
   // delete from config + agents.
-  const disconnect = useCallback(
-    (serverId: string): void => void crud.handleToggleMcpServer(serverId, false),
-    [crud]
-  );
+  const disconnect = useCallback((serverId: string): void => void crud.handleToggleMcpServer(serverId, false), [crud]);
   const reconnect = useCallback(
     async (server: IMcpServer) => {
       if (!server.enabled) await crud.handleToggleMcpServer(server.id, true);

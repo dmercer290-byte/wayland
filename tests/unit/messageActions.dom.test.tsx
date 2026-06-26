@@ -14,7 +14,9 @@ import MessageActions, {
   type ChatEditRerunDetail,
 } from '@/renderer/pages/conversation/Messages/components/MessageActions';
 
-vi.mock('@arco-design/web-react', () => ({ Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</> }));
+vi.mock('@arco-design/web-react', () => ({
+  Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}));
 vi.mock('@icon-park/react', () => ({
   Copy: () => <span data-testid='copy-icon' />,
   Edit: () => <span data-testid='edit-icon' />,
@@ -27,7 +29,9 @@ vi.mock('@icon-park/react', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k }),
 }));
-vi.mock('@/renderer/styles/colors', () => ({ iconColors: { secondary: 'var(--text-secondary)', brand: 'var(--brand)' } }));
+vi.mock('@/renderer/styles/colors', () => ({
+  iconColors: { secondary: 'var(--text-secondary)', brand: 'var(--brand)' },
+}));
 
 afterEach(() => {
   localStorage.clear();
@@ -106,7 +110,10 @@ describe('MessageActions', () => {
     const cancel = vi.fn();
     Object.assign(window, { speechSynthesis: { speak, cancel } });
     // @ts-expect-error - minimal test stub for the utterance ctor
-    window.SpeechSynthesisUtterance = vi.fn(function (this: { text: string; addEventListener: () => void }, text: string) {
+    window.SpeechSynthesisUtterance = vi.fn(function (
+      this: { text: string; addEventListener: () => void },
+      text: string
+    ) {
       this.text = text;
       this.addEventListener = vi.fn();
     });

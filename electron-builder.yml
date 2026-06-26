@@ -173,7 +173,7 @@ win:
   # silently ship unsigned again. electron-builder installs the TrustedSigning
   # PowerShell module itself on the windows-2022 runner.
   azureSignOptions:
-    publisherName: "Ferrox Labs, LLC"
+    publisherName: 'Ferrox Labs, LLC'
     endpoint: https://eus.codesigning.azure.net/
     codeSigningAccountName: ferrox-labs-signing
     certificateProfileName: ferroxlabs

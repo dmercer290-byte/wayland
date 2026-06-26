@@ -147,8 +147,7 @@ const AcpModelSelector: React.FC<{
       ...cached,
       currentModelId: effectiveModelId,
       currentModelLabel:
-        (effectiveModelId && cached.availableModels.find((m) => m.id === effectiveModelId)?.label) ||
-        effectiveModelId,
+        (effectiveModelId && cached.availableModels.find((m) => m.id === effectiveModelId)?.label) || effectiveModelId,
     };
   });
   // Whether the cache lookup (prefetch + this picker's first load) has settled.

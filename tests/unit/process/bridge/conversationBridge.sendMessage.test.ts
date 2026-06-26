@@ -212,9 +212,7 @@ describe('conversationBridge.sendMessage', () => {
 
       await handler!({ conversation_id: 'c1', input: 'hi', msg_id: 'm1' });
 
-      expect(task.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ content: 'hi', agentContent: 'hi' })
-      );
+      expect(task.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'hi', agentContent: 'hi' }));
       // composeStepContext must never run when there is no workflowSessionId
       expect(mockComposeStepContext).not.toHaveBeenCalled();
     });
@@ -257,9 +255,7 @@ describe('conversationBridge.sendMessage', () => {
       await handler!({ conversation_id: 'c1', input: 'hi', msg_id: 'm1' });
 
       expect(mockComposeStepContext).not.toHaveBeenCalled();
-      expect(task.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ content: 'hi', agentContent: 'hi' })
-      );
+      expect(task.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'hi', agentContent: 'hi' }));
     });
 
     it('does not prepend when composeStepContext returns empty (e.g. current_step === 0)', async () => {
@@ -277,9 +273,7 @@ describe('conversationBridge.sendMessage', () => {
       await handler!({ conversation_id: 'c1', input: 'hi', msg_id: 'm1' });
 
       expect(mockComposeStepContext).toHaveBeenCalled();
-      expect(task.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ content: 'hi', agentContent: 'hi' })
-      );
+      expect(task.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'hi', agentContent: 'hi' }));
     });
 
     it('soft-fails (no prepend, warn fired) when findById throws', async () => {
@@ -297,9 +291,7 @@ describe('conversationBridge.sendMessage', () => {
       const result = await handler!({ conversation_id: 'c1', input: 'hi', msg_id: 'm1' });
 
       expect(result).toEqual({ success: true });
-      expect(task.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ content: 'hi', agentContent: 'hi' })
-      );
+      expect(task.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'hi', agentContent: 'hi' }));
       expect(warnSpy).toHaveBeenCalledWith(
         '[conversationBridge] failed to prepend WORKFLOW_STEP_CONTEXT:',
         expect.any(Error)

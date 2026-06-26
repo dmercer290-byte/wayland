@@ -94,7 +94,16 @@ const ActionButton: React.FC<{ label: string; onClick: () => void; active?: bool
   </Tooltip>
 );
 
-const MessageActions: React.FC<Props> = ({ onCopy, messageId, readText, isUser, display, retryText, conversationId, onEdit }) => {
+const MessageActions: React.FC<Props> = ({
+  onCopy,
+  messageId,
+  readText,
+  isUser,
+  display,
+  retryText,
+  conversationId,
+  onEdit,
+}) => {
   const { t } = useTranslation();
   const fbKey = `wl:fb:${messageId}`;
   const [feedback, setFeedback] = useState<Feedback | null>(() => {
@@ -188,7 +197,11 @@ const MessageActions: React.FC<Props> = ({ onCopy, messageId, readText, isUser, 
             onClick={handleReadAloud}
             active={speaking}
           >
-            {speaking ? <PauseOne size={16} fill={iconColors.brand} /> : <PlayOne size={16} fill={iconColors.secondary} />}
+            {speaking ? (
+              <PauseOne size={16} fill={iconColors.brand} />
+            ) : (
+              <PlayOne size={16} fill={iconColors.secondary} />
+            )}
           </ActionButton>
 
           {retryText != null && (

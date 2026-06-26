@@ -71,7 +71,10 @@ const MessageThinking: React.FC<{ message: IMessageThinking }> = ({ message }) =
   // model's own gerund subject ("Synthesizing…") when the engine provides one,
   // else a calm "Thinking…". Full reasoning is on expand.
   const summaryText = isDone
-    ? t('conversation.thinking.thoughtFor', { defaultValue: 'Thought for {{duration}}', duration: formatDuration(duration || 0) })
+    ? t('conversation.thinking.thoughtFor', {
+        defaultValue: 'Thought for {{duration}}',
+        duration: formatDuration(duration || 0),
+      })
     : `${subject || t('conversation.thinking.label', { defaultValue: 'Thinking...' })} (${formatElapsedTime(elapsedTime)})`;
 
   return (

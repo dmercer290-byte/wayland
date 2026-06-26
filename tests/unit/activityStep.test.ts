@@ -6,9 +6,22 @@
 
 import { describe, it, expect } from 'vitest';
 import type { ActivityNode } from '../../src/common/chat/chatLib';
-import { nodeToStep, nodesToSteps, stepDurationSec, formatDuration, rollupStatus, doneCount } from '../../src/common/chat/activity/activityStep';
+import {
+  nodeToStep,
+  nodesToSteps,
+  stepDurationSec,
+  formatDuration,
+  rollupStatus,
+  doneCount,
+} from '../../src/common/chat/activity/activityStep';
 
-const node = (over: Partial<ActivityNode>): ActivityNode => ({ id: 'n1', kind: 'tool', name: 'Read', status: 'done', ...over });
+const node = (over: Partial<ActivityNode>): ActivityNode => ({
+  id: 'n1',
+  kind: 'tool',
+  name: 'Read',
+  status: 'done',
+  ...over,
+});
 
 describe('activityStep.nodeToStep', () => {
   it('projects a tool node with humanized label + glyph', () => {
@@ -20,10 +33,15 @@ describe('activityStep.nodeToStep', () => {
     expect(s.source).toBe('wcore');
   });
   it('carries agent name for sub_agent and recurses children', () => {
-    const s = nodeToStep(node({
-      kind: 'sub_agent', name: 'researcher', status: 'running',
-      children: [node({ id: 'c1', name: 'WebFetch', detail: 'https://apnews.com', status: 'done' })],
-    }), 'wcore');
+    const s = nodeToStep(
+      node({
+        kind: 'sub_agent',
+        name: 'researcher',
+        status: 'running',
+        children: [node({ id: 'c1', name: 'WebFetch', detail: 'https://apnews.com', status: 'done' })],
+      }),
+      'wcore'
+    );
     expect(s.agent).toBe('researcher');
     expect(s.children).toHaveLength(1);
     expect(s.children?.[0].label).toBe('Reading apnews.com');

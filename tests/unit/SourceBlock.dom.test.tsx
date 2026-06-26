@@ -31,8 +31,18 @@ import SourceBlock from '@/renderer/components/chat/observability/SourceBlock';
 import type { Source } from '@/common/chat/activity/sources';
 
 const sources: Source[] = [
-  { title: 'Reuters', url: 'https://reuters.com', domain: 'reuters.com', favicon: 'https://www.google.com/s2/favicons?domain=reuters.com&sz=32' },
-  { title: 'BBC News', url: 'https://bbc.com/news', domain: 'bbc.com', favicon: 'https://www.google.com/s2/favicons?domain=bbc.com&sz=32' },
+  {
+    title: 'Reuters',
+    url: 'https://reuters.com',
+    domain: 'reuters.com',
+    favicon: 'https://www.google.com/s2/favicons?domain=reuters.com&sz=32',
+  },
+  {
+    title: 'BBC News',
+    url: 'https://bbc.com/news',
+    domain: 'bbc.com',
+    favicon: 'https://www.google.com/s2/favicons?domain=bbc.com&sz=32',
+  },
 ];
 
 describe('SourceBlock', () => {

@@ -51,10 +51,7 @@ const WebSearchDisplay: React.FC<{ content: WebSearchUpdate }> = ({ content }) =
       )}
       {/* Source cards when Codex results are available */}
       {subtype === 'web_search_end' && 'results' in data && data.results && data.results.length > 0 && (
-        <SourceBlock
-          sources={codexResultsToSources(data.results)}
-          query={'query' in data ? data.query : undefined}
-        />
+        <SourceBlock sources={codexResultsToSources(data.results)} query={'query' in data ? data.query : undefined} />
       )}
     </BaseToolCallDisplay>
   );

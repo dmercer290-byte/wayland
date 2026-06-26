@@ -24,10 +24,16 @@ describe('activityLabels.deriveStep - kind-driven', () => {
     expect(deriveStep({ kind: 'thinking', name: '', detail: '' })).toEqual({ label: 'Reasoning', glyph: 'reasoning' });
   });
   it('maps sub_agent -> agent name + sub_agent glyph', () => {
-    expect(deriveStep({ kind: 'sub_agent', name: 'researcher', detail: '' })).toEqual({ label: 'researcher', glyph: 'sub_agent' });
+    expect(deriveStep({ kind: 'sub_agent', name: 'researcher', detail: '' })).toEqual({
+      label: 'researcher',
+      glyph: 'sub_agent',
+    });
   });
   it('maps circuit with provider name', () => {
-    expect(deriveStep({ kind: 'circuit', name: 'openrouter', detail: '' })).toEqual({ label: 'Switched provider (openrouter)', glyph: 'circuit' });
+    expect(deriveStep({ kind: 'circuit', name: 'openrouter', detail: '' })).toEqual({
+      label: 'Switched provider (openrouter)',
+      glyph: 'circuit',
+    });
   });
 });
 

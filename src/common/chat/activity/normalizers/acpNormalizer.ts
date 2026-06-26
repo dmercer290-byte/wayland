@@ -37,8 +37,7 @@ import type { AcpSessionUpdate } from '../../../types/acpTypes';
  * (ACP `status` is `'pending' | 'in_progress' | 'completed' | 'failed'` on
  * `tool_call`, and `'completed' | 'failed'` on `tool_call_update`.)
  */
-const isFailedStatus = (status: string | undefined): boolean =>
-  status === 'failed' || status === 'error';
+const isFailedStatus = (status: string | undefined): boolean => status === 'failed' || status === 'error';
 
 /** ACP tool statuses that mean the call finished successfully. */
 const isCompletedStatus = (status: string | undefined): boolean => status === 'completed';
@@ -138,9 +137,10 @@ export const acpToActivityNodes = (update: AcpSessionUpdate): ActivityNode[] => 
       // Thought chunks carry no per-chunk id; the only stable key on the event
       // is the top-level session id, so consecutive chunks merge into one
       // thinking node (mergeNodeList concatenates `detail`).
-      const sessionId = typeof (update as { sessionId?: unknown }).sessionId === 'string'
-        ? (update as { sessionId: string }).sessionId
-        : 'unknown';
+      const sessionId =
+        typeof (update as { sessionId?: unknown }).sessionId === 'string'
+          ? (update as { sessionId: string }).sessionId
+          : 'unknown';
       return [{ id: `thinking:${sessionId}`, kind: 'thinking', name: '', status: 'running', detail: text }];
     }
 

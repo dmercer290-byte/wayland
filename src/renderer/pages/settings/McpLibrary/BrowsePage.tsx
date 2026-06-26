@@ -6,13 +6,7 @@ import { Blocks, Activity } from 'lucide-react';
 import PageShell from '@renderer/components/layout/PageShell/PageShell';
 import LibrarySectionHeader from '@renderer/components/layout/library/LibrarySectionHeader';
 import { useMcpLibrary } from './hooks/useMcpLibrary';
-import {
-  useMcpServers,
-  useMcpAgentStatus,
-  useMcpOperations,
-  useMcpServerCRUD,
-  useMcpOAuth,
-} from '@renderer/hooks/mcp';
+import { useMcpServers, useMcpAgentStatus, useMcpOperations, useMcpServerCRUD, useMcpOAuth } from '@renderer/hooks/mcp';
 import { useMcpConnection } from '@renderer/hooks/mcp/useMcpConnection';
 import type { IMcpServer } from '@/common/config/storage';
 import AddMcpServerModal from '@renderer/pages/settings/components/AddMcpServerModal';
@@ -20,11 +14,7 @@ import { McpCard } from './components/McpCard';
 import McpLibraryRail, { type McpRailSelection } from './components/McpLibraryRail';
 import { McpCardActionsProvider, type McpCardActions } from './components/McpCardActions';
 import { deriveStatus, needsAttention, type UIStatus } from './status';
-import {
-  type CategoryGroupId,
-  getCategoryGroup,
-  groupsForEntry,
-} from './categories';
+import { type CategoryGroupId, getCategoryGroup, groupsForEntry } from './categories';
 import type { CatalogIndexEntry } from './types';
 import styles from './BrowsePage.module.css';
 
@@ -67,7 +57,7 @@ export function BrowsePage() {
 
   const installedIds = useMemo(
     () => new Set(mcpServers.map((s) => s.libraryEntryId).filter(Boolean) as string[]),
-    [mcpServers],
+    [mcpServers]
   );
 
   // Health of each installed catalog entry, keyed by its catalog id, so a broken
@@ -90,10 +80,7 @@ export function BrowsePage() {
     return map;
   }, [mcpServers]);
 
-  const onSelect = useCallback(
-    (id: string) => navigate(`/settings/mcp-library/${encodeURIComponent(id)}`),
-    [navigate],
-  );
+  const onSelect = useCallback((id: string) => navigate(`/settings/mcp-library/${encodeURIComponent(id)}`), [navigate]);
 
   const cardActions = useMemo<McpCardActions>(
     () => ({
@@ -107,9 +94,13 @@ export function BrowsePage() {
         const target = mcpServers.find((s) => s.id === serverId);
         Modal.confirm({
           title: t('mcpLibrary.card.removeTitle', 'Remove connector?'),
-          content: t('mcpLibrary.card.removeBody', 'This removes {{name}} and its config from your agents. You can re-add it any time.', {
-            name: target?.name ?? 'this connector',
-          }),
+          content: t(
+            'mcpLibrary.card.removeBody',
+            'This removes {{name}} and its config from your agents. You can re-add it any time.',
+            {
+              name: target?.name ?? 'this connector',
+            }
+          ),
           okButtonProps: { status: 'danger' },
           okText: t('mcpLibrary.card.remove', 'Remove'),
           onOk: () => void crud.handleDeleteMcpServer(serverId),
@@ -118,7 +109,7 @@ export function BrowsePage() {
     }),
     // onSelect is a stable navigate wrapper; crud/conn/mcpServers/t cover the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [serverByLibraryId, crud, conn, mcpServers, onSelect, t],
+    [serverByLibraryId, crud, conn, mcpServers, onSelect, t]
   );
 
   // ---- View state: rail selection + free-text search + page window ----
@@ -155,14 +146,11 @@ export function BrowsePage() {
   }, [library.entries, installedIds, statusByLibraryId]);
 
   // ---- View selection: compute the popular hero + the paginated list ----
-  const RECIDS = useMemo(
-    () => new Set(library.recommended.map((e) => e.id)),
-    [library.recommended],
-  );
+  const RECIDS = useMemo(() => new Set(library.recommended.map((e) => e.id)), [library.recommended]);
 
   const installedEntries = useMemo(
     () => library.entries.filter((e) => installedIds.has(e.id)),
-    [library.entries, installedIds],
+    [library.entries, installedIds]
   );
 
   const view = useMemo(() => {
@@ -174,7 +162,9 @@ export function BrowsePage() {
         const haystack = [
           e.name,
           e.shortDescription,
-          groupsForEntry(e).map((id) => getCategoryGroup(id).label).join(' '),
+          groupsForEntry(e)
+            .map((id) => getCategoryGroup(id).label)
+            .join(' '),
           e.maintainerType,
         ]
           .join(' ')
@@ -238,7 +228,7 @@ export function BrowsePage() {
         onClick={() => onSelect(e.id)}
       />
     ),
-    [installedIds, statusByLibraryId, onSelect],
+    [installedIds, statusByLibraryId, onSelect]
   );
 
   const actions = (
@@ -246,7 +236,7 @@ export function BrowsePage() {
       <Button icon={<Activity size={14} />} onClick={() => navigate('/settings/mcp-library/connected')}>
         {t('mcpLibrary.browse.connected', 'Connected MCPs')}
       </Button>
-      <Button type="primary" onClick={() => setShowAddModal(true)}>
+      <Button type='primary' onClick={() => setShowAddModal(true)}>
         {t('mcpLibrary.browse.addCustom', 'Add custom server')}
       </Button>
     </>
@@ -261,7 +251,7 @@ export function BrowsePage() {
         countLabel={t('mcpLibrary.browse.count', '{{n}} connectors', { n: library.entries.length })}
         subtitle={t(
           'mcpLibrary.browse.subtitle',
-          'Connect Wayland to the tools you already use. One click to install, a switch to turn it on or off.',
+          'Connect Wayland to the tools you already use. One click to install, a switch to turn it on or off.'
         )}
         actions={actions}
         width='full'
@@ -284,27 +274,20 @@ export function BrowsePage() {
                   label={t('mcpLibrary.browse.popular', 'Popular')}
                   hint={t('mcpLibrary.browse.popularHint', 'The connectors most people start with')}
                 />
-                <div className={styles.grid}>
-                  {library.recommended.map((e) => renderCard(e, true))}
-                </div>
+                <div className={styles.grid}>{library.recommended.map((e) => renderCard(e, true))}</div>
               </div>
             ) : null}
 
             <div>
               <LibrarySectionHeader label={view.headerLabel} count={view.list.length} />
               {view.list.length === 0 ? (
-                <div className={styles.empty}>
-                  {t('mcpLibrary.browse.empty', 'No connectors match.')}
-                </div>
+                <div className={styles.empty}>{t('mcpLibrary.browse.empty', 'No connectors match.')}</div>
               ) : (
                 <>
                   <div className={styles.grid}>{visible.map((e) => renderCard(e, false))}</div>
                   {view.list.length > shown ? (
                     <div className={styles.showMore}>
-                      <Button
-                        type='outline'
-                        onClick={() => setShown((s) => s + PAGE)}
-                      >
+                      <Button type='outline' onClick={() => setShown((s) => s + PAGE)}>
                         {t('mcpLibrary.browse.showMore', 'Show more')}
                       </Button>
                       <span className={styles.showMoreCount}>

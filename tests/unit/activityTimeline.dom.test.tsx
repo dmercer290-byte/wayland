@@ -55,10 +55,7 @@ describe('ActivityTimeline', () => {
   it('expands to show each step label when the header is clicked', () => {
     render(
       <ActivityTimeline
-        steps={[
-          step({ id: 'a', label: 'Planning the work' }),
-          step({ id: 'b', label: 'Searching the web' }),
-        ]}
+        steps={[step({ id: 'a', label: 'Planning the work' }), step({ id: 'b', label: 'Searching the web' })]}
       />
     );
     fireEvent.click(screen.getByText(/Did 2 things/));
@@ -119,9 +116,7 @@ describe('ActivityTimeline', () => {
   });
 
   it('auto-collapses on the running -> done edge', () => {
-    const running = [
-      step({ id: 'a', label: 'Working now', status: 'running', startTime: 1000, endTime: undefined }),
-    ];
+    const running = [step({ id: 'a', label: 'Working now', status: 'running', startTime: 1000, endTime: undefined })];
     const { rerender } = render(<ActivityTimeline steps={running} />);
     // While running: expanded, label visible.
     expect(screen.getByText('Working now')).toBeTruthy();

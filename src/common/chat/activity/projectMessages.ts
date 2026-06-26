@@ -15,7 +15,13 @@
  * same humanized step projection. Pure - no React, no IO; unit-tested.
  */
 
-import type { IMessageActivity, IMessageAcpToolCall, IMessageSubAgent, IMessageToolGroup, ActivityNode } from '../chatLib';
+import type {
+  IMessageActivity,
+  IMessageAcpToolCall,
+  IMessageSubAgent,
+  IMessageToolGroup,
+  ActivityNode,
+} from '../chatLib';
 import { nodeToStep, nodesToSteps, type ActivitySource, type ActivityStep } from './activityStep';
 import { parseWcoreSearchOutput } from './sources';
 

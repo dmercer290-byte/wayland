@@ -33,7 +33,10 @@ import type { ProviderId } from '@process/providers/types';
 import { BACKEND_AUTH_KEYS } from '@process/acp/compat/typeBridge';
 import { selectAuthFailureCulprits } from '@process/providers/detection/authFailure';
 import { ProcessConfig } from '@process/utils/initStorage';
-import { readClaudeModelInfoFromCcSwitch, readClaudeModelInfoFromSettings } from '@process/services/ccSwitchModelSource';
+import {
+  readClaudeModelInfoFromCcSwitch,
+  readClaudeModelInfoFromSettings,
+} from '@process/services/ccSwitchModelSource';
 import { codexBearerEnvVar } from '@process/services/mcpServices/agents/CodexMcpAgent';
 import type { IMcpServer } from '@/common/config/storage';
 import { addMessage, addOrUpdateMessage, nextTickToLocalFinish } from '@process/utils/message';

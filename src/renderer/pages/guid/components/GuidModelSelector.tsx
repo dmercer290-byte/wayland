@@ -491,11 +491,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   if (showAcpFlux || acpModels.length > 0) {
     // Inline scope caption - keeps the Arco Menu legal (no raw <div> kids).
     const scopeCaptionItem = (
-      <Menu.Item
-        key='scope-caption'
-        disabled
-        className='px-12px pt-8px pb-6px text-11px text-t-tertiary leading-snug'
-      >
+      <Menu.Item key='scope-caption' disabled className='px-12px pt-8px pb-6px text-11px text-t-tertiary leading-snug'>
         {scopeCaption}
       </Menu.Item>
     );
@@ -636,14 +632,7 @@ export const ModelSelectorPanel: React.FC<ModelSelectorPanelProps> = ({
     [curated, onPick]
   );
 
-  return (
-    <ModelSelectorFlyout
-      vm={vm}
-      onSelect={onSelect}
-      onTogglePin={togglePinKey}
-      onManage={onAddProvider}
-    />
-  );
+  return <ModelSelectorFlyout vm={vm} onSelect={onSelect} onTogglePin={togglePinKey} onManage={onAddProvider} />;
 };
 
 // Re-export for tests so they can mount the panel without the Arco Dropdown

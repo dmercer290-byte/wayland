@@ -503,9 +503,7 @@ export const useGuidAgentSelection = ({
       .then((res) => {
         const info = res?.success ? res.data?.modelInfo : null;
         if (!active || !info?.availableModels?.length) return;
-        setAcpCachedModels((prev) =>
-          prev[backend]?.availableModels?.length ? prev : { ...prev, [backend]: info }
-        );
+        setAcpCachedModels((prev) => (prev[backend]?.availableModels?.length ? prev : { ...prev, [backend]: info }));
       })
       .catch(() => {
         // Offline resolve is best-effort; the picker keeps its default until connect.

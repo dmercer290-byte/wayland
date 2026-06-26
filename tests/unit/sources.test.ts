@@ -34,7 +34,12 @@ describe('sources.parseWcoreSearchOutput', () => {
   });
 
   it('parses a { results: [...] } shape', () => {
-    const payload = { results: [{ title: 'BBC', url: 'https://bbc.com' }, { title: 'CNN', url: 'https://cnn.com' }] };
+    const payload = {
+      results: [
+        { title: 'BBC', url: 'https://bbc.com' },
+        { title: 'CNN', url: 'https://cnn.com' },
+      ],
+    };
     const out = parseWcoreSearchOutput(JSON.stringify(payload));
     expect(out).toHaveLength(2);
     expect(out[0].title).toBe('BBC');
@@ -53,7 +58,11 @@ describe('sources.parseWcoreSearchOutput', () => {
     const payload = {
       data: {
         web: [
-          { title: 'OpenAI: Latest News - WinBuzzer', url: 'https://winbuzzer.com/ai/openai/', snippet: '# **OpenAI**' },
+          {
+            title: 'OpenAI: Latest News - WinBuzzer',
+            url: 'https://winbuzzer.com/ai/openai/',
+            snippet: '# **OpenAI**',
+          },
           { title: 'OpenAI News', url: 'https://openai.com/news', snippet: '* Research' },
         ],
       },
@@ -61,7 +70,11 @@ describe('sources.parseWcoreSearchOutput', () => {
     };
     const out = parseWcoreSearchOutput(JSON.stringify(payload));
     expect(out).toHaveLength(2);
-    expect(out[0]).toMatchObject({ title: 'OpenAI: Latest News - WinBuzzer', domain: 'winbuzzer.com', snippet: '# **OpenAI**' });
+    expect(out[0]).toMatchObject({
+      title: 'OpenAI: Latest News - WinBuzzer',
+      domain: 'winbuzzer.com',
+      snippet: '# **OpenAI**',
+    });
     expect(out[1].domain).toBe('openai.com');
   });
 
@@ -98,7 +111,12 @@ describe('sources.codexResultsToSources', () => {
     ];
     const sources = codexResultsToSources(results);
     expect(sources).toHaveLength(2);
-    expect(sources[0]).toMatchObject({ title: 'AP News', url: 'https://apnews.com/article/test', domain: 'apnews.com', snippet: 'Breaking news' });
+    expect(sources[0]).toMatchObject({
+      title: 'AP News',
+      url: 'https://apnews.com/article/test',
+      domain: 'apnews.com',
+      snippet: 'Breaking news',
+    });
     expect(sources[0].favicon).toBe('https://www.google.com/s2/favicons?domain=apnews.com&sz=32');
     expect(sources[1].domain).toBe('bbc.com');
   });

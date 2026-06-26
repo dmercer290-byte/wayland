@@ -2,9 +2,10 @@
 
 You are the **desktop** lane (area label **area:desktop-ui**). Coordination state lives on GitHub
 issues (FerroxLabs/wayland) — NOT in handoff files. Use the `wl` wrapper:
-- `wl queue`   your work (run at session start). Own ONLY your area:desktop-ui; never touch another lane's.
-- `wl take <#>`   claim + mark in-progress
-- `wl handoff <#> --to core|desktop|flux "reason"`   pass cross-lane work — NEVER write a HANDOFF-*.md file
+
+- `wl queue` your work (run at session start). Own ONLY your area:desktop-ui; never touch another lane's.
+- `wl take <#>` claim + mark in-progress
+- `wl handoff <#> --to core|desktop|flux "reason"` pass cross-lane work — NEVER write a HANDOFF-\*.md file
 - `wl block <#> "why"` / `wl pending-release <#> --fixed-in REPO@VER`
 - NEVER close an issue — that is a release/Sean action.
 - The old `.blackboard/` is RETIRED. Archive it (`mkdir -p .blackboard/ARCHIVE && git mv .blackboard/* .blackboard/ARCHIVE/ 2>/dev/null`) and ignore it.
@@ -18,6 +19,7 @@ Setup: `export WL_LANE=desktop`; `wl` is on PATH.
 ---
 
 ---
+
 ijfw_version: 1.3.2
 ijfw_schema: 1
 type: software
@@ -26,67 +28,70 @@ secondary_types: []
 confidence: 0.942
 detected_at: 2026-06-04T12:39:04.360Z
 signals:
-  - kind: agents_md_frontmatter
-    weight: 0.9
-    value: software
-  - kind: manifest
-    weight: 0.9
-    manifests: [Makefile, package.json, package.json]
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: dir_design
-    weight: 0.4
-    name: assets
-  - kind: file_extension_ratio
-    weight: 0.7
-    domain: software
-    ratio: 0.925
-    count: 2631
-  - kind: file_extension_ratio
-    weight: 0.7
-    domain: design
-    ratio: 0.056
-    count: 158
-  - kind: filename_pattern
-    weight: 0.2
-    domain: content
-    name: post-applypatch
-  - kind: filename_pattern
-    weight: 0.2
-    domain: content
-    name: post-checkout
-  - kind: filename_pattern
-    weight: 0.2
-    domain: content
-    name: post-commit
-  - kind: filename_pattern
-    weight: 0.2
-    domain: content
-    name: post-merge
-  - kind: filename_pattern
-    weight: 0.2
-    domain: content
-    name: post-rewrite
+
+- kind: agents_md_frontmatter
+  weight: 0.9
+  value: software
+- kind: manifest
+  weight: 0.9
+  manifests: [Makefile, package.json, package.json]
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: dir_design
+  weight: 0.4
+  name: assets
+- kind: file_extension_ratio
+  weight: 0.7
+  domain: software
+  ratio: 0.925
+  count: 2631
+- kind: file_extension_ratio
+  weight: 0.7
+  domain: design
+  ratio: 0.056
+  count: 158
+- kind: filename_pattern
+  weight: 0.2
+  domain: content
+  name: post-applypatch
+- kind: filename_pattern
+  weight: 0.2
+  domain: content
+  name: post-checkout
+- kind: filename_pattern
+  weight: 0.2
+  domain: content
+  name: post-commit
+- kind: filename_pattern
+  weight: 0.2
+  domain: content
+  name: post-merge
+- kind: filename_pattern
+  weight: 0.2
+  domain: content
+  name: post-rewrite
+
 ---
+
 # Wayland - Project Guide
 
 All contributors (human and AI) must follow [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
@@ -225,9 +230,13 @@ All user-facing text must use i18n keys - never hardcode strings. Languages and 
 See the `i18n` skill (`.claude/skills/i18n/SKILL.md`) for complete workflow, key naming, and validation steps.
 
 <!-- IJFW-MEMORY-START -->
+
 Project memory at .ijfw/memory/. Call `ijfw_memory_prelude` for full context.
+
 <!-- IJFW-MEMORY-END -->
 
 <!-- IJFW-AGENTS-START -->
+
 No project agents yet. Run `ijfw team` to set them up.
+
 <!-- IJFW-AGENTS-END -->

@@ -235,8 +235,7 @@ export function readClaudeModelInfoFromSettings(homeDir = os.homedir()): AcpMode
   }
   const currentModelId = claudeSlotForModelId(settings?.model) ?? 'opus';
   const availableModels = CLAUDE_NATIVE_SLOT_ORDER.map((id) => ({ id, label: CLAUDE_SLOT_LABELS[id] }));
-  const currentModelLabel =
-    availableModels.find((m) => m.id === currentModelId)?.label ?? CLAUDE_SLOT_LABELS.opus;
+  const currentModelLabel = availableModels.find((m) => m.id === currentModelId)?.label ?? CLAUDE_SLOT_LABELS.opus;
   return {
     currentModelId,
     currentModelLabel,

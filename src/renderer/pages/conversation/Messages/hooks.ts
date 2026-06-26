@@ -229,8 +229,7 @@ function composeMessageWithIndex(message: TMessage, list: TMessage[], index: Mes
       if (existingMsg.type === 'sub_agent') {
         const prev = existingMsg.content;
         const next = message.content;
-        const mergedStatus =
-          next.status === 'done' || next.status === 'failed' ? next.status : prev.status;
+        const mergedStatus = next.status === 'done' || next.status === 'failed' ? next.status : prev.status;
         // #252 Phase 2: fold the sub-agent's streamed child subtree by node id
         // (recurses for nested sub-agents). Mirrors composeMessage.
         const mergedNodes = mergeNodeList(prev.nodes, next.nodes);

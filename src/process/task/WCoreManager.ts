@@ -993,7 +993,11 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
           // genuinely gated on a resume the app can't send (no resume token, or
           // a real approval in a non-auto mode with no HITL UI yet). Log loudly
           // so a wedged turn is diagnosable rather than silently hung. (#264)
-          mainError('[WCoreManager]', `approval_required reason='${appr.reason}' but no approval UI; cannot resume`, data.data);
+          mainError(
+            '[WCoreManager]',
+            `approval_required reason='${appr.reason}' but no approval UI; cannot resume`,
+            data.data
+          );
         }
         return;
       }
@@ -1022,9 +1026,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       // Wayland Core has no subscription/OAuth fallback, so a dead key is fatal
       // for the turn and the provider must be marked unhealthy.
       if (data.type === 'error') {
-        this.maybeInvalidateProviderKeyOnAuthError(
-          typeof data.data === 'string' ? data.data : String(data.data ?? '')
-        );
+        this.maybeInvalidateProviderKeyOnAuthError(typeof data.data === 'string' ? data.data : String(data.data ?? ''));
       }
 
       // System-level events (empty msg_id) are not part of a conversation turn.

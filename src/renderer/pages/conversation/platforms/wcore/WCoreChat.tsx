@@ -113,17 +113,14 @@ const WCoreChat: React.FC<{
     await routeThroughFluxAndReplay({
       conversationId: conversation_id,
       pendingTurn: pendingTurnRef.current,
-      connectFlux: () =>
-        fluxConnected ? Promise.resolve({ ok: true }) : ipcBridge.onboarding.connectFlux.invoke(),
+      connectFlux: () => (fluxConnected ? Promise.resolve({ ok: true }) : ipcBridge.onboarding.connectFlux.invoke()),
       switchToFlux: async (cid) => {
         // The Flux provider in model.config carries an opaque id, so match it by
         // its flux-* model catalog, not a fixed id. Persisting this provider with
         // useModel=flux-auto is the same shape getDefaultWCoreModel produces; the
         // main process resolves the Flux base URL + key at spawn.
         const cfg = await ipcBridge.mode.getModelConfig.invoke();
-        const fluxProvider = (Array.isArray(cfg) ? cfg : []).find((p) =>
-          (p.model ?? []).some((m) => isFluxModelId(m))
-        );
+        const fluxProvider = (Array.isArray(cfg) ? cfg : []).find((p) => (p.model ?? []).some((m) => isFluxModelId(m)));
         if (!fluxProvider) return false;
         const fluxModel = { ...fluxProvider, useModel: FLUX_AUTO_MODEL } as TProviderWithModel;
         // Mirror the model picker: stop the running engine, then persist the Flux

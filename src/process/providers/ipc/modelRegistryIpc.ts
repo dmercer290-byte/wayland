@@ -743,7 +743,11 @@ export function createModelRegistryHandlers(deps: ModelRegistryDeps): ModelRegis
         // A no-credit key is still authenticated - keep the provider Connected
         // (it sits switched-off via disabled models), consistent with connect (#100).
         const established = result.ok || result.error === 'no-credit';
-        repo.updateRegistryProviderState(providerId, established ? 'connected' : 'error', established ? undefined : result.error);
+        repo.updateRegistryProviderState(
+          providerId,
+          established ? 'connected' : 'error',
+          established ? undefined : result.error
+        );
         return result.ok ? { ok: true } : { ok: false, error: result.error ?? 'unknown' };
       } catch {
         return { ok: false, error: 'unknown' };
@@ -1768,8 +1772,7 @@ function scheduleStartupMigration(): void {
   // is no `whenReady` gate to wait on there - storage is already initialized
   // before the registry IPC is wired - so resolve immediately. The Electron
   // path keeps deferring to `app.whenReady()` exactly as before.
-  const ready: Promise<unknown> =
-    typeof app?.whenReady === 'function' ? app.whenReady() : Promise.resolve();
+  const ready: Promise<unknown> = typeof app?.whenReady === 'function' ? app.whenReady() : Promise.resolve();
   ready
     .then(async () => {
       if (!_repo) return;
@@ -2043,9 +2046,7 @@ export async function connectModelRegistryProvider(
  * so the status is sourced from exactly one place. Returns `null` if called
  * before `initModelRegistryIpc` has captured the production handlers.
  */
-export async function getModelRegistryProviderView(
-  providerId: ProviderId
-): Promise<IModelRegistryProviderView | null> {
+export async function getModelRegistryProviderView(providerId: ProviderId): Promise<IModelRegistryProviderView | null> {
   if (!_handlers) return null;
   const list = await _handlers.list();
   return list.find((p) => p.providerId === providerId) ?? null;

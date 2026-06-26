@@ -176,7 +176,18 @@ describe('innerEvent.parseInnerEvent - graceful fallback / regression', () => {
   });
 
   it('keeps ENUMERATED framing/control events empty - no noise nodes', () => {
-    for (const type of ['stream_start', 'stream_end', 'pong', 'approval_required', 'provider_circuit_event', 'suspend', 'budget_exceeded', 'evolution_event', 'plugin_event', 'cua_policy_denied']) {
+    for (const type of [
+      'stream_start',
+      'stream_end',
+      'pong',
+      'approval_required',
+      'provider_circuit_event',
+      'suspend',
+      'budget_exceeded',
+      'evolution_event',
+      'plugin_event',
+      'cua_policy_denied',
+    ]) {
       expect(parseInnerEvent({ type, msg_id: 'm1', call_id: 'c1' }).nodes).toHaveLength(0);
     }
   });
@@ -185,7 +196,13 @@ describe('innerEvent.parseInnerEvent - graceful fallback / regression', () => {
     const panic = parseInnerEvent({ type: 'tool_panicked', call_id: 'c1', tool_name: 'Bash', panic_message: 'boom' });
     expect(panic.nodes[0]).toMatchObject({ id: 'c1', kind: 'tool', name: 'Bash', status: 'failed', detail: 'boom' });
 
-    const browser = parseInnerEvent({ type: 'browser_event', call_id: 'b1', op: 'navigate', url: 'https://x.com', summary: 'opened' });
+    const browser = parseInnerEvent({
+      type: 'browser_event',
+      call_id: 'b1',
+      op: 'navigate',
+      url: 'https://x.com',
+      summary: 'opened',
+    });
     expect(browser.nodes[0]).toMatchObject({ id: 'b1', kind: 'browser', name: 'navigate' });
     expect(browser.nodes[0].detail).toContain('https://x.com');
 

@@ -29,7 +29,11 @@ import { usePendingSendOnWake } from '@/renderer/hooks/chat/usePendingSendOnWake
 import { useOpenFileSelector } from '@/renderer/hooks/file/useOpenFileSelector';
 import { useProviderReadiness } from '@/renderer/hooks/useProviderReadiness';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
-import { useAddOrUpdateMessage, useRemoveMessageByMsgId, useTruncateMessagesAfter } from '@/renderer/pages/conversation/Messages/hooks';
+import {
+  useAddOrUpdateMessage,
+  useRemoveMessageByMsgId,
+  useTruncateMessagesAfter,
+} from '@/renderer/pages/conversation/Messages/hooks';
 import { assertBridgeSuccess } from '@/renderer/pages/conversation/platforms/assertBridgeSuccess';
 import {
   shouldEnqueueConversationCommand,

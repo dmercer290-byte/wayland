@@ -825,9 +825,7 @@ export class WaylandUIDatabase {
     try {
       const finalUserId = userId || this.defaultUserId;
       const rows = this.db
-        .prepare(
-          `SELECT * FROM projects WHERE user_id = ? ORDER BY pinned DESC, pinned_at DESC, updated_at DESC`
-        )
+        .prepare(`SELECT * FROM projects WHERE user_id = ? ORDER BY pinned DESC, pinned_at DESC, updated_at DESC`)
         .all(finalUserId) as IProjectRow[];
       return { success: true, data: rows.map(rowToProject) };
     } catch (error: any) {

@@ -191,9 +191,7 @@ export class WCoreAgent {
     // and is never persisted. Per-call resolution keeps concurrent chats on
     // different accounts isolated (audit C6); raw-engine mode ignores the model
     // (it uses the engine's own config.toml), so skip the lookup there.
-    const spawnModel = this.options.rawEngineMode
-      ? this.options.model
-      : await hydrateModelForSpawn(this.options.model);
+    const spawnModel = this.options.rawEngineMode ? this.options.model : await hydrateModelForSpawn(this.options.model);
 
     const { args, env, projectConfig, resolvedMaxTokens } = buildSpawnConfig(spawnModel, {
       workspace: this.options.workspace,

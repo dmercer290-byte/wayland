@@ -81,7 +81,8 @@ export const nodeToStep = (node: ActivityNode, source?: ActivitySource): Activit
 };
 
 /** Project a node list (a turn's nodes) into steps. */
-export const nodesToSteps = (nodes: ActivityNode[], source?: ActivitySource): ActivityStep[] => nodes.map((n) => nodeToStep(n, source));
+export const nodesToSteps = (nodes: ActivityNode[], source?: ActivitySource): ActivityStep[] =>
+  nodes.map((n) => nodeToStep(n, source));
 
 /** Roll a turn's step statuses up to a single header status. */
 export const rollupStatus = (steps: Array<Pick<ActivityStep, 'status'>>): ActivityStep['status'] => {
@@ -92,4 +93,5 @@ export const rollupStatus = (steps: Array<Pick<ActivityStep, 'status'>>): Activi
 };
 
 /** Count of terminal (done|failed) steps - for the "Did N things" summary. */
-export const doneCount = (steps: Array<Pick<ActivityStep, 'status'>>): number => steps.filter((s) => s.status === 'done' || s.status === 'failed').length;
+export const doneCount = (steps: Array<Pick<ActivityStep, 'status'>>): number =>
+  steps.filter((s) => s.status === 'done' || s.status === 'failed').length;

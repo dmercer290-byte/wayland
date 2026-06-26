@@ -5,7 +5,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { IMessageActivity, IMessageAcpToolCall, IMessageSubAgent, IMessageToolGroup } from '../../src/common/chat/chatLib';
+import type {
+  IMessageActivity,
+  IMessageAcpToolCall,
+  IMessageSubAgent,
+  IMessageToolGroup,
+} from '../../src/common/chat/chatLib';
 import {
   acpToolCallToNode,
   activityToSteps,
@@ -18,7 +23,14 @@ const toolGroupMsg = (): IMessageToolGroup =>
   ({
     type: 'tool_group',
     content: [
-      { callId: 'c1', name: 'Read', description: '', renderOutputAsMarkdown: false, status: 'Success', resultDisplay: '/src/config.ts' },
+      {
+        callId: 'c1',
+        name: 'Read',
+        description: '',
+        renderOutputAsMarkdown: false,
+        status: 'Success',
+        resultDisplay: '/src/config.ts',
+      },
       { callId: 'c2', name: 'Bash', description: '', renderOutputAsMarkdown: false, status: 'Executing' },
     ],
   }) as unknown as IMessageToolGroup;
@@ -26,7 +38,16 @@ const toolGroupMsg = (): IMessageToolGroup =>
 const acpMsg = (): IMessageAcpToolCall =>
   ({
     type: 'acp_tool_call',
-    content: { sessionId: 's1', update: { sessionUpdate: 'tool_call', toolCallId: 't1', status: 'in_progress', title: 'web_search', kind: 'execute' } },
+    content: {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 't1',
+        status: 'in_progress',
+        title: 'web_search',
+        kind: 'execute',
+      },
+    },
   }) as unknown as IMessageAcpToolCall;
 
 describe('projectMessages.toolGroupToNodes', () => {
@@ -39,10 +60,24 @@ describe('projectMessages.toolGroupToNodes', () => {
 
 describe('projectMessages.acpToolCallToNode', () => {
   it('reads the nested .update fields and maps in_progress -> running', () => {
-    expect(acpToolCallToNode(acpMsg().content)).toMatchObject({ id: 't1', kind: 'tool', name: 'web_search', status: 'running' });
+    expect(acpToolCallToNode(acpMsg().content)).toMatchObject({
+      id: 't1',
+      kind: 'tool',
+      name: 'web_search',
+      status: 'running',
+    });
   });
   it('synthesizes an id when toolCallId is missing (never vanishes)', () => {
-    const content = { sessionId: 's1', update: { sessionUpdate: 'tool_call', toolCallId: '', status: 'in_progress', title: 'web_search', kind: 'execute' } } as unknown as IMessageAcpToolCall['content'];
+    const content = {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: '',
+        status: 'in_progress',
+        title: 'web_search',
+        kind: 'execute',
+      },
+    } as unknown as IMessageAcpToolCall['content'];
     const node = acpToolCallToNode(content);
     expect(node.id).toBe('acp:execute:web_search');
     expect(node.name).toBe('web_search');
@@ -118,7 +153,11 @@ describe('projectMessages.toolGroupToNodes - web_search sources', () => {
     } as unknown as IMessageToolGroup;
     const nodes = toolGroupToNodes(msg.content);
     expect(nodes[0].sources).toHaveLength(1);
-    expect(nodes[0].sources?.[0]).toMatchObject({ title: 'Example', url: 'https://example.com', domain: 'example.com' });
+    expect(nodes[0].sources?.[0]).toMatchObject({
+      title: 'Example',
+      url: 'https://example.com',
+      domain: 'example.com',
+    });
   });
 
   it('leaves sources undefined when the web_search output is prose (not JSON)', () => {
@@ -167,7 +206,14 @@ describe('projectMessages.toolGroupToNodes - web_search sources', () => {
     const msg: IMessageToolGroup = {
       type: 'tool_group',
       content: [
-        { callId: 'r1', name: 'Read', description: '', renderOutputAsMarkdown: false, status: 'Success', resultDisplay: '/some/file.ts' },
+        {
+          callId: 'r1',
+          name: 'Read',
+          description: '',
+          renderOutputAsMarkdown: false,
+          status: 'Success',
+          resultDisplay: '/some/file.ts',
+        },
       ],
     } as unknown as IMessageToolGroup;
     const nodes = toolGroupToNodes(msg.content);

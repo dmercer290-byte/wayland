@@ -97,7 +97,12 @@ const getUnhandledMessageType = (_message: never): string => 'unknown';
 // Image preview context
 export const ImagePreviewContext = createContext<{ inPreviewGroup: boolean }>({ inPreviewGroup: false });
 
-const MessageItem: React.FC<{ message: TMessage; highlighted?: boolean; toolbarMode?: ActionsDisplay; retryText?: string }> = React.memo(
+const MessageItem: React.FC<{
+  message: TMessage;
+  highlighted?: boolean;
+  toolbarMode?: ActionsDisplay;
+  retryText?: string;
+}> = React.memo(
   HOC((props) => {
     const { message, highlighted } = props as { message: TMessage; highlighted?: boolean };
     return (
@@ -120,52 +125,63 @@ const MessageItem: React.FC<{ message: TMessage; highlighted?: boolean; toolbarM
         {props.children}
       </div>
     );
-  })(({ message, toolbarMode, retryText }: { message: TMessage; highlighted?: boolean; toolbarMode?: ActionsDisplay; retryText?: string }) => {
-    const { t } = useTranslation();
-    switch (message.type) {
-      case 'text':
-        return <MessageText message={message} toolbarMode={toolbarMode} retryText={retryText} />;
-      case 'tips':
-        return <MessageTips message={message}></MessageTips>;
-      case 'tool_call':
-        return <MessageToolCall message={message}></MessageToolCall>;
-      case 'tool_group':
-        return <MessageToolGroup message={message}></MessageToolGroup>;
-      case 'agent_status':
-        return <MessageAgentStatus message={message}></MessageAgentStatus>;
-      case 'acp_permission':
-        return <MessageAcpPermission message={message}></MessageAcpPermission>;
-      case 'acp_tool_call':
-        return <MessageAcpToolCall message={message}></MessageAcpToolCall>;
-      case 'codex_permission':
-        // Permission UI is now handled by ConversationChatConfirm component
-        return null;
-      case 'codex_tool_call':
-        return <MessageCodexToolCall message={message}></MessageCodexToolCall>;
-      case 'plan':
-        return <MessagePlan message={message}></MessagePlan>;
-      case 'thinking':
-        return <MessageThinking message={message}></MessageThinking>;
-      case 'skill_suggest':
-        return <MessageSkillSuggest message={message} />;
-      case 'cron_trigger':
-        return <MessageCronTrigger message={message} />;
-      case 'cron_propose':
-        return <CronProposeCard message={message} />;
-      case 'sub_agent':
-        // #252 rework: a spawned sub-agent renders as one collapsible timeline
-        // step carrying its parsed inner subtree (tools / thinking / nested agents).
-        return <ActivityTimeline steps={[subAgentToStep(message.content)]} />;
-      case 'activity':
-        // #252 rework: the live activity tree (tool lifecycle, chunks, cost,
-        // circuit/browser/cua) renders inline as the unified timeline.
-        return <ActivityTimeline steps={activityToSteps(message.content)} />;
-      case 'available_commands':
-        return null;
-      default:
-        return <div>{t('messages.unknownMessageType', { type: getUnhandledMessageType(message) })}</div>;
+  })(
+    ({
+      message,
+      toolbarMode,
+      retryText,
+    }: {
+      message: TMessage;
+      highlighted?: boolean;
+      toolbarMode?: ActionsDisplay;
+      retryText?: string;
+    }) => {
+      const { t } = useTranslation();
+      switch (message.type) {
+        case 'text':
+          return <MessageText message={message} toolbarMode={toolbarMode} retryText={retryText} />;
+        case 'tips':
+          return <MessageTips message={message}></MessageTips>;
+        case 'tool_call':
+          return <MessageToolCall message={message}></MessageToolCall>;
+        case 'tool_group':
+          return <MessageToolGroup message={message}></MessageToolGroup>;
+        case 'agent_status':
+          return <MessageAgentStatus message={message}></MessageAgentStatus>;
+        case 'acp_permission':
+          return <MessageAcpPermission message={message}></MessageAcpPermission>;
+        case 'acp_tool_call':
+          return <MessageAcpToolCall message={message}></MessageAcpToolCall>;
+        case 'codex_permission':
+          // Permission UI is now handled by ConversationChatConfirm component
+          return null;
+        case 'codex_tool_call':
+          return <MessageCodexToolCall message={message}></MessageCodexToolCall>;
+        case 'plan':
+          return <MessagePlan message={message}></MessagePlan>;
+        case 'thinking':
+          return <MessageThinking message={message}></MessageThinking>;
+        case 'skill_suggest':
+          return <MessageSkillSuggest message={message} />;
+        case 'cron_trigger':
+          return <MessageCronTrigger message={message} />;
+        case 'cron_propose':
+          return <CronProposeCard message={message} />;
+        case 'sub_agent':
+          // #252 rework: a spawned sub-agent renders as one collapsible timeline
+          // step carrying its parsed inner subtree (tools / thinking / nested agents).
+          return <ActivityTimeline steps={[subAgentToStep(message.content)]} />;
+        case 'activity':
+          // #252 rework: the live activity tree (tool lifecycle, chunks, cost,
+          // circuit/browser/cua) renders inline as the unified timeline.
+          return <ActivityTimeline steps={activityToSteps(message.content)} />;
+        case 'available_commands':
+          return null;
+        default:
+          return <div>{t('messages.unknownMessageType', { type: getUnhandledMessageType(message) })}</div>;
+      }
     }
-  }),
+  ),
   (prev, next) =>
     prev.message.id === next.message.id &&
     prev.message.content === next.message.content &&
@@ -217,10 +233,11 @@ const ListFooter: React.FC<{ context?: MessageListContext }> = ({ context }) => 
 );
 const LIST_COMPONENTS = { Header: ListHeader, Footer: ListFooter } as const;
 
-const ConversationMessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode; isProcessing?: boolean }> = ({
-  emptySlot,
-  isProcessing,
-}) => {
+const ConversationMessageList: React.FC<{
+  className?: string;
+  emptySlot?: React.ReactNode;
+  isProcessing?: boolean;
+}> = ({ emptySlot, isProcessing }) => {
   const list = useMessageList();
   const conversationContext = useConversationContextSafe();
   useAutoPreviewOfficeFiles(conversationContext);

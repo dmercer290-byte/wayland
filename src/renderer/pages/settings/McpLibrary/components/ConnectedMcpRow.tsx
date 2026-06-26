@@ -40,9 +40,7 @@ const ConnectedMcpRow: React.FC<ConnectedMcpRowProps> = ({ row, onReconnect, onD
         <div className={styles.titleLine}>
           <span className={styles.name}>{server.name}</span>
           <StatusChip status={status} />
-          {isExtension && (
-            <span className={styles.extBadge}>{t('mcpLibrary.connected.extension', 'Extension')}</span>
-          )}
+          {isExtension && <span className={styles.extBadge}>{t('mcpLibrary.connected.extension', 'Extension')}</span>}
         </div>
         <div className={styles.meta}>
           <span className={styles.metaItem}>

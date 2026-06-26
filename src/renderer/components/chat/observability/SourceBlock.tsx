@@ -32,15 +32,7 @@ const FaviconImg: React.FC<{ src: string; alt: string }> = ({ src, alt }) => {
       </span>
     );
   }
-  return (
-    <img
-      className={styles.favicon}
-      src={src}
-      alt={alt}
-      onError={() => setFailed(true)}
-      loading='lazy'
-    />
-  );
+  return <img className={styles.favicon} src={src} alt={alt} onError={() => setFailed(true)} loading='lazy' />;
 };
 
 const SourceRow: React.FC<{ source: Source }> = ({ source }) => {

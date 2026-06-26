@@ -309,7 +309,8 @@ const MessageText: React.FC<{ message: IMessageText; toolbarMode?: ActionsDispla
             </div>
           )}
           {/* Use CollapsibleContent for JSON content */}
-          {!editing && hasVisibleContent &&
+          {!editing &&
+            hasVisibleContent &&
             (shouldRenderPlainText ? (
               <div className='whitespace-pre-wrap break-words' data-testid='message-text-content'>
                 {workflowSessionId ? stripWorkflowEnvelopes(text) : text}

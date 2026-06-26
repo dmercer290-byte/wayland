@@ -75,15 +75,47 @@ const RULES: LabelRule[] = [
       return q && q.toLowerCase() !== 'web' ? `Searching the web for "${q}"` : 'Searching the web';
     },
   },
-  { test: /webfetch|url[_-]?context|fetch[_-]?url|http[_-]?get|browse/, glyph: 'web', build: (h) => `Reading ${hostOrText(h)}` },
-  { test: /\b(read|open|cat|view)[_-]?file|\bfs[_-]?read|\bread\b/, glyph: 'file', build: (h) => `Reading ${truncateToFilename(firstPath(h) || 'a file')}` },
-  { test: /str[_-]?replace|editor|fs[_-]?write|\b(write|edit|update|modify|patch|apply)/, glyph: 'file', build: (h) => `Editing ${truncateToFilename(firstPath(h) || 'a file')}` },
-  { test: /\bcreate[_-]?file|\bnew[_-]?file|\btouch\b/, glyph: 'file', build: (h) => `Creating ${truncateToFilename(firstPath(h) || 'a file')}` },
-  { test: /\b(delete|remove|rm|unlink)[_-]?file|\brm\b/, glyph: 'file', build: (h) => `Removing ${truncateToFilename(firstPath(h) || 'a file')}` },
-  { test: /grep|ripgrep|\bfind\b|glob|search[_-]?code|codebase/, glyph: 'search', build: () => 'Searching the codebase' },
+  {
+    test: /webfetch|url[_-]?context|fetch[_-]?url|http[_-]?get|browse/,
+    glyph: 'web',
+    build: (h) => `Reading ${hostOrText(h)}`,
+  },
+  {
+    test: /\b(read|open|cat|view)[_-]?file|\bfs[_-]?read|\bread\b/,
+    glyph: 'file',
+    build: (h) => `Reading ${truncateToFilename(firstPath(h) || 'a file')}`,
+  },
+  {
+    test: /str[_-]?replace|editor|fs[_-]?write|\b(write|edit|update|modify|patch|apply)/,
+    glyph: 'file',
+    build: (h) => `Editing ${truncateToFilename(firstPath(h) || 'a file')}`,
+  },
+  {
+    test: /\bcreate[_-]?file|\bnew[_-]?file|\btouch\b/,
+    glyph: 'file',
+    build: (h) => `Creating ${truncateToFilename(firstPath(h) || 'a file')}`,
+  },
+  {
+    test: /\b(delete|remove|rm|unlink)[_-]?file|\brm\b/,
+    glyph: 'file',
+    build: (h) => `Removing ${truncateToFilename(firstPath(h) || 'a file')}`,
+  },
+  {
+    test: /grep|ripgrep|\bfind\b|glob|search[_-]?code|codebase/,
+    glyph: 'search',
+    build: () => 'Searching the codebase',
+  },
   { test: /\b(run|exec)[_-]?(test|spec)|\btest\b/, glyph: 'command', build: () => 'Running tests' },
-  { test: /exec[_-]?command|\bbash\b|\bshell\b|\bcommand\b|run[_-]?command|terminal/, glyph: 'command', build: () => 'Running a command' },
-  { test: /\binstall\b|npm|pnpm|bun[_-]?install|pip[_-]?install/, glyph: 'command', build: () => 'Installing dependencies' },
+  {
+    test: /exec[_-]?command|\bbash\b|\bshell\b|\bcommand\b|run[_-]?command|terminal/,
+    glyph: 'command',
+    build: () => 'Running a command',
+  },
+  {
+    test: /\binstall\b|npm|pnpm|bun[_-]?install|pip[_-]?install/,
+    glyph: 'command',
+    build: () => 'Installing dependencies',
+  },
   { test: /\bbuild\b|compile|bundle|tsc/, glyph: 'command', build: () => 'Building' },
 ];
 
@@ -92,11 +124,14 @@ const RULES: LabelRule[] = [
  * are handled by kind directly; everything else (tools, ops) runs the rule list,
  * falling back to a cleaned tool name so a label is ALWAYS produced (never blank).
  */
-export const deriveStep = (node: Pick<ActivityNode, 'kind' | 'name' | 'detail'>): { label: string; glyph: GlyphKind } => {
+export const deriveStep = (
+  node: Pick<ActivityNode, 'kind' | 'name' | 'detail'>
+): { label: string; glyph: GlyphKind } => {
   if (node.kind === 'thinking') return { label: 'Reasoning', glyph: 'reasoning' };
   if (node.kind === 'sub_agent') return { label: node.name || 'Sub-agent working', glyph: 'sub_agent' };
   if (node.kind === 'cost') return { label: 'Tallying cost', glyph: 'cost' };
-  if (node.kind === 'circuit') return { label: node.name ? `Switched provider (${node.name})` : 'Switched provider', glyph: 'circuit' };
+  if (node.kind === 'circuit')
+    return { label: node.name ? `Switched provider (${node.name})` : 'Switched provider', glyph: 'circuit' };
   if (node.kind === 'browser') return { label: node.name || 'Browsing', glyph: 'browser' };
   if (node.kind === 'cua') return { label: node.name || 'Operating the screen', glyph: 'cua' };
 

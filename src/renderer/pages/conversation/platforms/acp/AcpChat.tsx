@@ -102,8 +102,7 @@ const AcpChat: React.FC<{
     await routeThroughFluxAndReplay({
       conversationId: conversation_id,
       pendingTurn: pendingTurnRef.current,
-      connectFlux: () =>
-        fluxConnected ? Promise.resolve({ ok: true }) : ipcBridge.onboarding.connectFlux.invoke(),
+      connectFlux: () => (fluxConnected ? Promise.resolve({ ok: true }) : ipcBridge.onboarding.connectFlux.invoke()),
       switchToFlux: async (cid) => {
         const res = await ipcBridge.acpConversation.setModel.invoke({ conversationId: cid, modelId: FLUX_AUTO_MODEL });
         return res.success === true;

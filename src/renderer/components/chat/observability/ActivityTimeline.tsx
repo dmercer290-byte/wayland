@@ -89,9 +89,7 @@ const StepRow: React.FC<{ step: ActivityStep }> = ({ step }) => {
         <span className={styles.glyph}>
           <StepGlyph status={step.status} />
         </span>
-        <span className={`${styles.label} ${step.status === 'running' ? styles.labelActive : ''}`}>
-          {step.label}
-        </span>
+        <span className={`${styles.label} ${step.status === 'running' ? styles.labelActive : ''}`}>{step.label}</span>
         <span className={styles.meta}>
           {showAgentTag && step.agent && (
             <Tag size='small' color='arcoblue' className={styles.agentTag}>
@@ -160,8 +158,15 @@ const ActivityTimeline: React.FC<Props> = ({ steps, defaultExpanded }) => {
   // isn't always available - drop the "· {{duration}}" suffix when it's empty.
   const dur = running ? '' : spanDuration(steps);
   const doneSummary = dur
-    ? t('conversation.observability.summaryDid', { defaultValue: 'Did {{count}} things · {{duration}}', count: doneCount(steps), duration: dur })
-    : t('conversation.observability.summaryDidShort', { defaultValue: 'Did {{count}} things', count: doneCount(steps) });
+    ? t('conversation.observability.summaryDid', {
+        defaultValue: 'Did {{count}} things · {{duration}}',
+        count: doneCount(steps),
+        duration: dur,
+      })
+    : t('conversation.observability.summaryDidShort', {
+        defaultValue: 'Did {{count}} things',
+        count: doneCount(steps),
+      });
 
   // "What I did" at-a-glance: name the real actions under the collapsed summary
   // (only for genuinely multi-step turns; a single action is self-evident).
