@@ -559,8 +559,10 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       this.thinkingSubject = undefined;
     }
 
-    // First subject for this turn wins; the engine emits it once per turn (#318).
-    if (subject && !this.thinkingSubject) {
+    // Latest subject wins (#318 v2): Flux emits a generic header (Frame A) then a
+    // request-specific refinement (Frame B) within the same turn; replace in place
+    // so the refined subject upgrades the placeholder. Reset per turn (above).
+    if (subject) {
       this.thinkingSubject = subject;
     }
 

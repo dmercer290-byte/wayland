@@ -462,16 +462,23 @@ describe('GAP-1: WCoreManager Thinking Message Display & Persistence', () => {
       });
     });
 
-    it('keeps the first subject across subsequent subject-less thought events', () => {
+    it('upgrades to the latest subject within a turn, then preserves it (v2 placeholder-then-refine)', () => {
       emitEvent(manager, { type: 'start', data: '', msg_id: 'msg-1' });
-      emitEvent(manager, { type: 'thought', data: 'a', msg_id: 'msg-1', subject: 'Analyzing inputs' });
-      emitEvent(manager, { type: 'thought', data: ' b', msg_id: 'msg-1' });
+      // Frame A: generic placeholder.
+      emitEvent(manager, { type: 'thought', data: 'a', msg_id: 'msg-1', subject: 'Planning the approach' });
+      // Frame B (a beat later): request-specific refinement REPLACES the placeholder.
+      emitEvent(manager, {
+        type: 'thought',
+        data: ' b',
+        msg_id: 'msg-1',
+        subject: 'Analyzing query performance regression',
+      });
+      // Subsequent subject-less thought events preserve the latest subject.
+      emitEvent(manager, { type: 'thought', data: ' c', msg_id: 'msg-1' });
 
-      const thinkingEmissions = findEmissions('thinking');
-      // every emission for this turn carries the first subject
-      for (const e of thinkingEmissions as any[]) {
-        expect(e.data.subject).toBe('Analyzing inputs');
-      }
+      const thinkingEmissions = findEmissions('thinking') as any[];
+      const last = thinkingEmissions[thinkingEmissions.length - 1];
+      expect(last.data.subject).toBe('Analyzing query performance regression');
     });
 
     it('accepts a subject-only thought event (no reasoning text yet)', () => {
