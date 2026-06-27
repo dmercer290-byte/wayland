@@ -12,7 +12,7 @@
 //!
 //! Every backend uses `build_ssrf_safe_tool_client()` (S-B1 SSRF guard)
 //! and wraps each external call in `tokio::time::timeout` (R-H1 two-layer
-//! timeout). The resolver `build_image_gen_backend(allow_pollinations)`
+//! timeout). The resolver `build_image_gen_backend(config, allow_pollinations)`
 //! returns `None` when no keyed backend is configured AND pollinations is
 //! disabled — the bootstrap path then skips registration so the tool's
 //! `is_available()` reports false.
@@ -29,8 +29,10 @@ use wcore_tools::image_generation_tool::{
     ImageGenerationBackend, ImageGenerationError, ImageGenerationRequest, ImageGenerationResponse,
 };
 
+use wcore_config::config::Config;
+
 use super::build_ssrf_safe_tool_client;
-use super::shared::read_env_key;
+use super::shared::{OPENAI_API_BASE, join_openai_endpoint, openai_wire_media_base, read_env_key};
 
 // ---------------------------------------------------------------------
 // Per-call timeout. `reqwest`'s `.timeout()` covers the HTTP exchange
@@ -44,24 +46,65 @@ const HF_PER_CALL_TIMEOUT: Duration = Duration::from_secs(90);
 // Resolver
 // ---------------------------------------------------------------------
 
-/// Resolve a real `ImageGenerationBackend` from environment variables
-/// and config.
+/// Build a concrete OpenAI image backend from the active provider when it
+/// serves the OpenAI-wire `/images/generations` endpoint. Returns `None`
+/// for providers without it (Anthropic/Gemini and the LLM-only OpenAI-compat
+/// routers) or when the resolved key is empty.
+///
+/// Only native **OpenAI** and **FluxRouter** serve this media endpoint, so
+/// [`openai_wire_media_base`] resolves the `/v1` API root for those two
+/// (filling FluxRouter's default base when `config.base_url` is empty) and
+/// returns `None` otherwise. A Flux session therefore targets
+/// `https://api.fluxrouter.ai/v1/images/generations` with the Flux key
+/// (#310), and native OpenAI gets the required `/v1` even though its
+/// resolved `config.base_url` is `https://api.openai.com` (no `/v1`).
+///
+/// Returns the concrete `DalleBackend` (not a trait object) so the resolved
+/// endpoint + key are unit-assertable.
+pub(crate) fn dalle_backend_from_config(config: &Config) -> Option<DalleBackend> {
+    if config.api_key.trim().is_empty() {
+        return None;
+    }
+    let base = openai_wire_media_base(config)?;
+    Some(DalleBackend::new(config.api_key.clone(), &base))
+}
+
+/// Resolve a real `ImageGenerationBackend` from the resolved `Config`
+/// and environment variables.
 ///
 /// Priority order (first match wins):
-/// 1. `OPENAI_API_KEY` → OpenAI image (`gpt-image-1` default)
-/// 2. `FAL_API_KEY` → FAL FLUX schnell
-/// 3. `GEMINI_API_KEY` → Gemini Imagen 3
-/// 4. `HF_API_KEY` → Hugging Face FLUX
-/// 5. Pollinations (zero-key) — only when `allow_pollinations == true`
+/// 1. **Active OpenAI-wire media provider** (native OpenAI or Flux Router) —
+///    when `dalle_backend_from_config` resolves (see [`openai_wire_media_base`]
+///    for the gated provider set) and `config.api_key` is non-empty, the
+///    backend is built from the resolved `/v1` API root + `config.api_key`.
+///    This is the #310 fix: in a Flux session the tool now sends the Flux key
+///    to `https://api.fluxrouter.ai/v1/images/generations` instead of the
+///    Flux key to `api.openai.com` (HTTP 401).
+/// 2. `OPENAI_API_KEY` → OpenAI image at `api.openai.com` (back-compat
+///    fallback when config doesn't carry an OpenAI-wire provider)
+/// 3. `FAL_API_KEY` → FAL FLUX schnell
+/// 4. `GEMINI_API_KEY` → Gemini Imagen 3
+/// 5. `HF_API_KEY` → Hugging Face FLUX
+/// 6. Pollinations (zero-key) — only when `allow_pollinations == true`
 ///
 /// Returns `None` when no keyed backend resolves AND pollinations is
 /// disabled; the bootstrap path then skips registration so the tool's
 /// `is_available()` reports false.
 pub fn build_image_gen_backend(
+    config: &Config,
     allow_pollinations: bool,
 ) -> Option<Arc<dyn ImageGenerationBackend>> {
+    // 1. Prefer the active OpenAI-wire provider's resolved key + base_url.
+    if let Some(backend) = dalle_backend_from_config(config) {
+        tracing::info!(
+            "image_gen: using {} at {} (active OpenAI-wire provider)",
+            backend.model,
+            config.base_url
+        );
+        return Some(Arc::new(backend));
+    }
     if let Some(key) = read_env_key("OPENAI_API_KEY") {
-        let backend = DalleBackend::new(key);
+        let backend = DalleBackend::new(key, OPENAI_API_BASE);
         tracing::info!(
             "image_gen: using OpenAI {} (OPENAI_API_KEY found)",
             backend.model
@@ -229,11 +272,15 @@ pub struct DalleBackend {
 }
 
 impl DalleBackend {
-    pub fn new(api_key: String) -> Self {
+    /// Build an OpenAI image backend pointed at `base_url` (an OpenAI-wire
+    /// API base such as `https://api.openai.com/v1` or
+    /// `https://api.fluxrouter.ai/v1`). The endpoint is derived as
+    /// `{base_url}/images/generations` (#310) — no hardcoded host.
+    pub fn new(api_key: String, base_url: &str) -> Self {
         Self {
             client: build_ssrf_safe_tool_client(),
             api_key,
-            endpoint: "https://api.openai.com/v1/images/generations".to_string(),
+            endpoint: join_openai_endpoint(base_url, "images/generations"),
             model: openai_image_model_from_env(),
         }
     }
@@ -252,6 +299,21 @@ impl DalleBackend {
             endpoint,
             model: DEFAULT_OPENAI_IMAGE_MODEL.to_string(),
         }
+    }
+
+    /// Resolved request endpoint (`{base_url}/images/generations`). Exposed
+    /// so the resolver wiring (#310) can be unit-asserted without a network
+    /// round-trip.
+    #[cfg(test)]
+    pub(crate) fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// Resolved bearer key sent to the image endpoint. Exposed for the
+    /// #310 resolver tests (asserts the Flux key, not OPENAI_API_KEY).
+    #[cfg(test)]
+    pub(crate) fn api_key(&self) -> &str {
+        &self.api_key
     }
 
     /// `gpt-image-1` (and the `gpt-image-*` family) use a different size table
@@ -759,6 +821,7 @@ impl ImageGenerationBackend for PollinationsBackend {
 mod tests {
     use super::*;
     use serial_test::serial;
+    use wcore_config::config::ProviderType;
     use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -775,6 +838,26 @@ mod tests {
         }
     }
 
+    /// Default (Anthropic, empty key/url) config — exercises the env-key
+    /// fallback paths exactly as before #310 (the config branch is a no-op
+    /// for non-OpenAI providers / empty keys).
+    fn env_only_config() -> Config {
+        Config::default()
+    }
+
+    /// A real Flux Router session: `provider == ProviderType::FluxRouter`
+    /// (what `"flux-router"` parses to) with an explicit Flux base_url + the
+    /// Flux key (#310). NOTE: the pre-fix fixture used `provider: OpenAI`,
+    /// which masked the bug — the resolver gate never matched FluxRouter.
+    fn flux_config() -> Config {
+        Config {
+            provider: ProviderType::FluxRouter,
+            api_key: "sk-flux-test".to_string(),
+            base_url: "https://api.fluxrouter.ai/v1".to_string(),
+            ..Config::default()
+        }
+    }
+
     // -- Resolver priority ---------------------------------------------
 
     #[test]
@@ -785,7 +868,8 @@ mod tests {
             std::env::set_var("OPENAI_API_KEY", "sk-test-openai");
             std::env::set_var("FAL_API_KEY", "fal-test");
         }
-        let backend = build_image_gen_backend(false).expect("DALL-E must resolve");
+        let backend =
+            build_image_gen_backend(&env_only_config(), false).expect("DALL-E must resolve");
         // Smoke: DALL-E backend is selected — we can't downcast Arc<dyn _>
         // cleanly without trait-object reflection, so we assert by *not*
         // matching FAL's path: hit a wiremock that only the FAL backend
@@ -800,7 +884,7 @@ mod tests {
     #[serial]
     fn build_image_gen_backend_falls_back_to_pollinations_when_no_keys_and_enabled() {
         clear_image_gen_env();
-        let backend = build_image_gen_backend(true)
+        let backend = build_image_gen_backend(&env_only_config(), true)
             .expect("Pollinations must resolve when no keys + allow=true");
         let _ = backend;
     }
@@ -810,7 +894,7 @@ mod tests {
     fn build_image_gen_backend_returns_none_when_no_keys_and_pollinations_disabled() {
         clear_image_gen_env();
         assert!(
-            build_image_gen_backend(false).is_none(),
+            build_image_gen_backend(&env_only_config(), false).is_none(),
             "no keys + pollinations disabled → tool hidden"
         );
     }
@@ -824,7 +908,7 @@ mod tests {
             std::env::set_var("FAL_API_KEY", "   ");
         }
         assert!(
-            build_image_gen_backend(false).is_none(),
+            build_image_gen_backend(&env_only_config(), false).is_none(),
             "empty / whitespace env vars must be treated as unset (R-H2)"
         );
         clear_image_gen_env();
@@ -834,7 +918,121 @@ mod tests {
     #[serial]
     fn null_default_skips_registration_when_no_keys_set() {
         clear_image_gen_env();
-        assert!(build_image_gen_backend(false).is_none());
+        assert!(build_image_gen_backend(&env_only_config(), false).is_none());
+    }
+
+    // -- #310: OpenAI-wire provider routing (Flux) ---------------------
+
+    #[test]
+    #[serial]
+    fn dalle_resolves_from_flux_config_not_openai_host() {
+        // #310 regression: in a Flux Router session the config carries
+        // base_url=https://api.fluxrouter.ai/v1 + api_key=sk-flux-test. The
+        // resolved DALL-E endpoint must target Flux's host with the Flux
+        // key — NOT api.openai.com (which would 401 on the wrong key).
+        clear_image_gen_env();
+        let backend =
+            dalle_backend_from_config(&flux_config()).expect("OpenAI-wire config must resolve");
+        assert_eq!(
+            backend.endpoint(),
+            "https://api.fluxrouter.ai/v1/images/generations"
+        );
+        assert_eq!(backend.api_key(), "sk-flux-test");
+    }
+
+    #[test]
+    #[serial]
+    fn dalle_config_takes_priority_over_openai_env_key() {
+        // Even with OPENAI_API_KEY set in the environment, an active
+        // OpenAI-wire provider (Flux) must win — the resolver builds from
+        // config, so the Flux endpoint + key are used, not the env key.
+        clear_image_gen_env();
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "sk-openai-env");
+        }
+        let backend = dalle_backend_from_config(&flux_config())
+            .expect("config OpenAI-wire provider must resolve");
+        assert_eq!(
+            backend.endpoint(),
+            "https://api.fluxrouter.ai/v1/images/generations"
+        );
+        assert_eq!(backend.api_key(), "sk-flux-test");
+        clear_image_gen_env();
+    }
+
+    #[test]
+    #[serial]
+    fn dalle_falls_back_to_openai_host_when_config_not_openai_wire() {
+        // Back-compat: with no OpenAI-wire provider in config (default is
+        // Anthropic) but OPENAI_API_KEY set, the resolver builds the
+        // OpenAI backend against api.openai.com. `dalle_backend_from_config`
+        // is the config-first gate; it must decline so the env path runs.
+        assert!(
+            dalle_backend_from_config(&env_only_config()).is_none(),
+            "non-OpenAI provider must not hijack the OpenAI image slot"
+        );
+        // And the env-built backend points at api.openai.com.
+        let backend = DalleBackend::new("sk-openai-env".to_string(), OPENAI_API_BASE);
+        assert_eq!(
+            backend.endpoint(),
+            "https://api.openai.com/v1/images/generations"
+        );
+        assert_eq!(backend.api_key(), "sk-openai-env");
+    }
+
+    #[test]
+    #[serial]
+    fn dalle_resolves_flux_default_base_when_config_base_empty() {
+        // Real Flux sessions leave config.base_url empty (the FluxRouter
+        // newtype supplies the default). The resolver must still target Flux.
+        clear_image_gen_env();
+        let cfg = Config {
+            provider: ProviderType::FluxRouter,
+            api_key: "sk-flux-test".to_string(),
+            base_url: String::new(),
+            ..Config::default()
+        };
+        let backend = dalle_backend_from_config(&cfg).expect("Flux must resolve from default base");
+        assert_eq!(
+            backend.endpoint(),
+            "https://api.fluxrouter.ai/v1/images/generations"
+        );
+        assert_eq!(backend.api_key(), "sk-flux-test");
+    }
+
+    #[test]
+    #[serial]
+    fn dalle_adds_v1_for_native_openai_config() {
+        // Native OpenAI's resolved base_url is `https://api.openai.com` (no
+        // `/v1`); pre-fix this produced a 404 endpoint. The resolver must add
+        // `/v1`.
+        clear_image_gen_env();
+        let cfg = Config {
+            provider: ProviderType::OpenAI,
+            api_key: "sk-openai".to_string(),
+            base_url: "https://api.openai.com".to_string(),
+            ..Config::default()
+        };
+        let backend = dalle_backend_from_config(&cfg).expect("native OpenAI must resolve");
+        assert_eq!(
+            backend.endpoint(),
+            "https://api.openai.com/v1/images/generations"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn dalle_declines_userinfo_base_url() {
+        // A hostile config base_url with userinfo would exfiltrate the key to
+        // attacker.com — the resolver must decline (fail closed).
+        clear_image_gen_env();
+        let cfg = Config {
+            provider: ProviderType::OpenAI,
+            api_key: "sk-openai".to_string(),
+            base_url: "https://attacker.com@api.openai.com/v1".to_string(),
+            ..Config::default()
+        };
+        assert!(dalle_backend_from_config(&cfg).is_none());
     }
 
     // -- DALL-E happy + failure paths ----------------------------------
