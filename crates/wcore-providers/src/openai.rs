@@ -53,6 +53,11 @@ pub struct OpenAIProvider {
     pinned_base_url: Arc<Mutex<Option<String>>>,
     compat: ProviderCompat,
     debug: DebugConfig,
+    /// Per-model "accepts a `tools` array" cache — the capability-first tools
+    /// gate (#389/#97 follow-up). Populated by the Ollama `/api/show` probe and
+    /// by reactive tools-unsupported 400s; read by `build_request_body` before
+    /// attaching `body["tools"]`. Shared across clones via an inner `Arc`.
+    tool_support: crate::tool_capability::ToolSupportCache,
 }
 
 impl OpenAIProvider {
@@ -65,6 +70,7 @@ impl OpenAIProvider {
             pinned_base_url: Arc::new(Mutex::new(None)),
             compat,
             debug,
+            tool_support: crate::tool_capability::ToolSupportCache::new(),
         }
     }
 
@@ -86,6 +92,30 @@ impl OpenAIProvider {
             pinned_base_url: Arc::new(Mutex::new(None)),
             compat,
             debug,
+            tool_support: crate::tool_capability::ToolSupportCache::new(),
+        }
+    }
+
+    /// Capability-first tools gate for local Ollama backends (#389/#97
+    /// follow-up). On the first turn for an Ollama-served model, probe
+    /// `/api/show` and cache whether it advertises `tools` support, so
+    /// [`OpenAIProvider::build_request_body`] can drop an unsupported `tools`
+    /// array pre-emptively instead of eating a reactive 400. No-op for
+    /// non-Ollama providers and for models already cached (by a prior probe or
+    /// a reactive failure). Best-effort: a failed probe leaves the model
+    /// unknown, so tools stay attached optimistically.
+    async fn maybe_probe_ollama_tools(&self, model: &str) {
+        if self.compat.provider_type() != "ollama" {
+            return;
+        }
+        if self.tool_support.get(model).is_some() {
+            return;
+        }
+        if let Some(supports) =
+            crate::ollama_probe::probe_ollama_tool_support(&self.client, &self.base_url, model)
+                .await
+        {
+            self.tool_support.set(model, supports);
         }
     }
 
@@ -623,6 +653,7 @@ impl OpenAIProvider {
             body["tools"] = json!([{ "type": "web_search" }]);
         } else if !request.tools.is_empty()
             && openai_compat::model_supports_tool_calling(&request.model)
+            && self.tool_support.allows(&request.model)
         {
             body["tools"] = json!(Self::build_tools(&request.tools));
         }
@@ -680,19 +711,60 @@ impl OpenAIProvider {
 /// calling" — the request was otherwise valid and would succeed if the `tools`
 /// array were dropped.
 ///
-/// Ollama models without tool support (e.g. `smollm2:135m`) reject the OpenAI-
-/// compatible chat request with a 400 `... does not support tools`
-/// (`type: invalid_request_error`). Unlike Groq's Compound family — a small,
-/// known set we can name-gate in [`openai_compat::model_supports_tool_calling`]
-/// — local Ollama no-tool models are open-ended (any small model the user has
-/// pulled), so we cannot enumerate them. Detect the error and retry once
-/// without tools so the turn still completes. See FerroxLabs/wayland#389.
+/// Local OpenAI-compatible backends without tool support reject the request
+/// with a 400 whose body names the missing capability. Unlike Groq's Compound
+/// family — a small, known set we can name-gate in
+/// [`openai_compat::model_supports_tool_calling`] — local no-tool models are
+/// open-ended (any small model the user has pulled), so we cannot enumerate
+/// them. Detect the error and retry once without tools so the turn still
+/// completes. See FerroxLabs/wayland#389.
 ///
-/// Matched conservatively: a 400 whose body mentions "does not support tools"
-/// (case-insensitive). The phrasing is Ollama's; the substring is specific
-/// enough not to collide with unrelated 400s.
+/// Backends differ in wording, so we match a set of specific markers rather
+/// than one provider's phrasing:
+/// - Ollama: `... does not support tools`
+/// - llama.cpp without `--jinja`: `tools param requires --jinja flag`, `Unsupported param: tools`
+/// - generic: `does not support function calling`, `tools are not supported`, etc.
+///
+/// Matched conservatively: 400-only, and each marker is specific enough not to
+/// collide with unrelated 400s (a 500 is never retried — it may be a transient
+/// server fault, not a stable capability gap). Gated upstream by
+/// `body_has_tools`, so we only ever drop a `tools` array that was actually
+/// attached.
 fn is_tools_unsupported_error(status: u16, body: &str) -> bool {
-    status == 400 && body.to_ascii_lowercase().contains("does not support tools")
+    /// Phrases local backends emit when a tools/function-calling request hits a
+    /// model (or server config) that cannot do tools. Lowercase; matched as
+    /// case-insensitive substrings.
+    const TOOLS_UNSUPPORTED_MARKERS: &[&str] = &[
+        "does not support tools",            // Ollama
+        "tools param requires",              // llama.cpp without --jinja
+        "unsupported param: tools",          // llama.cpp (ggml-org/llama.cpp#10920)
+        "does not support function calling", // generic
+        "tool calling is not supported",     // generic
+        "tools are not supported",           // generic
+        "tool use is not supported",         // generic
+    ];
+    if status != 400 {
+        return false;
+    }
+    // Match the provider's error MESSAGE, not the whole body. A raw 400 body can
+    // echo the request — tool descriptions, the user's prompt — and a marker
+    // appearing there would false-positive, strip tools, and (worse) poison the
+    // capability cache to text-only for the rest of the session. Extract
+    // `error.message` when the body is structured JSON; fall back to the raw
+    // body for non-JSON error surfaces.
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|m| m.as_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| body.to_owned())
+        .to_ascii_lowercase();
+    TOOLS_UNSUPPORTED_MARKERS
+        .iter()
+        .any(|marker| message.contains(marker))
 }
 
 /// Strip configured patterns from text content
@@ -1080,6 +1152,15 @@ impl LlmProvider for OpenAIProvider {
         // `/v1/chat/completions` and MUST use the Responses API. Everything
         // else keeps the chat path unchanged. See `uses_responses_api`.
         let use_responses = self.uses_responses_api(request);
+        // Capability-first tools gate (#389/#97 follow-up): for a local Ollama
+        // backend, probe `/api/show` once per model so an unsupported `tools`
+        // array is dropped BEFORE the request (inside `build_request_body`)
+        // rather than reactively after a 400. No-op for non-Ollama providers.
+        // Only worth a probe when this turn could actually attach tools — a
+        // plain chat turn has nothing to strip.
+        if !request.tools.is_empty() {
+            self.maybe_probe_ollama_tools(&request.model).await;
+        }
         let body = if use_responses {
             openai_responses::build_responses_body(request, &self.compat)
         } else {
@@ -1125,6 +1206,10 @@ impl LlmProvider for OpenAIProvider {
                     model = %request.model,
                     "model does not support tools; retrying request without tools (#389)"
                 );
+                // Capability-first follow-up: remember this model rejects tools
+                // so every later turn drops the array pre-emptively — covers
+                // backends with no capability endpoint to probe (e.g. llama.cpp).
+                self.tool_support.set(&request.model, false);
                 let mut no_tools_request = request.clone();
                 no_tools_request.tools.clear();
                 no_tools_request.web_search = false;
@@ -2052,6 +2137,55 @@ mod tests {
             500,
             "model does not support tools"
         ));
+    }
+
+    #[test]
+    fn tools_unsupported_matches_llamacpp_jinja_400() {
+        // llama.cpp started without --jinja rejects tool requests with this 400
+        // (ggml-org/llama.cpp; reported via Zed, OpenCode). #389 follow-up.
+        assert!(is_tools_unsupported_error(
+            400,
+            "tools param requires --jinja flag"
+        ));
+    }
+
+    #[test]
+    fn tools_unsupported_matches_llamacpp_unsupported_param_400() {
+        // llama.cpp "Unsupported param: tools" (ggml-org/llama.cpp#10920).
+        assert!(is_tools_unsupported_error(
+            400,
+            r#"{"error":{"message":"Unsupported param: tools","type":"invalid_request_error"}}"#
+        ));
+    }
+
+    #[test]
+    fn tools_unsupported_matches_function_calling_phrasing() {
+        // Generic backends that phrase it as function calling rather than tools.
+        assert!(is_tools_unsupported_error(
+            400,
+            "this model does not support function calling"
+        ));
+    }
+
+    #[test]
+    fn tools_unsupported_matches_marker_in_structured_error_message() {
+        // The marker lives in `error.message` of a structured JSON body.
+        let body = r#"{"error":{"message":"tools param requires --jinja flag","type":"invalid_request_error"}}"#;
+        assert!(is_tools_unsupported_error(400, body));
+    }
+
+    #[test]
+    fn tools_unsupported_ignores_marker_outside_error_message() {
+        // A 400 for an UNRELATED reason whose body merely ECHOES a tool
+        // description containing a marker phrase must NOT be classified as
+        // tools-unsupported — otherwise we'd strip tools and poison the cache
+        // for a model that actually supports them. We match `error.message`,
+        // not the echoed request payload.
+        let body = r#"{"error":{"message":"context length exceeded","type":"invalid_request_error"},"request":{"tools":[{"function":{"description":"this model does not support function calling"}}]}}"#;
+        assert!(
+            !is_tools_unsupported_error(400, body),
+            "a marker echoed in the request payload must not trip the gate"
+        );
     }
 
     // --- FluxRouter typed 402 / entitlement error parsing -----------------
@@ -3129,6 +3263,35 @@ mod tests {
         assert!(
             body.get("tools").is_none(),
             "Groq Compound must receive NO `tools` field (it rejects tool calling)"
+        );
+    }
+
+    #[test]
+    fn build_request_body_omits_tools_when_capability_cache_says_unsupported() {
+        // Capability-first gate (#389/#97 follow-up): a model that PASSES the
+        // name-gate still gets its `tools` array dropped once the per-provider
+        // capability cache records it as tools-unsupported (set by the Ollama
+        // `/api/show` probe or a reactive 400). Proves the cache — not just the
+        // static name-gate — gates `body["tools"]`.
+        let provider = stop_provider();
+        let mut req = stop_req();
+        req.tools = one_tool();
+
+        // With an empty cache the (normal) model carries its tools optimistically.
+        assert!(
+            provider
+                .build_request_body(&req)
+                .get("tools")
+                .and_then(|t| t.as_array())
+                .is_some_and(|a| a.len() == 1),
+            "an unknown model must carry tools optimistically"
+        );
+
+        // Record the model as tools-unsupported; the array must now be dropped.
+        provider.tool_support.set(&req.model, false);
+        assert!(
+            provider.build_request_body(&req).get("tools").is_none(),
+            "a model cached as tools-unsupported must receive NO `tools` field"
         );
     }
 
