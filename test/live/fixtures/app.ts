@@ -56,7 +56,8 @@ export type AppHelpers = {
   expectCompletion: (timeoutMs?: number) => Promise<void>;
 };
 
-const ERROR_RE = /403|Forbidden|bad-credentials|could not be validated|Internal error|Something went wrong|noModelConfigured|Failed to create/i;
+const ERROR_RE =
+  /403|Forbidden|bad-credentials|could not be validated|Internal error|Something went wrong|noModelConfigured|Failed to create/i;
 
 export const test = base.extend<{ app: AppHelpers }>({
   app: async ({}, use) => {
@@ -90,9 +91,9 @@ export const test = base.extend<{ app: AppHelpers }>({
       },
       pickerModelLabels: async () => {
         return page.evaluate(() => {
-          const rows = [
-            ...document.querySelectorAll('[role="menuitem"], .arco-menu-item, [data-model-row]'),
-          ].filter((e) => (e as HTMLElement).getBoundingClientRect().width > 0);
+          const rows = [...document.querySelectorAll('[role="menuitem"], .arco-menu-item, [data-model-row]')].filter(
+            (e) => (e as HTMLElement).getBoundingClientRect().width > 0
+          );
           return rows.map((e) => (e.textContent ?? '').trim()).filter(Boolean);
         });
       },
@@ -127,7 +128,10 @@ export const test = base.extend<{ app: AppHelpers }>({
               throw new Error('error banner during completion: ' + t.slice(0, 300));
             }
             // a rendered assistant turn (orbit avatar + non-empty text after the user bubble)
-            return document.querySelectorAll('[data-message-role="assistant"], .assistant-message').length > 0 || /Thought for/i.test(t);
+            return (
+              document.querySelectorAll('[data-message-role="assistant"], .assistant-message').length > 0 ||
+              /Thought for/i.test(t)
+            );
           },
           null,
           { timeout: timeoutMs, polling: 1000 }

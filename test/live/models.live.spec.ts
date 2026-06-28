@@ -20,7 +20,10 @@ import { test, expect } from './fixtures/app';
 
 /** Skip a test if the given agent pill isn't present (provider/CLI not set up). */
 async function agentPresent(page: import('@playwright/test').Page, backend: string): Promise<boolean> {
-  return page.locator(`[data-agent-backend="${backend}"]`).count().then((n) => n > 0);
+  return page
+    .locator(`[data-agent-backend="${backend}"]`)
+    .count()
+    .then((n) => n > 0);
 }
 
 test.beforeEach(async ({ app }) => {
@@ -36,7 +39,10 @@ for (const backend of ['wcore', 'gemini', 'claude', 'codex', 'grok']) {
     const labels = await app.pickerModelLabels();
     // Must show at least one NON-Flux model row (the real catalog), not just Flux tiers.
     const nonFlux = labels.filter((l) => !/^Flux|Runs .* models/i.test(l));
-    expect(nonFlux.length, `picker for ${backend} showed only Flux/placeholder: ${JSON.stringify(labels)}`).toBeGreaterThan(0);
+    expect(
+      nonFlux.length,
+      `picker for ${backend} showed only Flux/placeholder: ${JSON.stringify(labels)}`
+    ).toBeGreaterThan(0);
   });
 }
 

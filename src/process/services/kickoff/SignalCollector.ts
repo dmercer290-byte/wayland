@@ -38,9 +38,7 @@ export class SignalCollector {
     const timeBucket = timeBucketFor(now);
 
     const [recentConvs, ritualFired] = await Promise.all([
-      this.collectRecentConversations(assistantId).catch(
-        (): KickoffSignals['assistantRecentConversations'] => []
-      ),
+      this.collectRecentConversations(assistantId).catch((): KickoffSignals['assistantRecentConversations'] => []),
       this.detectRecentRitualOutput(assistantId, now).catch((): boolean => false),
     ]);
 
@@ -53,7 +51,9 @@ export class SignalCollector {
     };
   }
 
-  private async collectRecentConversations(assistantId: string): Promise<KickoffSignals['assistantRecentConversations']> {
+  private async collectRecentConversations(
+    assistantId: string
+  ): Promise<KickoffSignals['assistantRecentConversations']> {
     // v0.4.7.1 (ENGINE-3) - repo-level filter on `presetAssistantId` so the
     // 5-conv slice that follows isn't silently truncated by power users with
     // 50+ recent chats across all assistants. Try both prefix forms because
@@ -149,9 +149,7 @@ export class SignalCollector {
       if (!leader?.conversationId) continue;
       const jobs = await this.cronService.listJobsByConversation(leader.conversationId);
       const ritualJobs = jobs.filter(
-        (j) =>
-          j.metadata.createdBy === 'agent' &&
-          j.metadata.agentConfig?.configOptions?.kind === 'ritual'
+        (j) => j.metadata.createdBy === 'agent' && j.metadata.agentConfig?.configOptions?.kind === 'ritual'
       );
       for (const job of ritualJobs) {
         const lastRun = job.state.lastRunAtMs;

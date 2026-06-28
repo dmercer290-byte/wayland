@@ -443,22 +443,28 @@ jobs:
       # The restored node_modules cache has electron without a usable binary
       # (path.txt missing / dist incomplete), and bun's --frozen-lockfile install
       # doesn't re-run electron's download script for the already-present package.
-      # Official remedy: delete node_modules/electron and reinstall so bun re-runs
-      # electron's (trusted) install script. Then run install.js explicitly as a
-      # belt-and-suspenders, and verify require('electron') resolves so a bad
-      # install fails HERE (with `set -x` diagnostics) instead of mid-spec.
-      # electron's default CDN (github.com/electron/electron releases) truncates
-      # the binary zip on this runner, leaving a ~688KB partial dist with no
-      # path.txt. Use the npmmirror mirror, request remote checksums (so a partial
-      # is rejected, not silently accepted), and clear every cache so the download
-      # is genuinely fresh. Assert path.txt + the binary so a bad install fails HERE.
+      # Remedy: explicitly run electron's (trusted) install.js, asserting a
+      # COMPLETE dist (path.txt + the executable it names) so a bad install fails
+      # HERE (with `set -x` diagnostics) instead of mid-spec.
+      #
+      # #361: since ~2026-06-26 an environmental egress cap on this runner
+      # truncates the ~100MB binary zip to ~678KB (a lone v8_context_snapshot.bin)
+      # on EVERY external host, so no download path can recover it. The durable
+      # fix is to cache the extracted binary in GitHub infra (restore is NOT
+      # subject to the external egress cap) and make the install idempotent so a
+      # cache-warm binary is reused instead of nuked + re-downloaded every run.
+      - name: Restore Electron binary cache
+        id: electron-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            node_modules/electron/dist
+            node_modules/electron/path.txt
+          # Keyed on the resolved electron version (node_modules/electron exists
+          # post-install); a version bump invalidates the entry.
+          key: electron-bin-${{ runner.os }}-${{ hashFiles('node_modules/electron/package.json') }}
+
       - name: Ensure Electron binary is installed
-        # Official host only, with retries — matches the proven _build-reusable.yml
-        # path. The npmmirror mirror intermittently served a TRUNCATED zip that
-        # extracted to a single file (v8_context_snapshot.bin, ~678KB) and failed
-        # the job; dropping it removes the poison source. Each attempt uses a fresh
-        # cache and asserts a COMPLETE dist (path.txt + the executable it names)
-        # before continuing, so a partial download retries instead of passing.
         env:
           ELECTRON_MIRROR: ''
           npm_config_disturl: 'https://electronjs.org/headers'
@@ -468,20 +474,40 @@ jobs:
             [ -s node_modules/electron/path.txt ] \
               && [ -x "node_modules/electron/dist/$(cat node_modules/electron/path.txt)" ]
           }
-          for attempt in 1 2 3 4; do
-            export electron_config_cache="$(mktemp -d)"
-            rm -rf node_modules/electron/dist node_modules/electron/path.txt
-            node node_modules/electron/install.js || true
-            if electron_ok; then
-              echo "electron installed OK (attempt $attempt)"
-              break
-            fi
-            echo "electron install incomplete (attempt $attempt); retrying after backoff"
-            sleep $((attempt * 5))
-          done
+          # Idempotent (#361 fix): a cache-warm or already-good binary is reused
+          # as-is. Only (re)download when missing, so the per-attempt `rm -rf dist`
+          # never destroys a usable binary.
+          if electron_ok; then
+            echo "electron already present (cache-warm); skipping download"
+          else
+            for attempt in 1 2 3 4; do
+              export electron_config_cache="$(mktemp -d)"
+              rm -rf node_modules/electron/dist node_modules/electron/path.txt
+              node node_modules/electron/install.js || true
+              if electron_ok; then
+                echo "electron installed OK (attempt $attempt)"
+                break
+              fi
+              echo "electron install incomplete (attempt $attempt); retrying after backoff"
+              sleep $((attempt * 5))
+            done
+          fi
           ls -la node_modules/electron/dist | head -12
           electron_ok
           node -e "const p=require('electron'); require('node:fs').accessSync(p); console.log('electron binary OK:', p)"
+
+      # Save only a COMPLETE install: the prior step asserts electron_ok and
+      # fails (skipping this step) otherwise, so reaching here means the binary
+      # is good — a truncated download can never poison the cache. Subsequent
+      # runs then restore it from GitHub infra, immune to the egress cap.
+      - name: Save Electron binary cache
+        if: steps.electron-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            node_modules/electron/dist
+            node_modules/electron/path.txt
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
 
       # This spec drives the BUILT Electron app via Playwright's _electron API
       # (electronApp.evaluate / page.evaluate); it never uses Playwright's bundled

@@ -10,6 +10,7 @@ the CDP URL differ.
 > full matrix this suite implements.
 
 ## Why it attaches instead of launching
+
 Playwright's `_electron.launch()` starts a fresh app with an **empty profile and
 no provider auth** — it cannot test ChatGPT-subscription, Grok OAuth, Ollama,
 etc. So the suite **connects to your already-running app over CDP** and uses your
@@ -18,11 +19,13 @@ authenticated session. Launching the app is your job (below).
 ## 1. Launch the app with remote debugging
 
 **macOS (dev app):**
+
 ```bash
 cd <repo> && WAYLAND_CDP_PORT=9222 bun run start
 ```
 
 **Windows (PowerShell — use `;`, not `&&`; dev app):**
+
 ```powershell
 cd C:\wl-verify; $env:WAYLAND_CDP_PORT=9222; bun run start
 ```
@@ -54,6 +57,7 @@ bunx playwright test --config test/live/playwright.config.ts --grep @windows
 Report: `test/live/.report/index.html`. Failures capture screenshot + video + trace.
 
 ## 3. Notes
+
 - **One worker** — the suite drives a single shared renderer page; parallel
   workers would fight over the one composer.
 - Tests **skip** (not fail) when a provider/CLI isn't connected on the profile,
@@ -62,6 +66,7 @@ Report: `test/live/.report/index.html`. Failures capture screenshot + video + tr
 - Env: `WAYLAND_CDP_URL` (default `http://127.0.0.1:9222`).
 
 ## 4. Files
+
 - `fixtures/app.ts` — CDP attach + helpers (selectAgent, openModelPicker,
   pickModel, send, expectCompletion, expectNoError).
 - `models.live.spec.ts` — P0 Models/Agents (MA-1..MA-14). **Implemented.**
@@ -70,6 +75,7 @@ Report: `test/live/.report/index.html`. Failures capture screenshot + video + tr
   placeholders mapped to the plan; fill in next.
 
 ## 5. Hardening TODO (do first)
+
 The DOM is matched by text/role today, which is brittle. Add `data-testid`s and
 switch the helpers to them: agent pills already expose `data-agent-backend`; add
 `data-testid="composer-model-button"`, `data-model-row` on picker rows,

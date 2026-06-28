@@ -29,7 +29,10 @@ function splitKickoffText(text: string): { title: string; body: string } {
   if (nl === -1) return { title: trimmed, body: '' };
   return {
     title: trimmed.slice(0, nl).trim(),
-    body: trimmed.slice(nl + 1).replace(/\s+/g, ' ').trim(),
+    body: trimmed
+      .slice(nl + 1)
+      .replace(/\s+/g, ' ')
+      .trim(),
   };
 }
 

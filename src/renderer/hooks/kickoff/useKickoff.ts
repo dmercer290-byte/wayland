@@ -6,11 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ipcBridge } from '@/common';
-import type {
-  KickoffResult,
-  KickoffSuggestion,
-  KickoffTelemetryEvent,
-} from '@process/services/kickoff/types';
+import type { KickoffResult, KickoffSuggestion, KickoffTelemetryEvent } from '@process/services/kickoff/types';
 
 /**
  * Hook for the new-chat Kickoff card. Consumes the SuggestionEngine's
@@ -224,8 +220,7 @@ export function useKickoff(assistantId: string | undefined): UseKickoffReturn {
   }, [suggestion, alternateIndex, dismissed, assistantId]);
 
   const visible = !dismissed && suggestion !== null;
-  const currentText =
-    alternateIndex === 0 ? suggestion?.text : suggestion?.alternates[alternateIndex - 1]?.text;
+  const currentText = alternateIndex === 0 ? suggestion?.text : suggestion?.alternates[alternateIndex - 1]?.text;
   const currentKickoffId =
     alternateIndex === 0 ? suggestion?.kickoffId : suggestion?.alternates[alternateIndex - 1]?.kickoffId;
 
