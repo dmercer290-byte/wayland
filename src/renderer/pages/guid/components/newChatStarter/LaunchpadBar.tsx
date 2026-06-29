@@ -25,7 +25,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Plus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAssistantList } from '@/renderer/hooks/assistant';
-import { useLaunchpadBar, LAUNCHPAD_MAX_ENTRIES } from '@/renderer/hooks/launchpad/useLaunchpadBar';
+import { useLaunchpadBar, LAUNCHPAD_MAX_ENTRIES, PINNED_BAR_IDS } from '@/renderer/hooks/launchpad/useLaunchpadBar';
 import AssistantIconTile from '@/renderer/pages/guid/components/AssistantIconTile';
 import type { QuickLaunchAnchor } from '@/renderer/pages/guid/quickLaunchAnchors';
 import { resolveBarEntry, type LaunchpadBarEntry } from './launchpadCatalog';
@@ -196,6 +196,7 @@ const LaunchpadBar: React.FC<LaunchpadBarProps> = ({ onAnchorClick, onViewAll, m
                 <SortableCard
                   key={entry.id}
                   entry={entry}
+                  pinned={PINNED_BAR_IDS.includes(entry.id)}
                   onClick={handleCardClick}
                   onRemove={handleRemove}
                   removeLabel={t('guid.launchpad.remove', {
@@ -271,13 +272,15 @@ const LaunchpadBar: React.FC<LaunchpadBarProps> = ({ onAnchorClick, onViewAll, m
 
 type SortableCardProps = {
   entry: LaunchpadBarEntry;
+  /** Pinned cards (Concierge) are always-available - no remove button is rendered. */
+  pinned: boolean;
   onClick: (entry: LaunchpadBarEntry) => void;
   onRemove: (id: string) => void;
   removeLabel: string;
   dragLabel: string;
 };
 
-const SortableCard: React.FC<SortableCardProps> = ({ entry, onClick, onRemove, removeLabel, dragLabel }) => {
+const SortableCard: React.FC<SortableCardProps> = ({ entry, pinned, onClick, onRemove, removeLabel, dragLabel }) => {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: entry.id,
   });
@@ -313,15 +316,17 @@ const SortableCard: React.FC<SortableCardProps> = ({ entry, onClick, onRemove, r
       >
         <GripVertical size={12} aria-hidden='true' />
       </button>
-      <button
-        type='button'
-        className={styles.removeBtn}
-        onClick={handleRemoveClick}
-        aria-label={removeLabel}
-        data-testid={`launchpad-remove-${entry.id}`}
-      >
-        <X size={10} aria-hidden='true' />
-      </button>
+      {pinned ? null : (
+        <button
+          type='button'
+          className={styles.removeBtn}
+          onClick={handleRemoveClick}
+          aria-label={removeLabel}
+          data-testid={`launchpad-remove-${entry.id}`}
+        >
+          <X size={10} aria-hidden='true' />
+        </button>
+      )}
     </div>
   );
 };

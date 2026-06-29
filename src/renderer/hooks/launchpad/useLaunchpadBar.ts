@@ -10,7 +10,7 @@ import { QUICK_LAUNCH_ANCHORS } from '@/renderer/pages/guid/quickLaunchAnchors';
 import type { LaunchpadBarOrder } from '@/common/types/launchpad';
 
 /**
- * Default bar order - the 6 anchors that shipped in v0.5.0. New installs
+ * Default bar order - the anchors that shipped in v0.5.0. New installs
  * see exactly this set on first boot. Customisation is opt-in: once the
  * user reorders / adds / removes a card the resulting array is persisted
  * to ConfigStorage under `launchpad.barOrder`, and the default branch is
@@ -18,6 +18,36 @@ import type { LaunchpadBarOrder } from '@/common/types/launchpad';
  * the bar - `[]` is still a deliberate user choice).
  */
 export const DEFAULT_BAR_ORDER: LaunchpadBarOrder = QUICK_LAUNCH_ANCHORS.map((a) => a.assistantId);
+
+/**
+ * Always-available cards. A pinned id is ALWAYS present in the bar: it is
+ * injected at its canonical slot even when the user's persisted order predates
+ * it (existing installs that customised the bar before Concierge shipped) or
+ * tried to drop it, and `removeFromBar` refuses to remove it. Concierge is the
+ * universal "ask anything" entry point and must always be reachable from the
+ * launchpad, so it sits at slot 1 - the #2 card, right after Cowork.
+ */
+export const PINNED_BAR_IDS: readonly string[] = ['builtin-concierge'];
+
+/** Canonical insert slot per pinned id (index into the bar). Concierge = #2 card. */
+const PINNED_SLOTS: Readonly<Record<string, number>> = { 'builtin-concierge': 1 };
+
+/**
+ * Ensure every PINNED_BAR_IDS entry is present in `order`, inserting any missing
+ * one at its canonical slot (clamped to the current length). Ids already present
+ * keep their position. Pure: returns the same reference when nothing changed so
+ * callers can cheaply detect a no-op.
+ */
+export function ensurePinned(order: LaunchpadBarOrder): LaunchpadBarOrder {
+  let next = order;
+  for (const id of PINNED_BAR_IDS) {
+    if (next.includes(id)) continue;
+    if (next === order) next = [...order];
+    const slot = Math.min(PINNED_SLOTS[id] ?? next.length, next.length);
+    next.splice(slot, 0, id);
+  }
+  return next;
+}
 
 /**
  * Hard cap on bar entries. The bar replaces the launchpad cold-start row
@@ -55,6 +85,9 @@ export type UseLaunchpadBarReturn = {
  *   - non-empty array          → use as-is.
  *   - empty array              → respect the user's deliberate empty bar.
  *
+ * Either way, PINNED_BAR_IDS (Concierge) are injected so the always-available
+ * cards survive a persisted order that predates or removed them.
+ *
  * `setBarOrder` / `addToBar` / `removeFromBar` write through to
  * ConfigStorage. The hook deliberately does NOT validate IDs against
  * the live assistant catalogue - that is the responsibility of the
@@ -78,18 +111,22 @@ export function useLaunchpadBar(): UseLaunchpadBarReturn {
       .then((stored) => {
         if (cancelled) return;
         if (Array.isArray(stored)) {
-          // Even an empty array is a deliberate user state.
-          setBarOrderState(stored);
+          // Even an empty array is a deliberate user state - but pinned cards
+          // (Concierge) are always injected so they survive a persisted order
+          // that predates them or removed them. Injected in-memory only; the
+          // re-injection is idempotent on every load, so we don't silently
+          // rewrite the user's stored config here.
+          setBarOrderState(ensurePinned(stored));
           userMutatedRef.current = true;
         } else {
-          setBarOrderState(DEFAULT_BAR_ORDER);
+          setBarOrderState(ensurePinned(DEFAULT_BAR_ORDER));
         }
         setLoaded(true);
       })
       .catch((err) => {
         if (cancelled) return;
         console.warn('[useLaunchpadBar] failed to read bar order; falling back to defaults', err);
-        setBarOrderState(DEFAULT_BAR_ORDER);
+        setBarOrderState(ensurePinned(DEFAULT_BAR_ORDER));
         setLoaded(true);
       });
     return () => {
@@ -98,9 +135,12 @@ export function useLaunchpadBar(): UseLaunchpadBarReturn {
   }, []);
 
   const persist = useCallback((next: LaunchpadBarOrder) => {
+    // Pinned cards (Concierge) are re-asserted on every explicit write, so a
+    // drag-reorder or reset can never leave the bar without them.
+    const pinned = ensurePinned(next);
     userMutatedRef.current = true;
-    setBarOrderState(next);
-    void ConfigStorage.set(STORAGE_KEY, next).catch((err) => {
+    setBarOrderState(pinned);
+    void ConfigStorage.set(STORAGE_KEY, pinned).catch((err) => {
       console.warn('[useLaunchpadBar] failed to persist bar order', err);
     });
   }, []);
@@ -137,6 +177,10 @@ export function useLaunchpadBar(): UseLaunchpadBarReturn {
 
   const removeFromBar = useCallback(
     (assistantId: string) => {
+      if (PINNED_BAR_IDS.includes(assistantId)) {
+        console.warn('[useLaunchpadBar] refusing to remove pinned card %s', assistantId);
+        return;
+      }
       setBarOrderState((prev) => {
         const next = prev.filter((id) => id !== assistantId);
         if (next.length === prev.length) return prev;
