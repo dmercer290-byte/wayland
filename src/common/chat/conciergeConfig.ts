@@ -92,8 +92,6 @@ export type ConciergeConfigStatus = 'pending' | 'processing' | 'accepted' | 'can
  */
 export type IConciergeConfigContent = ConciergeProposal & {
   status: ConciergeConfigStatus;
-  /** True when the block failed validation; the card disables Accept and offers Edit. */
-  parseError?: boolean;
   /** Backend that emitted the proposal (for context; not trusted for authorization). */
   agentType?: string;
   /** Human-readable result written by MAIN after a successful apply ("verify + report"). */
@@ -103,7 +101,7 @@ export type IConciergeConfigContent = ConciergeProposal & {
 };
 
 /** Confirm-card actions. */
-export type ConciergeConfirmAction = 'accept' | 'edit' | 'cancel';
+export type ConciergeConfirmAction = 'accept' | 'cancel';
 
 /**
  * Payload for `ipcBridge.conciergeConfig.confirmProposal`. The optional `secret`
@@ -118,19 +116,13 @@ export type ConciergeConfirmParams = {
   secret?: { apiKey?: string; baseUrl?: string };
 };
 
-/** Result of a confirm action. `editPayload` is returned for action='edit'. */
+/** Result of a confirm action. */
 export type ConciergeConfirmResult = {
   ok: boolean;
   /** Failure reason (machine-readable), e.g. `message_not_found`, `unauthorized`. */
   reason?: string;
   /** Human-readable success summary (also stored as resultSummary). */
   summary?: string;
-  /** For action='edit': data to prefill an edit affordance. */
-  editPayload?: {
-    conversationId: string;
-    kind: ConciergeProposalKind;
-    content: IConciergeConfigContent;
-  };
 };
 
 /** Fenced-tag constants (single source for detector + stripper + SKILL docs). */

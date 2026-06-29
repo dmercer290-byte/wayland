@@ -108,23 +108,6 @@ describe('<ConciergeConfigCard>', () => {
     );
   });
 
-  it('parseError disables Accept', () => {
-    render(
-      <ConciergeConfigCard
-        message={msg({
-          kind: 'set_default_model',
-          engine: 'wcore',
-          modelId: 'm',
-          useModel: 'u',
-          label: 'X',
-          status: 'pending',
-          parseError: true,
-        })}
-      />
-    );
-    expect(acceptBtn()).toBeDisabled();
-  });
-
   it('add_mcp env values render masked (raw value absent from the DOM)', () => {
     render(
       <ConciergeConfigCard

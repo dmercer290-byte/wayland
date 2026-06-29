@@ -149,16 +149,8 @@ export function initConciergeConfigBridge(): void {
         return { ok: true };
       }
 
-      if (action === 'edit') {
-        // Don't change status - the user may cancel out of the edit affordance and re-engage.
-        return { ok: true, editPayload: { conversationId: msg.conversation_id, kind: content.kind, content } };
-      }
-
       // action === 'accept' - the ONLY path that mutates config.
       // Pre-accept validation: return a reason WITHOUT any state change or write.
-      if (content.parseError) {
-        return { ok: false, reason: 'parse_error_cannot_accept' };
-      }
       if (content.kind === 'provider_connect' && !secret?.apiKey) {
         return { ok: false, reason: 'secret_required' };
       }

@@ -160,15 +160,6 @@ describe('conciergeConfigBridge apply', () => {
     noWrites();
   });
 
-  it('edit returns an editPayload and writes nothing (status unchanged)', async () => {
-    setMsg({ kind: 'edit_assistant', assistantId: 'a', label: 'A', rules: 'x', status: 'pending' });
-    const res = await state.handler!({ conversationId: 'c1', msgId: 'm1', action: 'edit' });
-    expect(res.ok).toBe(true);
-    expect(res.editPayload?.kind).toBe('edit_assistant');
-    expect((state.msg!.content as IConciergeConfigContent).status).toBe('pending');
-    noWrites();
-  });
-
   it('accept on a non-pending proposal is refused and writes nothing', async () => {
     setMsg({
       kind: 'set_default_model',
@@ -190,18 +181,4 @@ describe('conciergeConfigBridge apply', () => {
     noWrites();
   });
 
-  it('parseError proposals cannot be accepted', async () => {
-    setMsg({
-      kind: 'set_default_model',
-      engine: 'wcore',
-      modelId: 'a',
-      useModel: 'b',
-      label: 'C',
-      status: 'pending',
-      parseError: true,
-    });
-    const res = await state.handler!({ conversationId: 'c1', msgId: 'm1', action: 'accept' });
-    expect(res).toEqual({ ok: false, reason: 'parse_error_cannot_accept' });
-    noWrites();
-  });
 });

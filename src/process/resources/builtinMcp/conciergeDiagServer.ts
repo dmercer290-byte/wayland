@@ -153,6 +153,15 @@ const SHAPE_REGEXES: readonly RegExp[] = [
 const URL_USERINFO_REGEX = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:)([^\s@/]+)(@)/gi;
 
 /**
+ * Colon-less URL userinfo. `scheme://TOKEN@host` carries the whole secret in the
+ * userinfo with no `user:pass` split (`https://ghp_xxx@github.com`,
+ * `https://glpat-xxx@gitlab.example`), so URL_USERINFO_REGEX (which requires a
+ * `:`) misses it. Mask the userinfo token, keeping scheme + host. The >=8 floor
+ * avoids masking ordinary `scheme://host` URLs (no `@`) and trivial userinfo.
+ */
+const URL_USERINFO_NOCOLON_REGEX = /(\b[a-z][a-z0-9+.-]*:\/\/)([^\s:@/]{8,})(@)/gi;
+
+/**
  * Generic delimiter-adjacent token rule: a token run of length >= 12 sitting
  * IMMEDIATELY after a `:`, `=`, or `@` delimiter is almost always a secret
  * (DSN password, `key=longsecret`, …) rather than prose. Requiring the run to
@@ -171,6 +180,11 @@ export function redact(value: string): string {
   if (!value) return value;
   // URL/DSN userinfo first: mask only the password segment, keep scheme/user/host.
   let out = value.replace(URL_USERINFO_REGEX, (_m, prefix: string, secret: string, at: string) => {
+    return `${prefix}${maskTail(secret)}${at}`;
+  });
+  // Colon-less userinfo (`scheme://TOKEN@host`): mask the userinfo token. Runs
+  // after the colon variant, whose `user:••••@` output has no >=8 run before `@`.
+  out = out.replace(URL_USERINFO_NOCOLON_REGEX, (_m, prefix: string, secret: string, at: string) => {
     return `${prefix}${maskTail(secret)}${at}`;
   });
   // Key-name-driven: preserve the key name, mask only the value.

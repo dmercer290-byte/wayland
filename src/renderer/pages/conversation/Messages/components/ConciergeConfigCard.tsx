@@ -21,7 +21,7 @@
  * cannot escape the card boundary.
  */
 
-import { Button, Input, Message, Tag, Typography } from '@arco-design/web-react';
+import { Button, Input, Message, Typography } from '@arco-design/web-react';
 import { Check, Settings, X } from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -82,7 +82,7 @@ const ConciergeConfigCard: React.FC<ConciergeConfigCardProps> = ({ message }) =>
   }
 
   const needsKey = proposalNeedsCardSecret(content.kind);
-  const acceptDisabled = Boolean(content.parseError) || resolving || (needsKey && !apiKey.trim());
+  const acceptDisabled = resolving || (needsKey && !apiKey.trim());
 
   const sendAction = async (action: 'accept' | 'cancel') => {
     if (resolving) return;
@@ -153,12 +153,6 @@ const ConciergeConfigCard: React.FC<ConciergeConfigCardProps> = ({ message }) =>
             />
             <Input value={baseUrl} onChange={setBaseUrl} placeholder={t('concierge.config.baseUrlLabel')} />
           </div>
-        )}
-
-        {content.parseError && (
-          <Tag color='red' size='small' className={styles.errorTag}>
-            {t('concierge.config.parseError')}
-          </Tag>
         )}
       </div>
       <div className={styles.actions}>

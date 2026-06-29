@@ -125,6 +125,23 @@ describe('redact — DSN credentials and delimiter-adjacent tokens', () => {
     expect(out).toContain('••••');
   });
 
+  // SEC-2: colon-less userinfo (`scheme://TOKEN@host`) — the token IS the
+  // userinfo, no user:pass split, so the colon-based DSN rule misses it.
+  it('masks a colon-less URL userinfo token (scheme://TOKEN@host)', () => {
+    const out = redact('clone from https://ghp_abcdef0123456789tokenval@github.com/o/r.git');
+    expect(out).not.toContain('ghp_abcdef0123456789tokenval');
+    expect(out).toContain('••••');
+    // scheme + host preserved.
+    expect(out).toContain('https://');
+    expect(out).toContain('@github.com');
+  });
+
+  it('does not mangle an ordinary @-free URL', () => {
+    expect(redact('see https://github.com/owner/repo for details')).toBe(
+      'see https://github.com/owner/repo for details'
+    );
+  });
+
   it('masks the password in a mongodb DSN with symbols', () => {
     const out = redact('mongodb://root:Hunter2!@10.0.0.5/db');
     expect(out).not.toContain('Hunter2!');
