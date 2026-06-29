@@ -595,4 +595,21 @@ describe('findAssistantInRegistry', () => {
     });
     expect(findAssistantInRegistry('helm')).toBeNull();
   });
+
+  // #375 follow-up - ASSISTANT_PRESETS (concierge, cowork, ...) are seeded into
+  // config.assistants, NOT contributed to ExtensionRegistry and NOT in the
+  // builtin catalog. Without the preset fallback, suggestN returned
+  // 'unknown-assistant' and the Concierge/Cowork detail views opened with no
+  // suggested-prompt cards.
+  it('resolves an ASSISTANT_PRESETS id (builtin-concierge) and carries promptsI18n for the grid', () => {
+    getInstanceMock.mockReturnValue({ getAssistants: () => [] });
+    const result = findAssistantInRegistry('builtin-concierge');
+    expect(result?.id).toBe('concierge');
+    expect((result?.promptsI18n as Record<string, string[]> | undefined)?.['en-US']?.length).toBeGreaterThan(0);
+  });
+
+  it('resolves the cowork preset by bare id too', () => {
+    getInstanceMock.mockReturnValue({ getAssistants: () => [] });
+    expect(findAssistantInRegistry('cowork')?.id).toBe('cowork');
+  });
 });
