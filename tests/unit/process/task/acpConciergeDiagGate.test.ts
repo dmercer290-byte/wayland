@@ -15,10 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { buildAcpSessionMcpServers } from '@process/agent/acp/mcpSessionConfig';
-import {
-  BUILTIN_CONCIERGE_DIAG_ID,
-  BUILTIN_CONCIERGE_DIAG_NAME,
-} from '@process/resources/builtinMcp/constants';
+import { BUILTIN_CONCIERGE_DIAG_ID, BUILTIN_CONCIERGE_DIAG_NAME } from '@process/resources/builtinMcp/constants';
 import type { IMcpServer } from '@/common/config/storage';
 
 const caps = { stdio: true, http: true, sse: true };
@@ -44,7 +41,12 @@ const diag = server({
   status: undefined,
   transport: { type: 'stdio', command: 'node', args: ['/abs/builtin-mcp-concierge-diag.js'], env: {} },
 });
-const otherBuiltin = server({ id: 'builtin-image-gen', name: 'wayland-image-generation', builtin: true, status: undefined });
+const otherBuiltin = server({
+  id: 'builtin-image-gen',
+  name: 'wayland-image-generation',
+  builtin: true,
+  status: undefined,
+});
 const userA = server({ id: 'a', name: 'alpha' });
 
 describe('buildAcpSessionMcpServers — concierge-diag gate', () => {
@@ -56,11 +58,7 @@ describe('buildAcpSessionMcpServers — concierge-diag gate', () => {
 
   it('injects the concierge-diag server for the Concierge assistant (allowConciergeDiag=true)', () => {
     const out = buildAcpSessionMcpServers([diag, otherBuiltin, userA], caps, undefined, true);
-    expect(out.map((s) => s.name).sort()).toEqual([
-      'alpha',
-      BUILTIN_CONCIERGE_DIAG_NAME,
-      'wayland-image-generation',
-    ]);
+    expect(out.map((s) => s.name).sort()).toEqual(['alpha', BUILTIN_CONCIERGE_DIAG_NAME, 'wayland-image-generation']);
   });
 
   it('fails closed: omitting allowConciergeDiag drops the diag server', () => {

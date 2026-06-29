@@ -86,49 +86,51 @@ export function buildAcpSessionMcpServers(
     return [];
   }
 
-  return mcpServers
-    .filter(shouldInjectSessionMcpServer)
-    .filter((server) => isServerActiveForSession(server, activeServerIds))
-    // The read-only concierge diagnostics server is a builtin (so it bypasses
-    // user scoping) and is Concierge-only: exposing it to every assistant would
-    // bloat unrelated tool lists and surface a diagnostics tool where it doesn't
-    // belong. Gate it to the Concierge assistant (allowConciergeDiag); all other
-    // servers pass through unchanged. Fail-closed by default. Mirrors the Gemini
-    // path in GeminiAgentManager.getMcpServers.
-    .filter((server) => server.id !== BUILTIN_CONCIERGE_DIAG_ID || allowConciergeDiag)
-    .map((server): AcpSessionMcpServer | null => {
-      switch (server.transport.type) {
-        case 'stdio':
-          if (!capabilities.stdio) return null;
-          return {
-            type: 'stdio',
-            name: server.name,
-            command: server.transport.command,
-            args: server.transport.args || [],
-            env: toNameValueEntries(server.transport.env) ?? [],
-          };
-        case 'http':
-        case 'streamable_http':
-          if (!capabilities.http) return null;
-          return {
-            type: 'http',
-            name: server.name,
-            url: server.transport.url,
-            headers: toNameValueEntries(server.transport.headers),
-          };
-        case 'sse':
-          if (!capabilities.sse) return null;
-          return {
-            type: 'sse',
-            name: server.name,
-            url: server.transport.url,
-            headers: toNameValueEntries(server.transport.headers),
-          };
-        default:
-          return null;
-      }
-    })
-    .filter((server): server is AcpSessionMcpServer => server !== null);
+  return (
+    mcpServers
+      .filter(shouldInjectSessionMcpServer)
+      .filter((server) => isServerActiveForSession(server, activeServerIds))
+      // The read-only concierge diagnostics server is a builtin (so it bypasses
+      // user scoping) and is Concierge-only: exposing it to every assistant would
+      // bloat unrelated tool lists and surface a diagnostics tool where it doesn't
+      // belong. Gate it to the Concierge assistant (allowConciergeDiag); all other
+      // servers pass through unchanged. Fail-closed by default. Mirrors the Gemini
+      // path in GeminiAgentManager.getMcpServers.
+      .filter((server) => server.id !== BUILTIN_CONCIERGE_DIAG_ID || allowConciergeDiag)
+      .map((server): AcpSessionMcpServer | null => {
+        switch (server.transport.type) {
+          case 'stdio':
+            if (!capabilities.stdio) return null;
+            return {
+              type: 'stdio',
+              name: server.name,
+              command: server.transport.command,
+              args: server.transport.args || [],
+              env: toNameValueEntries(server.transport.env) ?? [],
+            };
+          case 'http':
+          case 'streamable_http':
+            if (!capabilities.http) return null;
+            return {
+              type: 'http',
+              name: server.name,
+              url: server.transport.url,
+              headers: toNameValueEntries(server.transport.headers),
+            };
+          case 'sse':
+            if (!capabilities.sse) return null;
+            return {
+              type: 'sse',
+              name: server.name,
+              url: server.transport.url,
+              headers: toNameValueEntries(server.transport.headers),
+            };
+          default:
+            return null;
+        }
+      })
+      .filter((server): server is AcpSessionMcpServer => server !== null)
+  );
 }
 
 /** Config shape passed from TeamSessionService to AgentManagers */
