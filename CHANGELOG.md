@@ -6,6 +6,14 @@ All notable changes to the Wayland Electron app are documented in this file. For
 
 ## [0.11.8] - 2026-06-30
 
+### Highlights
+
+- **Wayland can drive a browser on its own.** A Playwright browser tool is now bundled and auto-enabled on first run — Wayland can open pages, click, fill, and read the web as part of a task, no setup. (#471)
+- **Computer-Use onboarding for macOS.** A guided permission flow for Screen Recording and Accessibility (deep-links + Info.plist usage strings) so Computer-Use is ready without hunting through System Settings. (#466)
+- **You control the response budget.** A new Auto/Fixed output-budget control, plus the engine now sizes per-model token budgets instead of guessing a single hardcoded number — fewer truncated answers, less waste. (#468, #456)
+- **Per-project workspaces persist.** Projects keep a stable workspace instead of defaulting to a disposable temp dir, so work and state survive across sessions. (#463)
+- **Concierge got diagnostics.** The diag tool now reports your workspace and config-path state, so setup problems are easy to see and explain. (#460)
+
 ### Wayland Core engine
 
 - **Bundled wayland-core engine v0.12.16 → v0.12.17.** Carries three customer-driven fixes:
