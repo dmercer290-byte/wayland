@@ -212,6 +212,22 @@ mac:
   gatekeeperAssess: false
   entitlements: entitlements.plist
   entitlementsInherit: entitlements.plist
+  # #466: Computer-Use uses Screen Recording (screenshots) + Apple Events (to
+  # control other apps). NSAppleEventsUsageDescription IS an Apple-honored TCC
+  # purpose string - macOS shows it on the automation consent prompt.
+  # NSScreenCaptureUsageDescription is NOT an Apple-documented key: macOS
+  # generates the Screen Recording prompt itself and does not surface a custom
+  # string, so this is harmless documentation only (some tooling looks for it),
+  # NOT a hard requirement. Accessibility has no Info.plist key at all - it is
+  # granted via the AX API, and the engine owns that prompt (#114).
+  extendInfo:
+    NSScreenCaptureUsageDescription: >-
+      Wayland captures your screen so the Computer-Use agent can see what is on
+      it and act on your behalf. Nothing is captured unless you start a
+      Computer-Use task.
+    NSAppleEventsUsageDescription: >-
+      Wayland controls other apps on your behalf when you ask the Computer-Use
+      agent to complete a task.
 
 dmg:
   # Use UDZO format which is more reliable on CI
