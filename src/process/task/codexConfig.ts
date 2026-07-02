@@ -7,26 +7,53 @@
 import { isCodexNoSandboxMode } from '@/common/types/codex/codexModes';
 import { FLUX_AUTO_MODEL, FLUX_MODEL_DISPLAY, FLUX_MODEL_IDS, FLUX_SURFACE } from '@/common/config/flux';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { access, copyFile, mkdir, readFile, rm, symlink, writeFile } from 'fs/promises';
 import { homedir } from 'os';
-import { dirname, join, posix, win32 } from 'path';
+import { join, posix, win32 } from 'path';
+
+/** True when a path exists (file, dir, or symlink target), false otherwise. */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type CodexSandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
-export type SupportedCodexSandboxMode = 'workspace-write' | 'danger-full-access';
 
 const isWindowsStylePath = (value: string): boolean => /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\');
 
 const getCodexPathApi = (baseDirectory: string) =>
   process.platform === 'win32' || isWindowsStylePath(baseDirectory) ? win32 : posix;
 
-export function normalizeCodexSandboxMode(sandboxMode?: CodexSandboxMode | null): SupportedCodexSandboxMode {
-  return sandboxMode === 'danger-full-access' ? 'danger-full-access' : 'workspace-write';
+/**
+ * Coerce a caller-supplied fallback sandbox mode. #536: the default is
+ * `read-only` - the LEAST privileged mode - so a Codex spawn never silently
+ * escalates to workspace-write without an explicit user choice. Only an
+ * explicit `danger-full-access` (from a yolo/no-sandbox session mode already
+ * resolved upstream) or `workspace-write` is honored; anything else - including
+ * `undefined` - falls back to read-only.
+ */
+export function normalizeCodexSandboxMode(sandboxMode?: CodexSandboxMode | null): CodexSandboxMode {
+  if (sandboxMode === 'danger-full-access') return 'danger-full-access';
+  if (sandboxMode === 'workspace-write') return 'workspace-write';
+  return 'read-only';
 }
 
+/**
+ * Resolve the sandbox mode for a Codex session mode. #536: with NO explicit
+ * session mode we return `read-only` (was `workspace-write`), so the app never
+ * grants write access the user did not ask for. An explicit escalated mode
+ * (autoEdit/yolo/yoloNoSandbox) still maps correctly:
+ * - a no-sandbox mode -> `danger-full-access`
+ * - any other explicit mode -> `workspace-write`
+ */
 export function getCodexSandboxModeForSessionMode(
   mode?: string | null,
   fallbackMode?: CodexSandboxMode | null
-): SupportedCodexSandboxMode {
+): CodexSandboxMode {
   if (mode) {
     return isCodexNoSandboxMode(mode) ? 'danger-full-access' : 'workspace-write';
   }
@@ -44,40 +71,124 @@ export function getCodexConfigPath(): string {
   return getCodexPathApi(homeDirectory).join(homeDirectory, '.codex', 'config.toml');
 }
 
-export async function writeCodexSandboxMode(sandboxMode: CodexSandboxMode): Promise<void> {
-  const path = getCodexConfigPath();
-  let content = '';
-
-  try {
-    content = await readFile(path, 'utf8');
-  } catch {
-    content = '';
+/** Resolve the user's real `<CODEX_HOME>/auth.json` (default `~/.codex/auth.json`). */
+export function getUserCodexAuthPath(): string {
+  const codexHome = process.env.CODEX_HOME?.trim();
+  if (codexHome) {
+    return getCodexPathApi(codexHome).join(codexHome, 'auth.json');
   }
+  const homeDirectory = homedir();
+  return getCodexPathApi(homeDirectory).join(homeDirectory, '.codex', 'auth.json');
+}
 
+/**
+ * Overwrite (or insert) the top-level `sandbox_mode` key in a codex config.toml
+ * body WITHOUT reformatting the rest. Used only against a Wayland-owned scoped
+ * config - never the user's real file (#536). Mirrors codex's own top-level
+ * placement so the key applies globally.
+ */
+function setSandboxModeInConfig(content: string, sandboxMode: CodexSandboxMode): string {
   const newline = content.includes('\r\n') ? '\r\n' : '\n';
   const sandboxLine = `sandbox_mode = "${sandboxMode}"`;
-  let nextContent: string;
 
   if (/^\s*sandbox_mode\s*=.*$/m.test(content)) {
-    nextContent = content.replace(/^\s*sandbox_mode\s*=.*$/m, sandboxLine);
-  } else {
-    const sectionIndex = content.search(/^\s*\[/m);
+    return content.replace(/^\s*sandbox_mode\s*=.*$/m, sandboxLine);
+  }
 
-    if (sectionIndex >= 0) {
-      const prefix = content.slice(0, sectionIndex).trimEnd();
-      const suffix = content.slice(sectionIndex);
-      nextContent = prefix
-        ? `${prefix}${newline}${sandboxLine}${newline}${newline}${suffix}`
-        : `${sandboxLine}${newline}${newline}${suffix}`;
-    } else if (content.trim().length > 0) {
-      nextContent = `${content.trimEnd()}${newline}${sandboxLine}${newline}`;
-    } else {
-      nextContent = `${sandboxLine}${newline}`;
+  const sectionIndex = content.search(/^\s*\[/m);
+  if (sectionIndex >= 0) {
+    const prefix = content.slice(0, sectionIndex).trimEnd();
+    const suffix = content.slice(sectionIndex);
+    return prefix
+      ? `${prefix}${newline}${sandboxLine}${newline}${newline}${suffix}`
+      : `${sandboxLine}${newline}${newline}${suffix}`;
+  }
+  if (content.trim().length > 0) {
+    return `${content.trimEnd()}${newline}${sandboxLine}${newline}`;
+  }
+  return `${sandboxLine}${newline}`;
+}
+
+/**
+ * Materialize a Wayland-scoped CODEX_HOME for NATIVE (non-Flux) codex spawns and
+ * return its directory path. #536: Wayland must set the Codex sandbox mode
+ * WITHOUT ever mutating the user's own `~/.codex/config.toml` (a file outside
+ * its workspace, edited with no consent and left persisted after exit). Instead
+ * we point CODEX_HOME at a scoped clone that:
+ *   1. copies the user's real config.toml verbatim (so their model, provider,
+ *      MCP servers and every custom setting are preserved), then
+ *   2. overrides ONLY the top-level `sandbox_mode` with the value Wayland
+ *      resolved for this session, and
+ *   3. SYMLINKS the scoped `auth.json` at the user's real `auth.json` so ChatGPT
+ *      / API-key login keeps working AND a token refresh codex-acp writes into
+ *      the scoped home writes straight through to the user's real file (both
+ *      directions stay in sync; codex reads its credential from
+ *      `$CODEX_HOME/auth.json`). A copy would let a subscription-token refresh
+ *      inside the scoped home be lost on the next re-clone, forcing repeated
+ *      re-auth for ChatGPT-sub users.
+ *
+ * The user's real `~/.codex` config.toml is never written (that is the whole
+ * point of #536); only auth.json is a symlink through to the user's file.
+ *
+ * Concurrency (known LOW limitation): `codex-home` is a FIXED path
+ * re-materialized per spawn with no lock, so two near-simultaneous native codex
+ * spawns with different sandbox modes can race on config.toml. It fails safe -
+ * the default is read-only, and codex reads config only at startup so a running
+ * process is unaffected by a later re-write. Not worth per-conversation subdirs.
+ *
+ * `userDataDir` is the app's userData path (caller passes
+ * `app.getPath('userData')`); `userConfigPath` / `userAuthPath` are injectable
+ * so this stays unit-testable without electron.
+ */
+export async function materializeNativeCodexHome(
+  userDataDir: string,
+  sandboxMode: CodexSandboxMode = 'read-only',
+  userConfigPath: string = getCodexConfigPath(),
+  userAuthPath: string = getUserCodexAuthPath()
+): Promise<string> {
+  const codexHomeDir = join(userDataDir, 'codex-home');
+  const configPath = join(codexHomeDir, 'config.toml');
+  const authPath = join(codexHomeDir, 'auth.json');
+
+  let userConfig = '';
+  try {
+    userConfig = await readFile(userConfigPath, 'utf8');
+  } catch {
+    // No user config / unreadable - start from an empty body; the scoped home
+    // then carries only the sandbox_mode Wayland sets.
+    userConfig = '';
+  }
+
+  const content = setSandboxModeInConfig(userConfig, sandboxMode);
+
+  await mkdir(codexHomeDir, { recursive: true });
+  await writeFile(configPath, content, 'utf8');
+
+  // Link the user's auth.json THROUGH so native ChatGPT / API-key login survives
+  // the CODEX_HOME redirect and codex-acp's token refresh writes back to the
+  // user's real file (a copy would strand a subscription refresh on re-clone).
+  // Skip entirely when the user has no auth.json (not logged in) - same
+  // graceful-degrade as before. Symlink can fail on Windows without dev mode
+  // (EPERM) or if a plain file is already there (EEXIST); fall back to a copy so
+  // login still works, accepting that a copied token won't write back.
+  if (await pathExists(userAuthPath)) {
+    try {
+      await rm(authPath, { force: true });
+    } catch {
+      // best-effort cleanup of a prior link/file before re-linking.
+    }
+    try {
+      await symlink(userAuthPath, authPath);
+    } catch {
+      try {
+        await copyFile(userAuthPath, authPath);
+      } catch {
+        // could not mirror auth at all - codex will handle auth itself.
+      }
     }
   }
 
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, nextContent, 'utf8');
+  return codexHomeDir;
 }
 
 /**
@@ -141,41 +252,43 @@ function buildFluxModelCatalogJson(): string {
     { effort: 'medium', description: 'Balances speed and reasoning depth' },
     { effort: 'high', description: 'Greater reasoning depth for complex problems' },
   ];
-  const models = FLUX_MODEL_IDS.map((slug, i): Record<string, unknown> => ({
-    slug,
-    display_name: FLUX_MODEL_DISPLAY[slug],
-    description: 'Flux Router routed model - the right model for each task.',
-    supported_reasoning_levels: reasoningLevels,
-    default_reasoning_level: slug === 'flux-fast' ? 'low' : slug === 'flux-reasoning' ? 'high' : 'medium',
-    shell_type: 'shell_command',
-    visibility: 'list',
-    supported_in_api: true,
-    priority: i,
-    availability_nux: null,
-    upgrade: null,
-    base_instructions:
-      'You are Codex, a coding agent. Collaborate with the user to complete their task in the current workspace.',
-    supports_reasoning_summaries: false,
-    support_verbosity: false,
-    default_verbosity: null,
-    apply_patch_tool_type: 'freeform',
-    web_search_tool_type: 'text',
-    truncation_policy: { mode: 'tokens', limit: FLUX_CONTEXT_WINDOW },
-    supports_parallel_tool_calls: true,
-    supports_image_detail_original: false,
-    context_window: FLUX_CONTEXT_WINDOW,
-    max_context_window: FLUX_CONTEXT_WINDOW,
-    auto_compact_token_limit: FLUX_AUTO_COMPACT_TOKEN_LIMIT,
-    experimental_supported_tools: [],
-    input_modalities: ['text'],
-    supports_search_tool: false,
-  }));
+  const models = FLUX_MODEL_IDS.map(
+    (slug, i): Record<string, unknown> => ({
+      slug,
+      display_name: FLUX_MODEL_DISPLAY[slug],
+      description: 'Flux Router routed model - the right model for each task.',
+      supported_reasoning_levels: reasoningLevels,
+      default_reasoning_level: slug === 'flux-fast' ? 'low' : slug === 'flux-reasoning' ? 'high' : 'medium',
+      shell_type: 'shell_command',
+      visibility: 'list',
+      supported_in_api: true,
+      priority: i,
+      availability_nux: null,
+      upgrade: null,
+      base_instructions:
+        'You are Codex, a coding agent. Collaborate with the user to complete their task in the current workspace.',
+      supports_reasoning_summaries: false,
+      support_verbosity: false,
+      default_verbosity: null,
+      apply_patch_tool_type: 'freeform',
+      web_search_tool_type: 'text',
+      truncation_policy: { mode: 'tokens', limit: FLUX_CONTEXT_WINDOW },
+      supports_parallel_tool_calls: true,
+      supports_image_detail_original: false,
+      context_window: FLUX_CONTEXT_WINDOW,
+      max_context_window: FLUX_CONTEXT_WINDOW,
+      auto_compact_token_limit: FLUX_AUTO_COMPACT_TOKEN_LIMIT,
+      experimental_supported_tools: [],
+      input_modalities: ['text'],
+      supports_search_tool: false,
+    })
+  );
   return JSON.stringify({ models }, null, 2);
 }
 
 export async function materializeFluxCodexHome(
   userDataDir: string,
-  sandboxMode: SupportedCodexSandboxMode = 'workspace-write',
+  sandboxMode: CodexSandboxMode = 'read-only',
   baseURL: string = FLUX_SURFACE.responses,
   userConfigPath: string = getCodexConfigPath(),
   /** Per-conversation reasoning effort. When set, written as `model_reasoning_effort`. */
