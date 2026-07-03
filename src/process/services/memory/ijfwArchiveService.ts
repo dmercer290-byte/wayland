@@ -29,7 +29,17 @@ import type {
 } from '@/common/types/memory';
 
 // Memory files to read per project root.
-const MEMORY_FILES = ['knowledge.md', 'journal.md', 'handoff.md', 'plan.md', 'brief.md', 'project-journal.md'] as const;
+const MEMORY_FILES = [
+  'knowledge.md',
+  'journal.md',
+  'handoff.md',
+  'plan.md',
+  'brief.md',
+  'project-journal.md',
+  // Session transcript written by transcriptLogger.ts (chats, tool calls,
+  // thinking blocks) so full conversation history shows on the Memory page.
+  'transcript.md',
+] as const;
 
 type WatcherFactory = (
   filePath: string,
