@@ -2406,5 +2406,27 @@
     "economyDesc": "Erken sıkıştırır (~50K jeton). Uzun oturumlar için en ucuz; ajan eski ayrıntıları daha az hatırlar.",
     "lightDesc": "Motor varsayılanları: yalnızca bağlam sınırına yaklaşınca sıkıştırır.",
     "maxDesc": "Mümkün olduğunca çok bağlam ve araç sonucu tutar. En iyi hafıza, en yüksek jeton kullanımı."
+  },
+  "modelHub": {
+    "title": "Model Merkezi",
+    "subtitle": "Yerel ve uzak model sunucularınızdaki tüm modeller tek yerde. Bir Ollama modeli yüklenirken önce gereken VRAM boşaltılır.",
+    "refresh": "Yenile",
+    "addButton": "Sunucu ekle",
+    "addPlaceholder": "http://localhost:11434 (Ollama) or http://host:1234 (LM Studio)",
+    "addSuccess": "Sunucu eklendi",
+    "addUnreachable": "Bu URL'de bir model sunucusuna ulaşılamadı",
+    "addDuplicate": "Bu sunucu zaten kayıtlı",
+    "addInvalid": "Geçerli bir http(s) URL'si girin",
+    "offline": "çevrimdışı",
+    "empty": "Henüz kayıtlı sunucu yok. Yukarıdan Ollama veya LM Studio sunucunuzu ekleyin.",
+    "colModel": "Model",
+    "colServer": "Sunucu",
+    "colSize": "Boyut",
+    "inVram": "VRAM'de",
+    "loadButton": "Yükle",
+    "loadedLabel": "Yüklendi",
+    "loaded": "{{model}} yüklendi",
+    "loadedSwapped": "{{model}} yüklendi (boşaltılan VRAM: {{unloaded}})",
+    "loadFailed": "Yükleme başarısız: {{error}}"
   }
 }

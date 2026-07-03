@@ -2408,5 +2408,27 @@
     "economyDesc": "일찍 압축(~5만 토큰). 긴 세션에서 가장 저렴하지만 오래된 세부 정보 기억이 줄어듭니다.",
     "lightDesc": "엔진 기본값: 컨텍스트 한도에 가까워질 때만 압축합니다.",
     "maxDesc": "가능한 많은 컨텍스트와 도구 결과를 유지합니다. 최고의 기억력, 최대 토큰 사용."
+  },
+  "modelHub": {
+    "title": "모델 허브",
+    "subtitle": "로컬 및 원격 모델 서버의 모든 모델을 한곳에서 봅니다. Ollama 모델을 로드하면 필요한 VRAM을 먼저 비웁니다.",
+    "refresh": "새로고침",
+    "addButton": "서버 추가",
+    "addPlaceholder": "http://localhost:11434 (Ollama) or http://host:1234 (LM Studio)",
+    "addSuccess": "서버가 추가되었습니다",
+    "addUnreachable": "해당 URL에서 모델 서버에 연결할 수 없습니다",
+    "addDuplicate": "이미 등록된 서버입니다",
+    "addInvalid": "유효한 http(s) URL을 입력하세요",
+    "offline": "오프라인",
+    "empty": "등록된 서버가 없습니다. 위에서 Ollama 또는 LM Studio 서버를 추가하세요.",
+    "colModel": "모델",
+    "colServer": "서버",
+    "colSize": "크기",
+    "inVram": "VRAM 사용 중",
+    "loadButton": "로드",
+    "loadedLabel": "로드됨",
+    "loaded": "{{model}} 로드됨",
+    "loadedSwapped": "{{model}} 로드됨 (해제된 VRAM: {{unloaded}})",
+    "loadFailed": "로드 실패: {{error}}"
   }
 }

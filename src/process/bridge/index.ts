@@ -42,6 +42,7 @@ import { initOnboardingBridge } from './onboardingBridge';
 import { initIjfwBridge } from './ijfwBridge';
 import { initIjfwDropBridge } from './ijfwDropBridge';
 import { initMemoryArchiveBridge, initPromotionSweep } from './memoryArchiveBridge';
+import { initModelHubBridge } from './modelHubBridge';
 import { initWikiBridge } from './wikiBridge';
 import { startWikiAutoSync } from '@process/services/wiki/wikiAutoSync';
 import { initImportBridge } from './importBridge';
@@ -112,6 +113,7 @@ export function initAllBridges(deps: BridgeDependencies): void {
   initIjfwBridge();
   initIjfwDropBridge();
   initMemoryArchiveBridge();
+  initModelHubBridge();
   initPromotionSweep();
   initWikiBridge();
   startWikiAutoSync();

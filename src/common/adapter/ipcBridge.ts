@@ -1626,6 +1626,46 @@ export const ijfw = {
   dropQuarantine: buildProvider<{ ok: true } | { ok: false; error: string }, { name: string }>('ijfw.drop-quarantine'),
 };
 
+// ===== Model Hub (multi-server model dashboard + VRAM swap) =====
+
+export type ModelHubServerKind = 'ollama' | 'openai';
+export type ModelHubServerStatus = {
+  id: string;
+  name: string;
+  url: string;
+  kind: ModelHubServerKind;
+  online: boolean;
+  error?: string;
+};
+export type ModelHubModel = {
+  serverId: string;
+  serverName: string;
+  kind: ModelHubServerKind;
+  name: string;
+  sizeBytes?: number;
+  family?: string;
+  loaded: boolean;
+  supportsSwap: boolean;
+};
+
+export const modelHub = {
+  /** Snapshot of every registered server and every model it advertises. */
+  list: buildProvider<{ servers: ModelHubServerStatus[]; models: ModelHubModel[] }, void>('model-hub.list'),
+  /** Register a server by base URL (kind auto-detected: Ollama vs OpenAI-compatible). */
+  addServer: buildProvider<
+    | { ok: true; server: { id: string; name: string; url: string; kind: ModelHubServerKind } }
+    | { ok: false; error: string },
+    { url: string; name?: string }
+  >('model-hub.add-server'),
+  /** Remove a registered server. */
+  removeServer: buildProvider<{ ok: true }, { id: string }>('model-hub.remove-server'),
+  /** VRAM swap: unload whatever is resident on the server, then load `model`. */
+  loadModel: buildProvider<
+    { ok: true; loaded: string; unloaded: string[] } | { ok: false; error: string },
+    { serverId: string; model: string }
+  >('model-hub.load-model'),
+};
+
 export type IjfwDropEntry = { name: string; size: number; mtimeMs: number };
 
 export type IjfwDropIngestResult =

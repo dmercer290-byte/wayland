@@ -2408,5 +2408,27 @@
     "economyDesc": "早めに圧縮（約5万トークン）。長いセッションで最も安価ですが、古い詳細の記憶は減ります。",
     "lightDesc": "エンジンの既定値：コンテキスト上限に近づいたときのみ圧縮します。",
     "maxDesc": "できるだけ多くのコンテキストを保持し、ツール結果も多く残します。記憶は最良、トークン消費は最大。"
+  },
+  "modelHub": {
+    "title": "モデルハブ",
+    "subtitle": "ローカル・リモートのモデルサーバーのすべてのモデルを一か所に表示します。Ollama モデルの読み込み時は、必要な VRAM を先に解放します。",
+    "refresh": "更新",
+    "addButton": "サーバーを追加",
+    "addPlaceholder": "http://localhost:11434 (Ollama) or http://host:1234 (LM Studio)",
+    "addSuccess": "サーバーを追加しました",
+    "addUnreachable": "その URL でモデルサーバーに接続できませんでした",
+    "addDuplicate": "そのサーバーは登録済みです",
+    "addInvalid": "有効な http(s) URL を入力してください",
+    "offline": "オフライン",
+    "empty": "サーバーが未登録です。上で Ollama または LM Studio サーバーを追加してください。",
+    "colModel": "モデル",
+    "colServer": "サーバー",
+    "colSize": "サイズ",
+    "inVram": "VRAM 内",
+    "loadButton": "読み込む",
+    "loadedLabel": "読み込み済み",
+    "loaded": "{{model}} を読み込みました",
+    "loadedSwapped": "{{model}} を読み込みました（解放した VRAM: {{unloaded}}）",
+    "loadFailed": "読み込み失敗: {{error}}"
   }
 }

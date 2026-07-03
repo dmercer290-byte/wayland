@@ -2407,5 +2407,27 @@
     "economyDesc": "Compacte tôt (~50K tokens). Le moins cher pour les longues sessions ; l'agent retient moins de détails anciens.",
     "lightDesc": "Défauts du moteur : compacte seulement près de la limite de contexte.",
     "maxDesc": "Conserve un maximum de contexte et plus de résultats d'outils. Meilleure mémoire, consommation maximale."
+  },
+  "modelHub": {
+    "title": "Hub de modèles",
+    "subtitle": "Tous les modèles de vos serveurs locaux et distants au même endroit. Charger un modèle Ollama libère d'abord la VRAM nécessaire.",
+    "refresh": "Actualiser",
+    "addButton": "Ajouter un serveur",
+    "addPlaceholder": "http://localhost:11434 (Ollama) or http://host:1234 (LM Studio)",
+    "addSuccess": "Serveur ajouté",
+    "addUnreachable": "Aucun serveur de modèles joignable à cette URL",
+    "addDuplicate": "Ce serveur est déjà enregistré",
+    "addInvalid": "Saisissez une URL http(s) valide",
+    "offline": "hors ligne",
+    "empty": "Aucun serveur enregistré. Ajoutez votre serveur Ollama ou LM Studio ci-dessus.",
+    "colModel": "Modèle",
+    "colServer": "Serveur",
+    "colSize": "Taille",
+    "inVram": "en VRAM",
+    "loadButton": "Charger",
+    "loadedLabel": "Chargé",
+    "loaded": "{{model}} chargé",
+    "loadedSwapped": "{{model}} chargé (VRAM libérée : {{unloaded}})",
+    "loadFailed": "Échec du chargement : {{error}}"
   }
 }

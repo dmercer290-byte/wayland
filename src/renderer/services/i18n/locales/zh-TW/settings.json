@@ -2408,5 +2408,27 @@
     "economyDesc": "盡早壓縮（約 5 萬 token）。長工作階段最省錢；代理對舊細節的記憶較少。",
     "lightDesc": "引擎預設值：僅在接近上下文上限時壓縮。",
     "maxDesc": "盡可能保留上下文並保留更多工具結果。記憶最佳，token 消耗最高。"
+  },
+  "modelHub": {
+    "title": "模型中心",
+    "subtitle": "將本機和遠端模型伺服器上的所有模型集中顯示。載入 Ollama 模型時會先釋放所需的顯示記憶體。",
+    "refresh": "重新整理",
+    "addButton": "新增伺服器",
+    "addPlaceholder": "http://localhost:11434 (Ollama) or http://host:1234 (LM Studio)",
+    "addSuccess": "伺服器已新增",
+    "addUnreachable": "無法透過該 URL 連線到模型伺服器",
+    "addDuplicate": "該伺服器已註冊",
+    "addInvalid": "請輸入有效的 http(s) URL",
+    "offline": "離線",
+    "empty": "尚未註冊伺服器。請在上方新增您的 Ollama 或 LM Studio 伺服器。",
+    "colModel": "模型",
+    "colServer": "伺服器",
+    "colSize": "大小",
+    "inVram": "顯存中",
+    "loadButton": "載入",
+    "loadedLabel": "已載入",
+    "loaded": "已載入 {{model}}",
+    "loadedSwapped": "已載入 {{model}}（已釋放顯存：{{unloaded}}）",
+    "loadFailed": "載入失敗：{{error}}"
   }
 }

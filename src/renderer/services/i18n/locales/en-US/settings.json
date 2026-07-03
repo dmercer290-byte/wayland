@@ -2425,5 +2425,27 @@
     "economyDesc": "Compacts early (~50K tokens). Cheapest for long sessions; the agent remembers less old detail.",
     "lightDesc": "Engine defaults: compacts only when the conversation nears the context limit.",
     "maxDesc": "Holds as much context as possible and keeps more tool results. Best recall, highest token use."
+  },
+  "modelHub": {
+    "title": "Model Hub",
+    "subtitle": "All models from your local and remote model servers in one place. Loading an Ollama model frees the VRAM it needs first.",
+    "refresh": "Refresh",
+    "addButton": "Add server",
+    "addPlaceholder": "http://localhost:11434 (Ollama) or http://host:1234 (LM Studio)",
+    "addSuccess": "Server added",
+    "addUnreachable": "Could not reach a model server at that URL",
+    "addDuplicate": "That server is already registered",
+    "addInvalid": "Enter a valid http(s) URL",
+    "offline": "offline",
+    "empty": "No servers registered yet. Add your Ollama or LM Studio server above.",
+    "colModel": "Model",
+    "colServer": "Server",
+    "colSize": "Size",
+    "inVram": "in VRAM",
+    "loadButton": "Load",
+    "loadedLabel": "Loaded",
+    "loaded": "Loaded {{model}}",
+    "loadedSwapped": "Loaded {{model}} (freed VRAM: {{unloaded}})",
+    "loadFailed": "Load failed: {{error}}"
   }
 }

@@ -2407,5 +2407,27 @@
     "economyDesc": "Komprimiert früh (~50K Token). Am günstigsten für lange Sitzungen; der Agent erinnert sich an weniger Details.",
     "lightDesc": "Engine-Standard: komprimiert erst nahe dem Kontextlimit.",
     "maxDesc": "Hält so viel Kontext wie möglich und behält mehr Tool-Ergebnisse. Beste Erinnerung, höchster Tokenverbrauch."
+  },
+  "modelHub": {
+    "title": "Modell-Hub",
+    "subtitle": "Alle Modelle Ihrer lokalen und entfernten Modellserver an einem Ort. Beim Laden eines Ollama-Modells wird zuerst der benötigte VRAM freigegeben.",
+    "refresh": "Aktualisieren",
+    "addButton": "Server hinzufügen",
+    "addPlaceholder": "http://localhost:11434 (Ollama) or http://host:1234 (LM Studio)",
+    "addSuccess": "Server hinzugefügt",
+    "addUnreachable": "Unter dieser URL wurde kein Modellserver erreicht",
+    "addDuplicate": "Dieser Server ist bereits registriert",
+    "addInvalid": "Gültige http(s)-URL eingeben",
+    "offline": "offline",
+    "empty": "Noch keine Server registriert. Fügen Sie oben Ihren Ollama- oder LM-Studio-Server hinzu.",
+    "colModel": "Modell",
+    "colServer": "Server",
+    "colSize": "Größe",
+    "inVram": "im VRAM",
+    "loadButton": "Laden",
+    "loadedLabel": "Geladen",
+    "loaded": "{{model}} geladen",
+    "loadedSwapped": "{{model}} geladen (VRAM freigegeben: {{unloaded}})",
+    "loadFailed": "Laden fehlgeschlagen: {{error}}"
   }
 }

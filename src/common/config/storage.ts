@@ -190,6 +190,8 @@ export interface IConfigStorageRefer {
    * max     = hold maximum context, compact only as a last resort.
    */
   'wcore.compactMode'?: 'economy' | 'light' | 'max';
+  /** Model Hub: registered local/remote model servers (Ollama or OpenAI-compatible). */
+  'modelHub.servers'?: Array<{ id: string; name: string; url: string; kind: 'ollama' | 'openai' }>;
   /** Persisted app-wide UI zoom factor for Display settings */
   'ui.zoomFactor'?: number;
   /** Auto-enable WebUI in desktop mode */

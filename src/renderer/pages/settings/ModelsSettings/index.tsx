@@ -18,6 +18,7 @@ import ConnectPanel from './components/ConnectPanel';
 import ConnectedRow from './components/ConnectedRow';
 import EmptyState from './components/EmptyState';
 import FluxRouterHero from './components/FluxRouterHero';
+import ModelHubPanel from './components/ModelHubPanel';
 import ManageProvider from './ManageProvider';
 import { isCloudProvider } from './providerCatalog';
 import styles from './ModelsSettings.module.css';
@@ -408,6 +409,8 @@ const ModelsSettingsInner: React.FC = () => {
           ))}
         </div>
       )}
+
+      <ModelHubPanel />
 
       <div className='flex items-center justify-between gap-16px pt-8px'>
         <div className='flex flex-col gap-2px min-w-0'>
