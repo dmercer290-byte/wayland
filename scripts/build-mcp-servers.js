@@ -136,6 +136,11 @@ async function main() {
     }),
     esbuild.build({
       ...SHARED_OPTIONS,
+      entryPoints: [path.join(ROOT, 'src/process/hubTools/hubToolsMcpStdio.ts')],
+      outfile: path.join(ROOT, 'out/main/hub-tools-mcp-stdio.js'),
+    }),
+    esbuild.build({
+      ...SHARED_OPTIONS,
       entryPoints: [path.join(ROOT, 'src/process/team/mcp/guide/teamGuideMcpStdio.ts')],
       outfile: path.join(ROOT, 'out/main/team-guide-mcp-stdio.js'),
     }),

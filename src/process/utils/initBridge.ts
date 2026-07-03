@@ -21,6 +21,7 @@ import { SqliteBudgetRepository } from '@process/services/cost/SqliteBudgetRepos
 import { CostAnalyticsService } from '@process/services/cost/CostAnalyticsService';
 import { BudgetController, setBudgetController } from '@process/services/cost/BudgetController';
 import { initCostBridge, initCostBudgetBridge } from '@process/bridge/costBridge';
+import { initHubToolsService } from '@process/hubTools/hubToolsSingleton';
 import { CostRecorder, setCostRecorder } from '@process/services/cost/CostRecorder';
 import { getModelPricing } from '@process/services/cost/ModelPricing';
 import { getDatabase } from '@process/services/database';
@@ -37,10 +38,7 @@ import {
 } from '@process/services/workflow/autonomousWatchdog';
 import { handleParentWorkflowTurn } from '@process/services/workflow/parentTurnDriver';
 import { resumeInterruptedParentRuns } from '@process/services/workflow/resumeRuns';
-import {
-  sweepStalledParentRuns,
-  PARENT_WATCHDOG_INTERVAL_MS,
-} from '@process/services/workflow/parentWatchdog';
+import { sweepStalledParentRuns, PARENT_WATCHDOG_INTERVAL_MS } from '@process/services/workflow/parentWatchdog';
 import { setWorkflowSessionService } from '@process/services/workflow/workflowSessionServiceSingleton';
 import { SkillLibrary } from '@process/services/skills/SkillLibrary';
 import { ProcessConfig } from '@process/utils/initStorage';
@@ -185,6 +183,12 @@ void getDatabase()
       // can query summary/byModel/byBackend/byConversation/byTeam/series.
       const costAnalytics = new CostAnalyticsService(db.getDriver());
       initCostBridge(costAnalytics);
+
+      // Hub tools MCP (Model Hub VRAM swap + cost report as agent-callable
+      // tools). Best-effort: a start failure must never break cold-start.
+      void initHubToolsService(costAnalytics).catch((error) => {
+        console.error('[hub-tools] failed to start MCP server:', error);
+      });
 
       // Budgets / caps (Stage 1). The controller emits a one-time non-blocking
       // cost.budgetAlert to the renderer when a turn pushes a 'warn' budget over

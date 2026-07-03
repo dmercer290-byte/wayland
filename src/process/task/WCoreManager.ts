@@ -270,6 +270,11 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       if (teamGuide) stdioMcpServers.push(teamGuide);
     }
 
+    // Hub tools (Model Hub VRAM swap + cost report) - available in every
+    // Desktop-managed wcore session, team or solo. Raw-engine mode is
+    // excluded below with the rest of the Desktop MCP injection.
+    const hubTools = (await import('@process/hubTools/hubToolsSingleton')).getHubToolsStdioConfig();
+
     // Raw-engine (power-user) mode: when `wcore.rawEngineMode` is
     // true, the embedded engine runs on its OWN config.toml exactly like the
     // standalone CLI - so we SKIP (a) the Desktop model override (applied in
@@ -297,6 +302,9 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     // those at startup, so re-adding at runtime would register the server twice.
     // Skipped entirely in raw-engine mode (above). Best-effort: a config read
     // failure must never block the spawn.
+    if (!rawEngineMode && hubTools) {
+      stdioMcpServers.push({ name: hubTools.name, command: hubTools.command, args: hubTools.args, env: hubTools.env });
+    }
     if (!rawEngineMode) {
       try {
         const mcpConfig = await ProcessConfig.get('mcp.config');
