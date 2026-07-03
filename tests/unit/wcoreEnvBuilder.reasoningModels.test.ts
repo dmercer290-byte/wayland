@@ -196,3 +196,64 @@ describe('buildSpawnConfig - raw-engine (power-user) mode', () => {
     expect(env.ANTHROPIC_API_KEY).toBe('test-key');
   });
 });
+
+// --- Context-compaction presets (Economy / Light / Max) ---
+
+import { buildCompactSection } from '../../src/process/agent/wcore/envBuilder';
+
+describe('buildCompactSection', () => {
+  it('economy compacts early with fewer live tool results', () => {
+    const s = buildCompactSection('economy');
+    expect(s).toContain('[compact]');
+    expect(s).toContain('autocompact_buffer = 130000');
+    expect(s).toContain('micro_keep_recent = 3');
+  });
+
+  it('max holds context and keeps more tool results', () => {
+    const s = buildCompactSection('max');
+    expect(s).toContain('autocompact_buffer = 4000');
+    expect(s).toContain('micro_keep_recent = 10');
+  });
+
+  it('light and undefined emit nothing (engine defaults stay authoritative)', () => {
+    expect(buildCompactSection('light')).toBe('');
+    expect(buildCompactSection(undefined)).toBe('');
+  });
+});
+
+describe('buildSpawnConfig compactMode wiring', () => {
+  const opts = { workspace: '/tmp/w' };
+
+  it('injects [compact] into projectConfig for economy mode', () => {
+    const { projectConfig } = buildSpawnConfig(makeModel('anthropic', 'claude-sonnet-5'), {
+      ...opts,
+      compactMode: 'economy',
+    });
+    expect(projectConfig).toContain('[compact]');
+    expect(projectConfig).toContain('autocompact_buffer = 130000');
+  });
+
+  it('emits no [compact] for light mode', () => {
+    const { projectConfig } = buildSpawnConfig(makeModel('anthropic', 'claude-sonnet-5'), {
+      ...opts,
+      compactMode: 'light',
+    });
+    expect(projectConfig).not.toContain('[compact]');
+  });
+
+  it('raw-engine mode never receives a compact override', () => {
+    const { projectConfig } = buildSpawnConfig(makeModel('anthropic', 'claude-sonnet-5'), {
+      ...opts,
+      rawEngine: true,
+      compactMode: 'economy',
+    });
+    expect(projectConfig).toBe('');
+  });
+
+  it('keeps provider compat overrides alongside the compact section', () => {
+    const model = makeModel('gemini', 'gemini-2.5-flash');
+    model.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
+    const { projectConfig } = buildSpawnConfig(model, { ...opts, compactMode: 'max' });
+    expect(projectConfig).toContain('[compact]');
+  });
+});

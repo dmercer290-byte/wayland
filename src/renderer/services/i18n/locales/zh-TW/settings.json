@@ -2398,5 +2398,15 @@
     },
     "scopeWritesTo": "Writes to",
     "scopeSharedCli": "— used by the Wayland Core CLI too."
+  },
+  "contextMode": {
+    "title": "上下文模式",
+    "subtitle": "控制長對話在重新傳送給模型之前何時自動壓縮。適用於新的 Genesis 引擎工作階段。",
+    "economy": "經濟",
+    "light": "輕量",
+    "max": "最大",
+    "economyDesc": "盡早壓縮（約 5 萬 token）。長工作階段最省錢；代理對舊細節的記憶較少。",
+    "lightDesc": "引擎預設值：僅在接近上下文上限時壓縮。",
+    "maxDesc": "盡可能保留上下文並保留更多工具結果。記憶最佳，token 消耗最高。"
   }
 }

@@ -2398,5 +2398,15 @@
     },
     "scopeWritesTo": "Writes to",
     "scopeSharedCli": "— used by the Wayland Core CLI too."
+  },
+  "contextMode": {
+    "title": "컨텍스트 모드",
+    "subtitle": "긴 대화를 모델에 다시 보내기 전에 자동 압축하는 시점을 제어합니다. 새 Genesis 엔진 세션에 적용됩니다.",
+    "economy": "절약",
+    "light": "라이트",
+    "max": "최대",
+    "economyDesc": "일찍 압축(~5만 토큰). 긴 세션에서 가장 저렴하지만 오래된 세부 정보 기억이 줄어듭니다.",
+    "lightDesc": "엔진 기본값: 컨텍스트 한도에 가까워질 때만 압축합니다.",
+    "maxDesc": "가능한 많은 컨텍스트와 도구 결과를 유지합니다. 최고의 기억력, 최대 토큰 사용."
   }
 }

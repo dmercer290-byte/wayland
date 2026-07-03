@@ -15,6 +15,7 @@ import { buildEngineSpawnEnv, buildSpawnConfig } from './envBuilder';
 import { resolveActiveConfigDir } from './profilePaths';
 import { getToolKeyStore } from './toolKeyStore';
 import { hydrateModelForSpawn } from '@process/providers/ipc/modelRegistryIpc';
+import { ProcessConfig } from '@process/utils/initStorage';
 import type { WCoreEvent, WCoreCommand, WCoreCapabilities } from './protocol';
 
 const WCORE_PROJECT_CONFIG = '.wcore.toml';
@@ -190,9 +191,16 @@ export class WCoreAgent {
     // and is never persisted. Per-call resolution keeps concurrent chats on
     // different accounts isolated (audit C6); raw-engine mode ignores the model
     // (it uses the engine's own config.toml), so skip the lookup there.
-    const spawnModel = this.options.rawEngineMode
-      ? this.options.model
-      : await hydrateModelForSpawn(this.options.model);
+    const spawnModel = this.options.rawEngineMode ? this.options.model : await hydrateModelForSpawn(this.options.model);
+
+    // Context-compaction preset from Settings (best-effort - a config read
+    // failure falls back to the engine's own defaults, never blocks a spawn).
+    let compactMode: 'economy' | 'light' | 'max' | undefined;
+    try {
+      compactMode = await ProcessConfig.get('wcore.compactMode');
+    } catch {
+      compactMode = undefined;
+    }
 
     const { args, env, projectConfig, resolvedMaxTokens } = buildSpawnConfig(spawnModel, {
       workspace: this.options.workspace,
@@ -202,6 +210,7 @@ export class WCoreAgent {
       sessionId: this.options.sessionId,
       resume: this.options.resume,
       rawEngine: this.options.rawEngineMode,
+      compactMode,
     });
     this.resolvedMaxTokens = resolvedMaxTokens;
 

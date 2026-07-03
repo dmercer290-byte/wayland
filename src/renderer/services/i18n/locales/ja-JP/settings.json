@@ -2398,5 +2398,15 @@
     },
     "scopeWritesTo": "Writes to",
     "scopeSharedCli": "— used by the Wayland Core CLI too."
+  },
+  "contextMode": {
+    "title": "コンテキストモード",
+    "subtitle": "長い会話をモデルに再送信する前に自動圧縮するタイミングを制御します。新しい Genesis エンジンセッションに適用されます。",
+    "economy": "エコノミー",
+    "light": "ライト",
+    "max": "マックス",
+    "economyDesc": "早めに圧縮（約5万トークン）。長いセッションで最も安価ですが、古い詳細の記憶は減ります。",
+    "lightDesc": "エンジンの既定値：コンテキスト上限に近づいたときのみ圧縮します。",
+    "maxDesc": "できるだけ多くのコンテキストを保持し、ツール結果も多く残します。記憶は最良、トークン消費は最大。"
   }
 }

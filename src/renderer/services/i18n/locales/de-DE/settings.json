@@ -2397,5 +2397,15 @@
     },
     "scopeWritesTo": "Writes to",
     "scopeSharedCli": "— used by the Wayland Core CLI too."
+  },
+  "contextMode": {
+    "title": "Kontextmodus",
+    "subtitle": "Steuert, wann lange Unterhaltungen automatisch komprimiert werden, bevor sie erneut an das Modell gesendet werden. Gilt für neue Genesis-Engine-Sitzungen.",
+    "economy": "Sparsam",
+    "light": "Leicht",
+    "max": "Maximal",
+    "economyDesc": "Komprimiert früh (~50K Token). Am günstigsten für lange Sitzungen; der Agent erinnert sich an weniger Details.",
+    "lightDesc": "Engine-Standard: komprimiert erst nahe dem Kontextlimit.",
+    "maxDesc": "Hält so viel Kontext wie möglich und behält mehr Tool-Ergebnisse. Beste Erinnerung, höchster Tokenverbrauch."
   }
 }

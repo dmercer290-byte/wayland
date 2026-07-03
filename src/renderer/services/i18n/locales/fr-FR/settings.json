@@ -2397,5 +2397,15 @@
     },
     "scopeWritesTo": "Writes to",
     "scopeSharedCli": "— used by the Wayland Core CLI too."
+  },
+  "contextMode": {
+    "title": "Mode de contexte",
+    "subtitle": "Contrôle quand les longues conversations sont compactées automatiquement avant d'être renvoyées au modèle. S'applique aux nouvelles sessions du moteur Genesis.",
+    "economy": "Économie",
+    "light": "Léger",
+    "max": "Max",
+    "economyDesc": "Compacte tôt (~50K tokens). Le moins cher pour les longues sessions ; l'agent retient moins de détails anciens.",
+    "lightDesc": "Défauts du moteur : compacte seulement près de la limite de contexte.",
+    "maxDesc": "Conserve un maximum de contexte et plus de résultats d'outils. Meilleure mémoire, consommation maximale."
   }
 }

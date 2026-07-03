@@ -183,6 +183,13 @@ export interface IConfigStorageRefer {
    * Default ON (absent = enabled); the Settings toggle writes false to opt out.
    */
   'memory.transcriptLogging'?: boolean;
+  /**
+   * Context compaction preset for wcore engine conversations.
+   * economy = compact early (~50K tokens) to minimize API spend;
+   * light   = engine defaults (compact near the context limit);
+   * max     = hold maximum context, compact only as a last resort.
+   */
+  'wcore.compactMode'?: 'economy' | 'light' | 'max';
   /** Persisted app-wide UI zoom factor for Display settings */
   'ui.zoomFactor'?: number;
   /** Auto-enable WebUI in desktop mode */

@@ -2396,5 +2396,15 @@
     },
     "scopeWritesTo": "Writes to",
     "scopeSharedCli": "— used by the Wayland Core CLI too."
+  },
+  "contextMode": {
+    "title": "Bağlam modu",
+    "subtitle": "Uzun konuşmaların modele yeniden gönderilmeden önce ne zaman otomatik sıkıştırılacağını denetler. Yeni Genesis motoru oturumlarına uygulanır.",
+    "economy": "Ekonomi",
+    "light": "Hafif",
+    "max": "Maksimum",
+    "economyDesc": "Erken sıkıştırır (~50K jeton). Uzun oturumlar için en ucuz; ajan eski ayrıntıları daha az hatırlar.",
+    "lightDesc": "Motor varsayılanları: yalnızca bağlam sınırına yaklaşınca sıkıştırır.",
+    "maxDesc": "Mümkün olduğunca çok bağlam ve araç sonucu tutar. En iyi hafıza, en yüksek jeton kullanımı."
   }
 }

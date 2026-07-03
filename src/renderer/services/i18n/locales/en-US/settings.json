@@ -2415,5 +2415,15 @@
     },
     "scopeWritesTo": "Writes to",
     "scopeSharedCli": "Used by the Wayland Core CLI too."
+  },
+  "contextMode": {
+    "title": "Context mode",
+    "subtitle": "Controls when long conversations are auto-compacted before being re-sent to the model. Applies to new Genesis engine sessions.",
+    "economy": "Economy",
+    "light": "Light",
+    "max": "Max",
+    "economyDesc": "Compacts early (~50K tokens). Cheapest for long sessions; the agent remembers less old detail.",
+    "lightDesc": "Engine defaults: compacts only when the conversation nears the context limit.",
+    "maxDesc": "Holds as much context as possible and keeps more tool results. Best recall, highest token use."
   }
 }

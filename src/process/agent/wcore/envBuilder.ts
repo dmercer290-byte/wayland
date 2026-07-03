@@ -199,6 +199,12 @@ export function buildSpawnConfig(
      * standalone CLI would for that session id. The `model` argument is ignored.
      */
     rawEngine?: boolean;
+    /**
+     * Context compaction preset ('wcore.compactMode' setting). Injected as a
+     * `[compact]` section into the generated `.wcore.toml`. Ignored in
+     * raw-engine mode (the engine's own config.toml stays authoritative).
+     */
+    compactMode?: CompactMode;
   }
 ): {
   args: string[];
@@ -266,7 +272,10 @@ export function buildSpawnConfig(
     // (ghost-key: a catalog provider must use its OWN scoped var).
     const envVar = catalogEnvVarById().get(catalogId);
     if (envVar && model.apiKey) env[envVar] = model.apiKey;
-    const projectConfig = buildProjectConfig(model, provider);
+    const projectConfig = joinTomlSections(
+      buildProjectConfig(model, provider),
+      buildCompactSection(options.compactMode)
+    );
     return { args, env, projectConfig, resolvedMaxTokens };
   }
 
@@ -303,9 +312,42 @@ export function buildSpawnConfig(
   }
 
   // Generate project config for compat overrides (e.g., max_tokens_field)
-  const projectConfig = buildProjectConfig(model, provider);
+  // plus the user's context-compaction preset.
+  const projectConfig = joinTomlSections(buildProjectConfig(model, provider), buildCompactSection(options.compactMode));
 
   return { args, env, projectConfig, resolvedMaxTokens };
+}
+
+/** Context compaction preset selectable in Settings ('wcore.compactMode'). */
+export type CompactMode = 'economy' | 'light' | 'max';
+
+function joinTomlSections(...sections: string[]): string {
+  return sections.filter(Boolean).join('\n');
+}
+
+/**
+ * Map a compaction preset onto the engine's `[compact]` knobs
+ * (`threshold = context_window - output_reserve - autocompact_buffer`;
+ * engine defaults: 200_000 - 20_000 - 13_000 → autocompact near ~167K).
+ *
+ * - economy: compact around ~50K tokens and keep only 3 recent tool results -
+ *   long sessions stop re-sending big histories, trading recall for cost.
+ * - light: engine defaults - emit nothing so the engine stays authoritative.
+ * - max: hold context as long as possible (compact ~176K) and keep more tool
+ *   results live - maximum recall, maximum spend.
+ *
+ * Exported for tests.
+ */
+export function buildCompactSection(mode: CompactMode | undefined): string {
+  switch (mode) {
+    case 'economy':
+      return ['[compact]', 'autocompact_buffer = 130000', 'micro_keep_recent = 3', ''].join('\n');
+    case 'max':
+      return ['[compact]', 'autocompact_buffer = 4000', 'micro_keep_recent = 10', ''].join('\n');
+    case 'light':
+    default:
+      return '';
+  }
 }
 
 /**
