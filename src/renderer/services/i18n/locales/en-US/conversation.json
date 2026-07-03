@@ -353,5 +353,8 @@
       "copied": "Command copied"
     },
     "dismiss": "Dismiss"
+  },
+  "cost": {
+    "badgeTooltip": "Spend in this conversation: {{cost}} · {{tokens}} tokens"
   }
 }

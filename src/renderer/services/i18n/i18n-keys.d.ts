@@ -361,6 +361,7 @@ export type I18nKey =
   | 'conversation.commandQueue.title'
   | 'conversation.commandQueue.tooManyFiles'
   | 'conversation.contextUsage.contextUsed'
+  | 'conversation.cost.badgeTooltip'
   | 'conversation.createFailed'
   | 'conversation.dropdown.cliAgents'
   | 'conversation.dropdown.presetAssistants'

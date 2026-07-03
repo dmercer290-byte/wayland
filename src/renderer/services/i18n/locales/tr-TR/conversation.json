@@ -332,5 +332,8 @@
       "sublabel": "Mevcut Claude Code oturumunla çalıştır — yönetilecek ek anahtar yok.",
       "action": "Kullan"
     }
+  },
+  "cost": {
+    "badgeTooltip": "Bu konuşmadaki harcama: {{cost}} · {{tokens}} jeton"
   }
 }

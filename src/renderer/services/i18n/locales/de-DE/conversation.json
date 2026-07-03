@@ -330,5 +330,8 @@
       "sublabel": "Läuft über deine bestehende Claude-Code-Anmeldung – kein zusätzlicher Schlüssel nötig.",
       "action": "Verwenden"
     }
+  },
+  "cost": {
+    "badgeTooltip": "Ausgaben in dieser Unterhaltung: {{cost}} · {{tokens}} Token"
   }
 }

@@ -330,5 +330,8 @@
       "sublabel": "基於你現有的 Claude Code 登入執行——無需額外管理金鑰。",
       "action": "使用"
     }
+  },
+  "cost": {
+    "badgeTooltip": "本對話花費：{{cost}} · {{tokens}} token"
   }
 }

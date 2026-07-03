@@ -330,5 +330,8 @@
       "sublabel": "Execute com seu login atual do Claude Code — sem chaves extras para gerenciar.",
       "action": "Usar"
     }
+  },
+  "cost": {
+    "badgeTooltip": "Gasto nesta conversa: {{cost}} · {{tokens}} tokens"
   }
 }

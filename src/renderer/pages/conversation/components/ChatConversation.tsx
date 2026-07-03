@@ -37,6 +37,7 @@ import { usePreviewContext } from '../Preview';
 import StarOfficeMonitorCard from '../platforms/openclaw/StarOfficeMonitorCard.tsx';
 import ConversationSkillsIndicator from './ConversationSkillsIndicator';
 import AddSkillToChatButton from './AddSkillToChatButton';
+import ConversationCostBadge from './ConversationCostBadge';
 import { WorkflowSurface } from '@/renderer/pages/guid/components/workflow/WorkflowSurface';
 // import SkillRuleGenerator from './components/SkillRuleGenerator'; // Temporarily hidden
 
@@ -164,6 +165,7 @@ const GeminiConversationPanel: React.FC<{
     headerLeft: <GeminiModelSelector selection={modelSelection} />,
     headerExtra: (
       <div className='flex items-center gap-8px'>
+        <ConversationCostBadge conversationId={conversation.id} />
         <ConversationSkillsIndicator conversation={conversation} />
         <AddSkillToChatButton conversationId={conversation.id} />
         <CronJobManager
@@ -225,6 +227,7 @@ const WCoreConversationPanel: React.FC<{ conversation: WCoreConversation; slider
     headerLeft: <WCoreModelSelector selection={modelSelection} />,
     headerExtra: (
       <div className='flex items-center gap-8px'>
+        <ConversationCostBadge conversationId={conversation.id} />
         <ConversationSkillsIndicator conversation={conversation} />
         <AddSkillToChatButton conversationId={conversation.id} />
         <CronJobManager
@@ -258,9 +261,7 @@ type WorkflowPanelCommonProps = {
   workspaceEnabled: boolean;
   workflowSessionId: string;
   workflowTotalSteps: number | null;
-  workflowApplyStepMarker:
-    | ((stepN: number, status: StepStatus, source?: StepTransitionSource) => Promise<void>)
-    | null;
+  workflowApplyStepMarker: ((stepN: number, status: StepStatus, source?: StepTransitionSource) => Promise<void>) | null;
   initialWorkflowSession?: WorkflowSession;
 };
 
@@ -643,6 +644,7 @@ const ChatConversation: React.FC<{
           />
         </div>
       )}
+      {conversation && <ConversationCostBadge conversationId={conversation.id} />}
       <ConversationSkillsIndicator conversation={conversation} />
       {conversation && <AddSkillToChatButton conversationId={conversation.id} />}
       {conversation && (

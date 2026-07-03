@@ -330,5 +330,8 @@
       "sublabel": "기존 Claude Code 로그인으로 실행 — 별도 키 관리가 필요 없습니다.",
       "action": "사용"
     }
+  },
+  "cost": {
+    "badgeTooltip": "이 대화의 지출: {{cost}} · {{tokens}} 토큰"
   }
 }

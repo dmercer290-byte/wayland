@@ -330,5 +330,8 @@
       "sublabel": "Exécutez avec votre connexion Claude Code existante — aucune clé supplémentaire à gérer.",
       "action": "Utiliser"
     }
+  },
+  "cost": {
+    "badgeTooltip": "Dépenses de cette conversation : {{cost}} · {{tokens}} tokens"
   }
 }
