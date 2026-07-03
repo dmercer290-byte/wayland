@@ -103,6 +103,18 @@
       "pauseActionHint": "Pause gates new turns for this scope while over budget. It is resumable at any time and reserved for scheduled or team work.",
       "alertTitle": "Budget exceeded",
       "alertBody": "Spent {{spent}} of the {{limit}} limit."
+    },
+    "calendar": {
+      "title": "トークン使用カレンダー",
+      "allModels": "すべてのモデル",
+      "hour": "時間",
+      "day": "日",
+      "week": "週",
+      "month": "月",
+      "less": "少",
+      "more": "多",
+      "cellTokens": "{{tokens}} トークン · {{cost}}",
+      "unattributed": "（未分類）"
     }
   }
 }

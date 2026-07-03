@@ -9,6 +9,7 @@ import type {
   CostAggregate,
   CostEventInput,
   CostGroupBy,
+  CostModelSeriesPoint,
   CostSeriesPoint,
   CostWindow,
   ICostRepository,
@@ -123,6 +124,37 @@ export class SqliteCostRepository implements ICostRepository {
     }>;
     return rows.map((r) => ({
       bucketStart: r.bucket_start,
+      costUsd: r.cost_usd,
+      tokensTotal: r.tokens_total,
+      events: r.events,
+    }));
+  }
+
+  seriesByModel(window: CostWindow, bucketMs: number): CostModelSeriesPoint[] {
+    if (bucketMs <= 0) throw new Error('[SqliteCostRepository] seriesByModel bucketMs must be > 0');
+    const rows = this.db
+      .prepare(`
+        SELECT
+          (created_at - ((created_at - ?) % ?)) AS bucket_start,
+          COALESCE(model_id, '') AS model_id,
+          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          COALESCE(SUM(tokens_total), 0) AS tokens_total,
+          COUNT(*) AS events
+        FROM cost_events
+        WHERE created_at >= ? AND created_at < ?
+        GROUP BY bucket_start, model_id
+        ORDER BY bucket_start ASC
+      `)
+      .all(window.fromMs, bucketMs, window.fromMs, window.toMs) as Array<{
+      bucket_start: number;
+      model_id: string;
+      cost_usd: number;
+      tokens_total: number;
+      events: number;
+    }>;
+    return rows.map((r) => ({
+      bucketStart: r.bucket_start,
+      modelId: r.model_id,
       costUsd: r.cost_usd,
       tokensTotal: r.tokens_total,
       events: r.events,

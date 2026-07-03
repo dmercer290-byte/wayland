@@ -6,7 +6,14 @@
 
 import type { ISqliteDriver } from '@process/services/database/drivers/ISqliteDriver';
 import { SqliteCostRepository } from './SqliteCostRepository';
-import type { CostAggregate, CostSeriesPoint, CostSummary, CostWindow, ICostRepository } from './types';
+import type {
+  CostAggregate,
+  CostSeriesPoint,
+  CostSummary,
+  CostWindow,
+  ICostRepository,
+  CostModelSeriesPoint,
+} from './types';
 
 /**
  * Thin read-only service over the cost_events table (migration_v48), exposing
@@ -51,5 +58,10 @@ export class CostAnalyticsService {
   /** Fixed-width time-bucketed series over a window. `bucketMs` > 0. */
   series(window: CostWindow, bucketMs: number): CostSeriesPoint[] {
     return this.repo.series(window, bucketMs);
+  }
+
+  /** Per-model time-bucketed series (usage-calendar heatmap). */
+  seriesByModel(window: CostWindow, bucketMs: number): CostModelSeriesPoint[] {
+    return this.repo.seriesByModel(window, bucketMs);
   }
 }

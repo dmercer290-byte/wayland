@@ -2336,6 +2336,11 @@ export const cost = {
     import('@process/services/cost/types').CostSeriesPoint[],
     { window: import('@process/services/cost/types').CostWindow; bucketMs: number }
   >('cost.series'),
+  /** Per-model time-bucketed series (usage-calendar heatmap). */
+  seriesByModel: buildProvider<
+    import('@process/services/cost/types').CostModelSeriesPoint[],
+    { window: import('@process/services/cost/types').CostWindow; bucketMs: number }
+  >('cost.seriesByModel'),
   // --- Budgets / caps (Stage 1 / WS-F). All three are mutations or
   //     spend-disclosing reads; remote-denied by the `cost.` prefix in
   //     bridgeAllowlist.ts. listBudgets returns spend vs limit for the UI bars.

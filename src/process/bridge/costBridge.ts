@@ -12,6 +12,7 @@ import type {
   BudgetInput,
   BudgetStatus,
   CostAggregate,
+  CostModelSeriesPoint,
   CostSeriesPoint,
   CostSummary,
   CostWindow,
@@ -86,6 +87,17 @@ export function initCostBridge(service: CostAnalyticsService): void {
         return service.series(window, bucketMs);
       } catch (error) {
         console.error('[costBridge] series error:', error);
+        return [];
+      }
+    }
+  );
+
+  ipcBridge.cost.seriesByModel.provider(
+    async ({ window, bucketMs }: { window: CostWindow; bucketMs: number }): Promise<CostModelSeriesPoint[]> => {
+      try {
+        return service.seriesByModel(window, bucketMs);
+      } catch (error) {
+        console.error('[costBridge] seriesByModel error:', error);
         return [];
       }
     }

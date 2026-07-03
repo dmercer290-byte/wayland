@@ -71,6 +71,15 @@ export type CostAggregate = {
  * One bucket of a time series over cost_events, aligned to a fixed-width
  * window (the bucket start in ms-epoch). Used to drive the trend chart.
  */
+/** One (bucket, model) cell of the per-model usage series. */
+export type CostModelSeriesPoint = {
+  bucketStart: number;
+  modelId: string;
+  costUsd: number;
+  tokensTotal: number;
+  events: number;
+};
+
 export type CostSeriesPoint = {
   bucketStart: number;
   costUsd: number;
@@ -189,6 +198,9 @@ export interface ICostRepository {
   aggregate(groupBy: CostGroupBy, window: CostWindow): CostAggregate[];
   /** Fixed-width time-bucketed series over a window. `bucketMs` > 0. */
   series(window: CostWindow, bucketMs: number): CostSeriesPoint[];
+
+  /** Time-bucketed series grouped by model id (usage-calendar heatmap). */
+  seriesByModel(window: CostWindow, bucketMs: number): CostModelSeriesPoint[];
   /** Total cost + tokens + row count within a window. */
   total(window: CostWindow): { costUsd: number; tokensTotal: number; events: number };
   /**

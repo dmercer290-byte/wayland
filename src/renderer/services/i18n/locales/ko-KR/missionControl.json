@@ -103,6 +103,18 @@
       "pauseActionHint": "Pause gates new turns for this scope while over budget. It is resumable at any time and reserved for scheduled or team work.",
       "alertTitle": "Budget exceeded",
       "alertBody": "Spent {{spent}} of the {{limit}} limit."
+    },
+    "calendar": {
+      "title": "토큰 사용 캘린더",
+      "allModels": "모든 모델",
+      "hour": "시간",
+      "day": "일",
+      "week": "주",
+      "month": "월",
+      "less": "적음",
+      "more": "많음",
+      "cellTokens": "{{tokens}} 토큰 · {{cost}}",
+      "unattributed": "(미분류)"
     }
   }
 }

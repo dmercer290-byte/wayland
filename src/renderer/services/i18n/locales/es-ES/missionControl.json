@@ -103,6 +103,18 @@
       "pauseActionHint": "Pause gates new turns for this scope while over budget. It is resumable at any time and reserved for scheduled or team work.",
       "alertTitle": "Budget exceeded",
       "alertBody": "Spent {{spent}} of the {{limit}} limit."
+    },
+    "calendar": {
+      "title": "Calendario de uso de tokens",
+      "allModels": "Todos los modelos",
+      "hour": "Hora",
+      "day": "Día",
+      "week": "Semana",
+      "month": "Mes",
+      "less": "Menos",
+      "more": "Más",
+      "cellTokens": "{{tokens}} tokens · {{cost}}",
+      "unattributed": "(sin atribuir)"
     }
   }
 }

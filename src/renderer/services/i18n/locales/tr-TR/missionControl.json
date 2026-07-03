@@ -103,6 +103,18 @@
       "pauseActionHint": "Pause gates new turns for this scope while over budget. It is resumable at any time and reserved for scheduled or team work.",
       "alertTitle": "Budget exceeded",
       "alertBody": "Spent {{spent}} of the {{limit}} limit."
+    },
+    "calendar": {
+      "title": "Jeton kullanım takvimi",
+      "allModels": "Tüm modeller",
+      "hour": "Saat",
+      "day": "Gün",
+      "week": "Hafta",
+      "month": "Ay",
+      "less": "Az",
+      "more": "Çok",
+      "cellTokens": "{{tokens}} tokens · {{cost}}",
+      "unattributed": "(atanmamış)"
     }
   }
 }
