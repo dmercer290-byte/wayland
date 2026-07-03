@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.12.22](https://github.com/FerroxLabs/wayland-core/compare/v0.12.21...v0.12.22) (2026-07-04)
+
+A reliability release focused on runaway-loop resilience and honest tool-error
+signals. Agents that would previously burn a whole turn retrying a failing tool
+now stop cleanly and let the host offer a "Continue"; MCP tool failures are
+finally visible to the agent instead of masquerading as success; and two
+hardening fixes close an out-of-memory vector and a duplicate-connection bug.
+
+
+### Highlights
+
+* **Retry-cap for stuck tool loops** (#475). A model that keeps calling a tool
+  that keeps failing — e.g. an MCP call retried with a new wrong argument each
+  time — no longer burns the turn's budget mid-thought. A per-run failure cap
+  stops the run with clear guidance and, paired with the finish-reason work
+  below, lets the host offer **Continue** to resume with fresh headroom. Tunable
+  via `WAYLAND_MAX_CONSECUTIVE_TOOL_FAILURES` (the shell tool is deliberately
+  exempt so a normal build/test burst is never mistaken for a stuck loop).
+* **MCP tool failures are now honest** (#475). Every MCP tool-level failure —
+  argument-validation errors, API errors — used to look like *success* to the
+  agent, the error badge, and the model's own error signal, because the MCP
+  `isError` flag was dropped on the way in. It now propagates end-to-end, so
+  failures are visible (and the retry-cap can see them). The error text still
+  reaches the model so it can read it and recover.
+* **"Out of turns" now offers Continue, not "use a bigger model"** (#457). When
+  a run hits its per-turn cap, the engine emits a distinct `max_turns`
+  finish-reason (mapped to the ACP `max_turn_requests` stop) so hosts render a
+  resume affordance instead of a model-failure message.
+
+
+### Hardening
+
+* **Bounded the OpenAI chat-path tool-call accumulator** (#136). A runaway or
+  hostile streaming response can no longer allocate unbounded tool-call slots;
+  an out-of-range streamed index now fails the stream closed.
+* **`/mcp add` is idempotent** (#135). Re-adding an already-connected MCP server
+  no longer spawns a duplicate connection — or, for stdio servers, a duplicate
+  child process.
+
+
+### Tests & docs
+
+* **WebFetch extraction-timeout coverage** (#110). The readability
+  extraction-timeout → raw-body fallback is now tested with an injected slow
+  extractor, and the orphaned-thread behavior is documented honestly.
+
 ## [0.12.21](https://github.com/FerroxLabs/wayland-core/compare/v0.12.20...v0.12.21) (2026-07-03)
 
 A security and reliability release. It closes GHSA-8r7g end-to-end on the ACP
