@@ -22,6 +22,72 @@ export const TRANSCRIPT_KIND_BY_TYPE: Record<string, 'chat' | 'tool-call' | 'tho
   codex_tool_call: 'tool-call',
 };
 
+/**
+ * Redact secret-looking strings before anything hits disk. Transcripts mirror
+ * raw tool args/results, which routinely carry API keys and tokens; a memory
+ * file that gets backed up or shared must never leak them. Patterns cover the
+ * common provider key shapes plus a generic `key: value` assignment form.
+ */
+const SECRET_PATTERNS: RegExp[] = [
+  /\bsk-[A-Za-z0-9_-]{16,}\b/g, // OpenAI / Anthropic style
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g, // GitHub tokens
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, // Slack
+  /\bAIza[0-9A-Za-z_-]{30,}\b/g, // Google API key
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g, // Authorization headers
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}/g, // JWTs
+];
+
+/** `"api_key": "..."` / `token=...` style assignments, value redacted. */
+const SECRET_ASSIGNMENT =
+  /(["']?(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret|secret|password|passwd|token)["']?\s*[:=]\s*["']?)([^"'\s,}]{8,})/gi;
+
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, '[REDACTED]');
+  }
+  out = out.replace(SECRET_ASSIGNMENT, '$1[REDACTED]');
+  return out;
+}
+
+/** File header re-written on every rotation. */
+export const TRANSCRIPT_HEADER = '<!-- ijfw-schema: v1 -->\n# Session Transcript\n\n';
+
+/**
+ * Split transcript content for rotation: returns the newest whole blocks that
+ * fit in `keepBytes` (to remain in transcript.md) and the older remainder (to
+ * be gzip-archived). Splits only on block starts (`\n---\n` following a block
+ * body) so both halves stay parseable. Pure - exported for tests.
+ */
+export function splitTranscriptForRotation(content: string, keepBytes: number): { keep: string; archive: string } {
+  const body = content.startsWith(TRANSCRIPT_HEADER) ? content.slice(TRANSCRIPT_HEADER.length) : content;
+  // Block boundaries: a `---` line that begins a frontmatter section always
+  // follows a blank line in our writer's output ("\n\n---\n").
+  const marker = '\n\n---\n';
+  if (body.length <= keepBytes) return { keep: TRANSCRIPT_HEADER + body, archive: '' };
+
+  let cut = body.indexOf(marker);
+  let lastGood = -1;
+  while (cut !== -1) {
+    if (body.length - (cut + 2) <= keepBytes) {
+      lastGood = cut + 2; // keep from the `---` line (skip the blank separator)
+      break;
+    }
+    cut = body.indexOf(marker, cut + marker.length);
+  }
+  if (lastGood === -1) {
+    // No boundary leaves a small-enough tail - keep everything (better a
+    // slightly oversized file than a torn block).
+    return { keep: TRANSCRIPT_HEADER + body, archive: '' };
+  }
+  return {
+    keep: TRANSCRIPT_HEADER + body.slice(lastGood),
+    archive: body.slice(0, lastGood),
+  };
+}
+
 /** Body lines that are exactly `---` would split the block - soften them. */
 function sanitizeBody(text: string): string {
   return text
@@ -126,9 +192,10 @@ export function formatTranscriptBlock(conversation_id: string, message: TMessage
   if (!kind || !described) return '';
 
   const storedAt = new Date(message.createdAt ?? Date.now()).toISOString();
-  const summary = JSON.stringify(singleLine(`${described.label}: ${stripLabelPrefix(described.body)}`, 100));
+  const redactedBody = redactSecrets(described.body);
+  const summary = JSON.stringify(singleLine(`${described.label}: ${stripLabelPrefix(redactedBody)}`, 100));
   const convTag = `conv-${conversation_id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 12) || 'unknown'}`;
-  const body = truncate(sanitizeBody(described.body), MAX_BODY_CHARS);
+  const body = truncate(sanitizeBody(redactedBody), MAX_BODY_CHARS);
 
   return [
     '---',

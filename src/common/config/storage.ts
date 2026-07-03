@@ -178,6 +178,11 @@ export interface IConfigStorageRefer {
    * never spawns `npx @ijfw/install`. Wave 6 wires the Settings toggle.
    */
   'ijfw.skipSetup'?: boolean;
+  /**
+   * Mirror chats/tool calls/thinking into .ijfw/memory/transcript.md.
+   * Default ON (absent = enabled); the Settings toggle writes false to opt out.
+   */
+  'memory.transcriptLogging'?: boolean;
   /** Persisted app-wide UI zoom factor for Display settings */
   'ui.zoomFactor'?: number;
   /** Auto-enable WebUI in desktop mode */

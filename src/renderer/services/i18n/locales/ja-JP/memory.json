@@ -98,6 +98,8 @@
     "panel_title": "IJFW Memory（Ferrox Labs）",
     "skip_label": "IJFW の自動セットアップをスキップ",
     "skip_description": "有効にすると、Wayland は IJFW をインストールまたはアップグレードしません。後でメモリページから手動でインストールできます。",
+    "transcript_label": "会話の記録をメモリに保存",
+    "transcript_description": "チャット、ツール呼び出し、思考を各ワークスペースのメモリ記録にミラーリングします。古いエントリは自動圧縮され、シークレットは書き込み前に削除されます。",
     "manual_install_hint": "手動でインストールするには、ターミナルで `npx -y --package @ijfw/install@latest ijfw-install` を実行してください",
     "about_title": "IJFW Memory",
     "about_body": "Ferrox Labs によるオープンソースの永続メモリエンジンです。"

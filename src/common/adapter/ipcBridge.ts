@@ -2368,6 +2368,10 @@ export const memory = {
   >('memory.read-source-context'),
   /** Fired when the file watcher triggers a re-index. */
   onIndexChanged: buildEmitter<IndexStats>('memory.index-changed'),
+  /** Read the transcript-logging toggle (absent = enabled). */
+  getTranscriptLogging: buildProvider<{ enabled: boolean }, void>('memory.get-transcript-logging'),
+  /** Persist the transcript-logging toggle. */
+  setTranscriptLogging: buildProvider<{ ok: true }, { enabled: boolean }>('memory.set-transcript-logging'),
   /** Import verbs - stubs until W1a wires the actual importers. */
   import: {
     claudeMem: buildProvider<{ count: number; errors: string[] }, void>('memory.import.claude-mem'),

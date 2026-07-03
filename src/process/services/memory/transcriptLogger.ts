@@ -21,14 +21,50 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import * as zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import type { TMessage } from '@/common/chat/chatLib';
+import { ProcessConfig } from '../../utils/initStorage';
 import { getDatabase } from '../database/export';
-import { TRANSCRIPT_KIND_BY_TYPE, formatTranscriptBlock } from './transcriptFormat';
+import {
+  TRANSCRIPT_HEADER,
+  TRANSCRIPT_KIND_BY_TYPE,
+  formatTranscriptBlock,
+  splitTranscriptForRotation,
+} from './transcriptFormat';
+
+const gzip = promisify(zlib.gzip);
 
 /** Snapshot a message after this long without updates (stream settled). */
 const QUIET_MS = 5000;
 /** Remember at most this many already-logged message keys per process. */
 const MAX_LOGGED_KEYS = 4000;
+/** Rotate transcript.md once it grows past this... */
+const ROTATE_AT_BYTES = 1024 * 1024;
+/** ...keeping the newest whole blocks up to this size in place. */
+const KEEP_BYTES = 256 * 1024;
+/** Re-read the Settings toggle at most this often. */
+const ENABLED_TTL_MS = 15_000;
+
+let enabledCache: { value: boolean; readAt: number } | null = null;
+
+async function isEnabled(): Promise<boolean> {
+  const now = Date.now();
+  if (enabledCache && now - enabledCache.readAt < ENABLED_TTL_MS) return enabledCache.value;
+  let value = true;
+  try {
+    value = (await ProcessConfig.get('memory.transcriptLogging')) !== false;
+  } catch {
+    value = true;
+  }
+  enabledCache = { value, readAt: now };
+  return value;
+}
+
+/** Called by the settings bridge so a toggle applies immediately. */
+export function invalidateTranscriptLoggingCache(): void {
+  enabledCache = null;
+}
 
 type PendingEntry = { message: TMessage; timer: NodeJS.Timeout };
 
@@ -75,6 +111,7 @@ export function recordTranscriptMessage(conversation_id: string, message: TMessa
 
 async function flushMessage(key: string, conversation_id: string, message: TMessage): Promise<void> {
   try {
+    if (!(await isEnabled())) return;
     const workspace = await resolveWorkspace(conversation_id);
     if (!workspace) return;
 
@@ -90,13 +127,47 @@ async function flushMessage(key: string, conversation_id: string, message: TMess
       try {
         await fs.promises.access(filePath);
       } catch {
-        header = '<!-- ijfw-schema: v1 -->\n# Session Transcript\n\n';
+        header = TRANSCRIPT_HEADER;
       }
       await fs.promises.appendFile(filePath, header + block, 'utf8');
       await ensureRegistered(workspace);
+      await rotateIfOversized(memDir, filePath);
     });
   } catch (err) {
     console.error('[TranscriptLogger] flush failed:', err);
+  }
+}
+
+/**
+ * Auto-compression: once transcript.md passes ROTATE_AT_BYTES, the older
+ * blocks are gzipped into `.ijfw/memory/transcript-archive/` (outside the
+ * archive scanner's file list, so the Memory index and its token/scan cost
+ * stay bounded) and only the newest KEEP_BYTES of whole blocks remain live.
+ * Runs inside the per-file append chain, so no concurrent writer interleaves.
+ */
+async function rotateIfOversized(memDir: string, filePath: string): Promise<void> {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (stat.size <= ROTATE_AT_BYTES) return;
+
+    const content = await fs.promises.readFile(filePath, 'utf8');
+    const { keep, archive } = splitTranscriptForRotation(content, KEEP_BYTES);
+    if (!archive) return;
+
+    const archiveDir = path.join(memDir, 'transcript-archive');
+    await fs.promises.mkdir(archiveDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const archivePath = path.join(archiveDir, `transcript-${stamp}.md.gz`);
+    const compressed = await gzip(Buffer.from(archive, 'utf8'));
+    await fs.promises.writeFile(archivePath, compressed);
+
+    // Write-then-rename so a crash mid-rotation never truncates the live file.
+    const tmpPath = `${filePath}.rotating`;
+    await fs.promises.writeFile(tmpPath, keep, 'utf8');
+    await fs.promises.rename(tmpPath, filePath);
+    console.info(`[TranscriptLogger] rotated ${archive.length} bytes into ${path.basename(archivePath)}`);
+  } catch (err) {
+    console.error('[TranscriptLogger] rotation failed:', err);
   }
 }
 

@@ -14,6 +14,8 @@ import log from 'electron-log';
 import { z } from 'zod';
 import { ipcBridge } from '@/common';
 import { getIjfwArchiveService } from '@process/services/memory/ijfwArchiveService';
+import { invalidateTranscriptLoggingCache } from '@process/services/memory/transcriptLogger';
+import { ProcessConfig } from '@process/utils/initStorage';
 import { promoteEntry, undoPromotion } from '@process/services/memory/wikiWriter';
 import { startPromotionSweep } from '@process/services/memory/promotionSweep';
 import { readSourceContext } from '@process/services/memory/sourceReader';
@@ -228,6 +230,22 @@ export function initMemoryArchiveBridge(): void {
       log.error('[memory-archive] readSourceContext failed', { err });
       return { ok: false as const, error: (err as Error).message };
     }
+  });
+
+  // ===== Transcript logging toggle =====
+
+  ipcBridge.memory.getTranscriptLogging.provider(async () => {
+    const value = await ProcessConfig.get('memory.transcriptLogging');
+    return { enabled: value !== false };
+  });
+
+  ipcBridge.memory.setTranscriptLogging.provider(async (args: unknown) => {
+    const parsed = z.object({ enabled: z.boolean() }).safeParse(args);
+    const enabled = parsed.success ? parsed.data.enabled : true;
+    await ProcessConfig.set('memory.transcriptLogging', enabled);
+    invalidateTranscriptLoggingCache();
+    log.info('[memory-archive] setTranscriptLogging', { enabled });
+    return { ok: true as const };
   });
 
   // ===== Emitters =====

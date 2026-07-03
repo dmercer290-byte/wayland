@@ -12,7 +12,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { IMessageText, IMessageThinking, IMessageToolCall, TMessage } from '@/common/chat/chatLib';
 import { parseMarkdownBlocks } from '@/process/services/memory/markdownFrontmatter';
-import { formatTranscriptBlock } from '@/process/services/memory/transcriptFormat';
+import {
+  TRANSCRIPT_HEADER,
+  formatTranscriptBlock,
+  redactSecrets,
+  splitTranscriptForRotation,
+} from '@/process/services/memory/transcriptFormat';
 
 const CONV = 'conv-1234-abcd';
 
@@ -97,6 +102,15 @@ describe('formatTranscriptBlock', () => {
     expect((summary as string).length).toBeLessThanOrEqual(110);
   });
 
+  it('redacts secrets in bodies and summaries', () => {
+    const leaky = 'my key is sk-abc123def456ghi789jkl and token=supersecretvalue123 plus ghp_' + 'a'.repeat(30);
+    const block = formatTranscriptBlock(CONV, textMessage(leaky, 'right'));
+    expect(block).not.toContain('sk-abc123def456ghi789jkl');
+    expect(block).not.toContain('supersecretvalue123');
+    expect(block).not.toContain('ghp_' + 'a'.repeat(30));
+    expect(block).toContain('[REDACTED]');
+  });
+
   it('appended blocks parse as consecutive entries', () => {
     const file =
       '<!-- ijfw-schema: v1 -->\n# Session Transcript\n\n' +
@@ -106,5 +120,70 @@ describe('formatTranscriptBlock', () => {
     expect(parsed).toHaveLength(2);
     expect(parsed[0].body).toContain('first');
     expect(parsed[1].body).toContain('second');
+  });
+});
+
+describe('redactSecrets', () => {
+  it('masks provider keys, JWTs, and bearer tokens', () => {
+    const input = [
+      'openai: sk-proj1234567890abcdefgh',
+      'aws: AKIAIOSFODNN7EXAMPLE',
+      'slack: xoxb-1234567890-abcdefghij',
+      'google: AIzaSyA1234567890abcdefghijklmnopqrstu',
+      'jwt: eyJhbGciOiJIUzI1NiIs.eyJzdWIiOiIxMjM0NTY3ODkwIn0',
+      'Authorization: Bearer abcdef1234567890abcdef',
+    ].join('\n');
+    const out = redactSecrets(input);
+    expect(out).not.toMatch(/sk-proj|AKIAIOSFODNN7|xoxb-123|AIzaSy|eyJhbGciOiJI|Bearer abcdef/);
+    expect(out.match(/\[REDACTED\]/g)?.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('masks key:value assignments but keeps ordinary text', () => {
+    const out = redactSecrets('"api_key": "abcd1234efgh5678" and the weather is nice today');
+    expect(out).toContain('"api_key": "[REDACTED]');
+    expect(out).toContain('weather is nice today');
+  });
+});
+
+describe('splitTranscriptForRotation', () => {
+  const block = (n: number, pad: number): string =>
+    [
+      '---',
+      'type: session',
+      `summary: "entry ${n}"`,
+      'stored: 2026-07-03T00:00:00.000Z',
+      'tags: [transcript, chat]',
+      '---',
+      `body ${n} ${'x'.repeat(pad)}`,
+      '',
+      '',
+    ].join('\n');
+
+  it('keeps everything when under the cap', () => {
+    const content = TRANSCRIPT_HEADER + block(1, 10) + block(2, 10);
+    const { keep, archive } = splitTranscriptForRotation(content, 10_000);
+    expect(archive).toBe('');
+    expect(keep).toBe(content);
+  });
+
+  it('splits on block boundaries, newest blocks kept, both halves parseable', () => {
+    const blocks = Array.from({ length: 20 }, (_, i) => block(i, 500));
+    const content = TRANSCRIPT_HEADER + blocks.join('');
+    const { keep, archive } = splitTranscriptForRotation(content, 2000);
+    expect(archive.length).toBeGreaterThan(0);
+    const keptEntries = parseMarkdownBlocks(keep);
+    const archivedEntries = parseMarkdownBlocks(archive);
+    expect(keptEntries.length + archivedEntries.length).toBe(20);
+    // Newest entries stay live; oldest go to the archive.
+    expect(archivedEntries[0].frontmatter['summary']).toBe('entry 0');
+    expect(keptEntries[keptEntries.length - 1].frontmatter['summary']).toBe('entry 19');
+    expect(keep.startsWith(TRANSCRIPT_HEADER)).toBe(true);
+  });
+
+  it('never tears a block even when a single block exceeds the cap', () => {
+    const content = TRANSCRIPT_HEADER + block(1, 5000);
+    const { keep, archive } = splitTranscriptForRotation(content, 100);
+    expect(archive).toBe('');
+    expect(parseMarkdownBlocks(keep)).toHaveLength(1);
   });
 });

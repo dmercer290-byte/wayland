@@ -98,6 +98,8 @@
     "panel_title": "IJFW Memory (Ferrox Labs)",
     "skip_label": "Automatische IJFW-Einrichtung überspringen",
     "skip_description": "Wenn aktiviert, installiert oder aktualisiert Wayland IJFW nicht. Du kannst es später manuell über die Gedächtnis-Seite installieren.",
+    "transcript_label": "Gesprächsprotokolle im Speicher ablegen",
+    "transcript_description": "Spiegelt Chats, Tool-Aufrufe und Denkprozesse in das Speicher-Transkript des Arbeitsbereichs. Ältere Einträge werden automatisch komprimiert; Geheimnisse werden vor dem Schreiben entfernt.",
     "manual_install_hint": "Manuelle Installation: Führe `npx -y --package @ijfw/install@latest ijfw-install` in einem Terminal aus",
     "about_title": "IJFW Memory",
     "about_body": "Eine Open-Source-Engine für dauerhaftes Gedächtnis von Ferrox Labs."
