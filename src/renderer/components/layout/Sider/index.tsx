@@ -9,7 +9,6 @@ import { blurActiveElement } from '@renderer/utils/ui/focus';
 import { useThemeContext } from '@renderer/hooks/context/ThemeContext';
 import {
   SiderAssistantsEntry,
-  SiderFluxRouterEntry,
   SiderMemoryEntry,
   SiderProjectsEntry,
   SiderScheduledEntry,
@@ -243,12 +242,6 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
           siderTooltipProps={siderTooltipProps}
           onClick={handleAssistantsClick}
         />
-        <SiderFluxRouterEntry
-          isMobile={isMobile}
-          collapsed={collapsed}
-          siderTooltipProps={siderTooltipProps}
-          onClick={() => handleTopZoneNav('/settings/models')}
-        />
         <SiderWorkflowsEntry
           isMobile={isMobile}
           isActive={pathname.startsWith('/workflows')}
@@ -287,16 +280,23 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
 
       <div className={classNames('overflow-y-auto', siderStyles.scrollArea, siderStyles.scrollZone)}>
         {/* v0.6.2 W2b - accordion sections replace SiderScheduledEntry / SiderWorkflowsEntry /
-            SiderTeamsEntry / SiderActiveTeams / TeamSiderSection / CronJobSiderSection. */}
-        <SiderScheduledSection collapsed={collapsed} pathname={pathname} onNavigate={handleCronNavigate} />
-        <SiderWorkflowsSection collapsed={collapsed} />
-        <SiderTeamsSection
-          collapsed={collapsed}
-          pathname={pathname}
-          siderTooltipProps={siderTooltipProps}
-          onSessionClick={onSessionClick}
-        />
-        <SiderRecentChatsSection {...workspaceHistoryProps} />
+            SiderTeamsEntry / SiderActiveTeams / TeamSiderSection / CronJobSiderSection.
+            Hidden entirely when collapsed: their list content cannot render cleanly
+            in the icon rail, so the rail stays icons-only (the top nav already has an
+            icon entry for each destination). */}
+        {!collapsed && (
+          <>
+            <SiderScheduledSection collapsed={collapsed} pathname={pathname} onNavigate={handleCronNavigate} />
+            <SiderWorkflowsSection collapsed={collapsed} />
+            <SiderTeamsSection
+              collapsed={collapsed}
+              pathname={pathname}
+              siderTooltipProps={siderTooltipProps}
+              onSessionClick={onSessionClick}
+            />
+            <SiderRecentChatsSection {...workspaceHistoryProps} />
+          </>
+        )}
       </div>
 
       <div className={siderStyles.footerZone}>

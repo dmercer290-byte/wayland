@@ -19,11 +19,13 @@
 
 import path from 'node:path';
 import { homedir } from 'node:os';
-import type { SkillSecurityReport } from '@/common/types/skillTypes';
+import type { SkillSecurityReport, SkillType } from '@/common/types/skillTypes';
 import type { SkillScanInput } from './skillGuardRules';
 import { SkillGuard } from './SkillGuard';
 import { SkillLibrary } from './SkillLibrary';
 import { SkillQuarantine, type SkillQuarantineIo } from './SkillQuarantine';
+import type { LlmScanCall } from './skillGuardLlmScan';
+import { makeOneShotLlmScanCall } from './skillGuardLlmCall';
 
 export const IMPORTED_DIR = path.join(homedir(), '.wayland', 'skills', 'imported');
 
@@ -40,8 +42,8 @@ export type SkillImportIo = {
   readFile: (p: string) => Promise<Buffer>;
   /** Copy a file (src → dest). */
   copyFile: (src: string, dest: string) => Promise<void>;
-  /** Ensure a directory exists (recursive). */
-  mkdir: (p: string) => Promise<void>;
+  /** Ensure a directory exists (recursive). MUST create parent dirs. */
+  mkdir: (p: string, opts?: { recursive?: boolean }) => Promise<void>;
   /** Write a Buffer to a file. */
   writeFile: (p: string, data: Buffer | string) => Promise<void>;
   /** Clone a git repo to destDir. */
@@ -75,7 +77,11 @@ export const defaultSkillImportIo: SkillImportIo = {
   readdir,
   readFile,
   copyFile,
-  mkdir,
+  mkdir: async (p, opts) => {
+    // fs/promises mkdir returns the first-created dir path with { recursive: true };
+    // the SkillImportIo contract is Promise<void>, so discard it.
+    await mkdir(p, opts);
+  },
   writeFile,
   gitClone: async (url, destDir) => {
     await execAsync(`git clone --depth 1 -- ${JSON.stringify(url)} ${JSON.stringify(destDir)}`);
@@ -107,6 +113,18 @@ export type ImportedSkillResult = {
   destPath: string;
   /** Security scan report. */
   report: SkillSecurityReport;
+  /** Type declared in the SKILL.md frontmatter (default 'skill'). */
+  type: SkillType;
+  /** Raw SKILL.md body - lets the import dispatcher route agent-profiles. */
+  body: string;
+  /**
+   * Whether the skill was actually registered into the library. `clean`
+   * verdicts register immediately (true); `review` verdicts are held pending
+   * an explicit user "Import anyway" (false) and only register via
+   * `confirmImport` (C3). Blocked verdicts never appear here - they are
+   * quarantined instead.
+   */
+  registered: boolean;
 };
 
 export type ImportResult = {
@@ -135,6 +153,26 @@ function isAllowedGitUrl(url: string): boolean {
 
 // Regex to flag SKILL.md bodies that reference relative executable paths.
 const EXECUTABLE_REF_RE = /\.(\/scripts\/[^\s)'"]+|\/bin\/[^\s)'"]+)/;
+
+// Whitelist of valid SKILL.md frontmatter `type:` values. Anything else
+// (missing block, unknown value) falls back to 'skill' so a malformed
+// header can never register an entry under an unexpected surface.
+const VALID_SKILL_TYPES: ReadonlySet<SkillType> = new Set(['skill', 'workflow', 'agent-profile']);
+
+/**
+ * Extract the frontmatter `type:` from a SKILL.md body. Reads only the
+ * leading `---\n…\n---` block; defaults to 'skill' when absent or invalid.
+ * Kept local (and regex-only, no YAML dep) to mirror the rest of this file's
+ * dependency-free posture; the canonical parser in AcpSkillManager is renderer-
+ * adjacent and pulls more surface than the importer needs.
+ */
+export function parseFrontmatterType(body: string): SkillType {
+  const block = body.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!block) return 'skill';
+  const m = block[1].match(/^type:[ \t]*['"]?([^'"\n]+?)['"]?[ \t]*$/m);
+  const raw = m ? (m[1].trim() as SkillType) : 'skill';
+  return VALID_SKILL_TYPES.has(raw) ? raw : 'skill';
+}
 
 /**
  * Decompression caps to defend against zip-bombs. A skill is a small bundle of
@@ -172,10 +210,17 @@ function resolveContainedEntry(baseDir: string, entryName: string): string | nul
 export class SkillImport {
   private readonly io: SkillImportIo;
   private readonly quarantineIo: SkillQuarantineIo | undefined;
+  /**
+   * LLM deep-sweep call for the import path (C1). Defaults to the real
+   * oneShot-backed scanner; injected in tests. Imports are untrusted, rare
+   * events, so every import gets exactly one model call per skill.
+   */
+  private readonly llmCall: LlmScanCall;
 
-  constructor(io: SkillImportIo = defaultSkillImportIo, quarantineIo?: SkillQuarantineIo) {
+  constructor(io: SkillImportIo = defaultSkillImportIo, quarantineIo?: SkillQuarantineIo, llmCall?: LlmScanCall) {
     this.io = io;
     this.quarantineIo = quarantineIo;
+    this.llmCall = llmCall ?? makeOneShotLlmScanCall();
   }
 
   // -------------------------------------------------------------------------
@@ -303,7 +348,7 @@ export class SkillImport {
     }
     const skillName = path.basename(path.dirname(srcPath));
     const destDir = path.join(IMPORTED_DIR, skillName);
-    await this.io.mkdir(destDir);
+    await this.io.mkdir(destDir, { recursive: true });
     const destFile = path.join(destDir, 'SKILL.md');
     await this.io.copyFile(srcPath, destFile);
     // Read body for scan.
@@ -319,7 +364,7 @@ export class SkillImport {
   private async _copyAndScan(srcDir: string): Promise<ImportResult> {
     const basename = path.basename(srcDir);
     const destDir = path.join(IMPORTED_DIR, basename);
-    await this.io.mkdir(destDir);
+    await this.io.mkdir(destDir, { recursive: true });
 
     const files = await this.io.readdir(srcDir);
     let body = '';
@@ -345,7 +390,15 @@ export class SkillImport {
     return this._scanAndRegister([{ name: basename, body, destDir }]);
   }
 
-  /** Scan a batch of skills and register clean/review ones; quarantine blocked. */
+  /**
+   * Scan a batch of imported skills through the full Security Sweep (regex +
+   * LLM deep read, C1) and gate registration on the verdict (C3):
+   *  - `blocked` → quarantine, refuse (never returned in `imported`).
+   *  - `review`  → HELD. Not registered; returned with `registered: false` so
+   *    the renderer can show the findings and require an explicit
+   *    "Import anyway" that calls `confirmImport`.
+   *  - `clean`   → registered immediately with `registered: true`.
+   */
   private async _scanAndRegister(
     skills: Array<{ name: string; body: string; destDir: string }>
   ): Promise<ImportResult> {
@@ -356,10 +409,12 @@ export class SkillImport {
       tags: [] as string[],
     }));
 
-    const reports = await SkillGuard.scan(inputs, { llm: true });
+    // Only the untrusted import/user path passes llm:true with a real llmCall.
+    const reports = await SkillGuard.scan(inputs, { llm: true, llmCall: this.llmCall });
 
     const imported: ImportedSkillResult[] = [];
     const quarantined: string[] = [];
+    const warnings: string[] = [];
 
     for (let i = 0; i < skills.length; i++) {
       const skill = skills[i];
@@ -369,23 +424,91 @@ export class SkillImport {
         // Route to quarantine.
         await SkillQuarantine.quarantine(skill.name, skill.destDir, this.quarantineIo);
         quarantined.push(skill.name);
-      } else {
-        // Register clean and review skills into the library.
-        SkillLibrary.getInstance().registerSource([
-          {
-            name: skill.name,
-            description: '',
-            type: 'skill',
-            source: 'imported',
-            path: path.join(skill.destDir, 'SKILL.md'),
-            metadata: { tags: [] },
-            security: report,
-          },
-        ]);
-        imported.push({ name: skill.name, destPath: skill.destDir, report });
+        continue;
       }
+
+      // `review` is HELD pending explicit consent: the on-disk copy stays
+      // (so confirmImport can re-verify it) but it is NOT registered, so no
+      // agent can retrieve it until the user approves.
+      let registered = false;
+      if (report.verdict === 'clean') {
+        warnings.push(...this._register(skill.name, skill.destDir, skill.body, report));
+        registered = true;
+      }
+
+      imported.push({
+        name: skill.name,
+        destPath: skill.destDir,
+        report,
+        type: parseFrontmatterType(skill.body),
+        body: skill.body,
+        registered,
+      });
     }
 
-    return { imported, quarantined, warnings: [] };
+    return { imported, quarantined, warnings };
+  }
+
+  /**
+   * Register an already-swept, non-blocked skill into the library under its
+   * frontmatter type. Returns any collision warnings. Shared by the clean-path
+   * auto-register and the review-path `confirmImport`.
+   */
+  private _register(name: string, destDir: string, body: string, report: SkillSecurityReport): string[] {
+    return SkillLibrary.getInstance().registerSource([
+      {
+        name,
+        description: '',
+        type: parseFrontmatterType(body),
+        source: 'imported',
+        path: path.join(destDir, 'SKILL.md'),
+        metadata: { tags: [] },
+        security: report,
+      },
+    ]);
+  }
+
+  /**
+   * Register a previously-swept, user-approved `review` skill (C3 consent gate).
+   *
+   * Idempotent and replay-safe. The renderer passes the on-disk imported path
+   * and the `contentHash` from the report the user actually saw. We re-read the
+   * SKILL.md that is on disk RIGHT NOW and re-scan it (regex only - the deep
+   * sweep already ran at import time and the user is approving that verdict):
+   *  - If the freshly-hashed content does not match the approved `contentHash`,
+   *    the on-disk body changed since the user reviewed it → refuse. This is
+   *    what stops an approval from being replayed against different content.
+   *  - If the fresh verdict is `blocked`, refuse (a regex block is absolute).
+   *  - Otherwise register and return ok.
+   *
+   * Re-running is safe: registering the same entry twice is a no-op overwrite.
+   */
+  async confirmImport(params: {
+    name: string;
+    destPath: string;
+    contentHash: string;
+  }): Promise<{ ok: true } | { ok: false; error: 'content-changed' | 'blocked' | 'not-found' }> {
+    const { name, destPath, contentHash } = params;
+    const skillMd = path.join(destPath, 'SKILL.md');
+    let body: string;
+    try {
+      body = (await this.io.readFile(skillMd)).toString('utf-8');
+    } catch {
+      return { ok: false, error: 'not-found' };
+    }
+
+    const [report] = await SkillGuard.scan([{ name, body, description: '', tags: [] }], { llm: false });
+
+    // Replay guard: the approval is bound to the exact content the user saw.
+    if (report.contentHash !== contentHash) {
+      return { ok: false, error: 'content-changed' };
+    }
+    if (report.verdict === 'blocked') {
+      await SkillQuarantine.quarantine(name, destPath, this.quarantineIo);
+      return { ok: false, error: 'blocked' };
+    }
+
+    this._register(name, destPath, body, report);
+    return { ok: true };
   }
 }

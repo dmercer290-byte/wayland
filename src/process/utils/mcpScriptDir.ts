@@ -58,6 +58,7 @@ export const MCP_STDIO_SCRIPT_NAMES = [
   'team-guide-mcp-stdio.js',
   'builtin-mcp-image-gen.js',
   'builtin-mcp-search-skills.js',
+  'builtin-mcp-concierge-diag.js',
 ] as const;
 
 /**

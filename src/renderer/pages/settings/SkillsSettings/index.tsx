@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Input, Switch } from '@arco-design/web-react';
-import { Download, Sparkles } from 'lucide-react';
+import { Button, Input, Message, Switch } from '@arco-design/web-react';
+import { Download, RefreshCw, Sparkles } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { ipcBridge } from '@/common';
@@ -16,6 +17,7 @@ import type { SkillIndexEntry, SkillSource, SkillVerdict } from '@/common/types/
 import SettingsPageShell from '@renderer/pages/settings/components/SettingsPageShell';
 import BuildSkillModal from './BuildSkillModal';
 import FilterRail from './FilterRail';
+import ImportModal from './ImportModal';
 import LibraryHealth from './LibraryHealth';
 import SkillDetailDrawer from './SkillDetailDrawer';
 import SkillRow from './SkillRow';
@@ -23,6 +25,7 @@ import './SkillsSettings.module.css';
 
 const SkillsSettings: React.FC = () => {
   const { t } = useTranslation(undefined, { keyPrefix: 'skills' });
+  const isMobile = useLayoutContext()?.isMobile ?? false;
 
   const [entries, setEntries] = useState<SkillIndexEntry[]>([]);
   const [stats, setStats] = useState<SkillStats | null>(null);
@@ -32,6 +35,8 @@ const SkillsSettings: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get('q') ?? '');
   const [buildModalVisible, setBuildModalVisible] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [scanningLibrary, setScanningLibrary] = useState(false);
 
   // CLI discovery flag (default off). Reads/writes via the skills bridge.
   // Flipping shows a restart-required hint - the discovery only fires once
@@ -49,18 +54,39 @@ const SkillsSettings: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
-    const [list, s] = await Promise.all([
+    const [list, s, pinned] = await Promise.all([
       ipcBridge.skills.list.invoke({ type: 'skill' }),
       ipcBridge.skills.stats.invoke(),
+      ipcBridge.skills.getPinned.invoke(),
     ]);
     setEntries(list);
     setStats(s);
+    // Hydrate the pin stars from persisted prefs. Without this the stars reset
+    // to unchecked on every mount while the stats count still reflects the real
+    // pinned total - the desync reported in #72.
+    setPinnedNames(new Set(pinned));
   }, []);
 
   useEffect(() => {
     void fetchData();
     void ipcBridge.skills.getCliDiscoveryEnabled.invoke().then((v) => setCliDiscoveryEnabled(v));
   }, [fetchData]);
+
+  // C4: manual "Scan library" re-run. The regex-only sweep also fires once on
+  // app start; this lets the user re-flip any still-unscanned entries (and see
+  // the verified counter move) without a restart.
+  const handleScanLibrary = useCallback(async () => {
+    setScanningLibrary(true);
+    try {
+      const { rescanned } = await ipcBridge.skills.scanLibrary.invoke();
+      await fetchData();
+      Message.success(t('scanLibrary.done', { count: rescanned, defaultValue: `Scanned ${rescanned} skills` }));
+    } catch {
+      Message.error(t('scanLibrary.failed', 'Library scan failed'));
+    } finally {
+      setScanningLibrary(false);
+    }
+  }, [fetchData, t]);
 
   const handleCliDiscoveryToggle = useCallback(async (next: boolean) => {
     setCliDiscoveryEnabled(next);
@@ -80,7 +106,9 @@ const SkillsSettings: React.FC = () => {
     // Text search
     if (query.trim()) {
       const q = query.toLowerCase();
-      result = result.filter((e) => e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q));
+      result = result.filter(
+        (e) => (e.name ?? '').toLowerCase().includes(q) || (e.description ?? '').toLowerCase().includes(q)
+      );
     }
 
     // Source filter (empty = show all)
@@ -180,27 +208,23 @@ const SkillsSettings: React.FC = () => {
         </div>
       ) : null}
 
-      <div className='flex items-center gap-10px'>
+      <div className='flex items-center gap-10px flex-wrap'>
         <Input.Search
           placeholder={t('search.placeholder')}
           value={query}
           onChange={(v) => setQuery(v)}
-          style={{ flex: 1, maxWidth: 'unset' }}
+          style={isMobile ? { flex: '1 1 100%', maxWidth: 'unset' } : { flex: 1, maxWidth: 'unset' }}
           allowClear
         />
         <Button
           type='secondary'
-          icon={<Download size={14} />}
-          onClick={() => {
-            // TODO: B12 wiring - open the existing import flow (folder/git/zip/single-md
-            // already provided via ipcBridge.skills.import.*). The button is here so
-            // the page matches the mockup affordance; the modal is a future follow-up.
-            // eslint-disable-next-line no-alert
-            window.alert(
-              'Import flow is wired via IPC (folder / git / zip / single SKILL.md). The picker UI ships in the next pass.'
-            );
-          }}
+          icon={<RefreshCw size={14} />}
+          loading={scanningLibrary}
+          onClick={() => void handleScanLibrary()}
         >
+          {t('actions.scanLibrary', 'Scan library')}
+        </Button>
+        <Button type='secondary' icon={<Download size={14} />} onClick={() => setImportModalVisible(true)}>
           {t('actions.import', 'Import skills')}
         </Button>
         <Button type='primary' icon={<Sparkles size={14} />} onClick={() => setBuildModalVisible(true)} className=''>
@@ -253,8 +277,16 @@ const SkillsSettings: React.FC = () => {
         }}
       />
 
+      <ImportModal
+        visible={importModalVisible}
+        onClose={() => setImportModalVisible(false)}
+        onImported={() => void fetchData()}
+      />
+
       <div
-        className='skills-shell rd-12px overflow-hidden flex'
+        className={
+          isMobile ? 'skills-shell rd-12px overflow-hidden flex flex-col' : 'skills-shell rd-12px overflow-hidden flex'
+        }
         style={{
           background: 'var(--color-bg-2)',
           border: '1px solid var(--color-border-2)',

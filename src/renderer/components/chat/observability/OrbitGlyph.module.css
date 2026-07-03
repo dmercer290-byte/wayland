@@ -1,0 +1,90 @@
+/* Animated Wayland orbit "thinking" glyph. Orange brand stroke in both themes;
+   arcs sweep, electrons counter-rotate, nucleus breathes. */
+
+.orbit {
+  stroke: var(--brand);
+  display: inline-block;
+  vertical-align: middle;
+  flex: none;
+}
+
+/* CSS transforms on SVG sub-elements pivot around their own bounding box by
+   default; force the 24x24 view-box center so rotation/scale stay centered. */
+.arcs,
+.sat,
+.nucleus {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+}
+
+.arcs {
+  animation: spin 3.4s linear infinite;
+}
+
+/* Electrons ride a counter-rotating group so they read as orbiting points
+   while the arcs sweep the opposite way. */
+.sat {
+  animation: spin 3.4s linear infinite reverse;
+}
+
+.nucleus {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+/* Resting state shown after a turn completes: hold still, slightly dimmed. */
+.paused .arcs,
+.paused .sat,
+.paused .nucleus {
+  animation: none;
+}
+
+.paused .nucleus {
+  opacity: 1;
+}
+
+.paused {
+  opacity: 0.55;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arcs,
+  .sat,
+  .nucleus {
+    animation: none;
+  }
+
+  .orbit {
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 0.6;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}

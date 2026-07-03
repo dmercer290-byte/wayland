@@ -5,7 +5,9 @@ import type {
   UsageUpdate,
 } from '@agentclientprotocol/sdk';
 import * as path from 'node:path';
+import { resolveAcpSessionModeId } from '@/common/types/agentModes';
 import { AcpError } from '@process/acp/errors/AcpError';
+import { buildAcpSetupGuidance } from '@process/acp/errors/setupFailure';
 import type { ClientFactory, DisconnectInfo } from '@process/acp/infra/IAcpClient';
 import { noopMetrics, type AcpMetrics } from '@process/acp/metrics/AcpMetrics';
 import { ConfigTracker } from '@process/acp/session/ConfigTracker';
@@ -206,6 +208,19 @@ export class AcpSession {
         this.promptExecutor.setPending(content);
         this.lifecycle.resume();
         return;
+      case 'prompting':
+        // The agent is mid-turn. Queue the follow-up instead of rejecting it -
+        // `PromptExecutor.execute` flushes the pending prompt the moment the
+        // current turn finishes (status → active). This is what stops a fast
+        // second message from hitting a "Cannot send in prompting state" error.
+        this.promptExecutor.setPending(content);
+        return;
+      case 'starting':
+      case 'resuming':
+        // Session is spawning / reconnecting — queue the message so doStart /
+        // doResume flush it automatically when the session reaches 'active'.
+        this.promptExecutor.setPending(content);
+        return;
       default:
         throw new AcpError('INVALID_STATE', `Cannot send in ${this._status} state`);
     }
@@ -239,9 +254,14 @@ export class AcpSession {
     if (this._status === 'idle' || this._status === 'error') return;
     const { client, sessionId } = this.lifecycle;
     if (this._status === 'active' && client && sessionId) {
+      // Validate against the agent's advertised modes: backends like opencode
+      // have no `default` agent (their primary is `build`), so an unadvertised
+      // modeId is rejected with "Agent not found" and breaks the session (#298).
+      const { availableModes, currentModeId } = this.configTracker.modeSnapshot();
+      const resolved = resolveAcpSessionModeId(modeId, availableModes, currentModeId);
       client
-        .setMode(sessionId, modeId)
-        .then(() => this.configTracker.setCurrentMode(modeId))
+        .setMode(sessionId, resolved)
+        .then(() => this.configTracker.setCurrentMode(resolved))
         .then(() => this.callbacks.onModeUpdate(this.configTracker.modeSnapshot()))
         .catch((err) => console.warn('[AcpSession] setMode failed:', err));
     }
@@ -414,10 +434,19 @@ export class AcpSession {
   }
 
   enterError(message: string): void {
+    // If the backend failed because it's installed but missing a runtime extra
+    // (e.g. Hermes without the ACP adapter), rewrite the raw stderr into
+    // actionable install guidance with the correct command. Otherwise pass the
+    // original message through unchanged.
+    const displayMessage = buildAcpSetupGuidance(this.agentConfig.agentBackend, message) ?? message;
     this.promptExecutor.clearPending();
-    this.permissionResolver.rejectAll(new Error(message));
+    this.permissionResolver.rejectAll(new Error(displayMessage));
     this.promptExecutor.stopTimer();
+    // Emit the detailed error signal BEFORE flipping status to 'error'. A pending
+    // start op is rejected on the status change, and the reject wants the real
+    // reason (#483/#369): emitting the signal first lets AcpAgentV2 capture the
+    // message so the rejection carries it instead of a generic "failed to start".
+    this.callbacks.onSignal({ type: 'error', message: displayMessage, recoverable: false });
     this.setStatus('error');
-    this.callbacks.onSignal({ type: 'error', message, recoverable: false });
   }
 }

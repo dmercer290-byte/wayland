@@ -1,8 +1,10 @@
 {
-  "truncation.budgetExhausted.body": "Ответ был обрезан - модель исчерпала бюджет токенов до завершения. Попробуйте модель с большим резервом для рассуждений или упростите запрос.",
+  "truncation.budgetExhausted.body": "Этот ответ прервался, не завершившись. Нажмите «Продолжить», чтобы возобновить с того места, где он остановился — модель сохраняет уже выполненную работу.",
+  "truncation.budgetExhausted.action": "Продолжить",
   "fileChanges": "Изменения файлов",
   "fileChangesCount": "{{count}} изменений файлов",
   "conversationInProgress": "Диалог в процессе...",
+  "working": "Working...",
   "confirm": "Подтвердить",
   "canceledExecution": "Выполнение отменено",
   "openLinkFailed": "Не удалось открыть ссылку",
@@ -67,5 +69,12 @@
   },
   "atFile.hint": "Введите текст для поиска файлов",
   "atFile.menuLabel": "Упоминания файлов",
-  "atFile.loading": "Загрузка..."
+  "atFile.loading": "Загрузка...",
+  "slash.customBadge": "Custom",
+  "runaway": {
+    "title": "Stopped a runaway loop",
+    "repeatedReadBody": "This turn kept re-reading the same content ({{count}} times) without making progress, so it was stopped to avoid burning tokens. You can send a new message to continue.",
+    "failingCommandBody": "A command failed {{count}} times in a row, so this turn was stopped to avoid burning tokens retrying it. You can send a new message to continue.",
+    "dismiss": "Got it"
+  }
 }

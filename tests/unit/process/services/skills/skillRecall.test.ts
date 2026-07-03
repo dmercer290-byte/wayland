@@ -52,12 +52,17 @@ const QUERIES_PATH = path.join(LIBRARY_DIR, 'discovery-queries.json');
 // Gate
 // ---------------------------------------------------------------------------
 
-describe('BM25 recall gate (release gate)', () => {
+// This is a CPU-bound full-corpus gate (2105 docs x 2003 queries, ~16s on a
+// loaded CI runner) and it was the single biggest contributor to the unit
+// shard-1/4 imbalance (#358). It does not need to run on every PR shard — it
+// guards a release decision (whether BM25 recall is still good enough), not the
+// correctness of a changeset. It runs only when RUN_RELEASE_GATES=1, which the
+// nightly `release-gates.yml` workflow sets; PR shards skip it.
+const RUN_RELEASE_GATES = process.env.RUN_RELEASE_GATES === '1';
+
+describe.skipIf(!RUN_RELEASE_GATES)('BM25 recall gate (release gate)', () => {
   it('recall@20 >= 0.80 over the full discovery-queries corpus', async () => {
-    const [indexRaw, queriesRaw] = await Promise.all([
-      readFile(INDEX_PATH, 'utf-8'),
-      readFile(QUERIES_PATH, 'utf-8'),
-    ]);
+    const [indexRaw, queriesRaw] = await Promise.all([readFile(INDEX_PATH, 'utf-8'), readFile(QUERIES_PATH, 'utf-8')]);
 
     const entries = JSON.parse(indexRaw) as SkillIndexEntry[];
     const { queries } = JSON.parse(queriesRaw) as DiscoveryQueryFile;
@@ -91,5 +96,8 @@ describe('BM25 recall gate (release gate)', () => {
       `BM25 recall@20 = ${pct}% (${hits}/${evaluated}) - below the 80% gate. ` +
         `Consider improving tokenization or adding semantic embeddings.`
     ).toBeGreaterThanOrEqual(0.8);
-  }, 30_000); // Allow up to 30s for 2003 queries
+  }, 60_000); // CPU-bound BM25 gate: O(queryTerms x 2105 docs) over 2003 queries.
+  // ~15s on a fast dev box, but a loaded/slower CI runner can exceed the old 30s
+  // budget and spuriously "time out" (no async hang — pure compute). 60s gives 2x
+  // headroom without weakening the recall@20 >= 0.80 assertion.
 });

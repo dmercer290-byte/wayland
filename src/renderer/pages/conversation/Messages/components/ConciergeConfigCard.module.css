@@ -1,0 +1,85 @@
+.shell {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-2);
+  background-color: var(--color-bg-2);
+  max-width: 520px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-1);
+}
+
+.body {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary {
+  font-size: 13px;
+  color: var(--color-text-2);
+}
+
+.env {
+  font-family: var(--font-family-code, monospace);
+  font-size: 12px;
+  color: var(--color-text-3);
+  background-color: var(--color-fill-2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.rules {
+  font-size: 12px;
+  color: var(--color-text-3);
+  white-space: pre-wrap;
+}
+
+.secret {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.errorTag {
+  align-self: flex-start;
+}
+
+.pending {
+  border-color: var(--color-border-2);
+}
+
+.accepted {
+  border-color: rgb(var(--green-3));
+}
+
+.cancelled {
+  color: var(--color-text-3);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.errored {
+  border-color: rgb(var(--red-3));
+  color: var(--color-text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

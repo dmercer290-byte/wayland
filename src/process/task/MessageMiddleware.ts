@@ -10,6 +10,8 @@ import type { AgentBackend } from '@/common/types/acpTypes';
 import { uuid } from '@/common/utils';
 import { cronService } from '@process/services/cron/cronServiceSingleton';
 import { detectCronCommands, stripCronCommands, type CronCommand } from './CronCommandDetector';
+import { detectConciergeProposals, hasConciergeProposals, stripConciergeProposals } from './ConciergeProposeDetector';
+import type { ConciergeProposal } from '@/common/chat/conciergeConfig';
 import { addMessage } from '@process/utils/message';
 import { hasThinkTags, stripThinkTags } from './ThinkTagDetector';
 
@@ -76,6 +78,21 @@ export async function processAgentResponse(
 
     // Strip cron commands from display
     displayContent = stripCronCommands(displayContent);
+    needsDisplayMessage = true;
+  }
+
+  // Concierge Phase 2b - detect [CONCIERGE_PROPOSE] config-change blocks and
+  // render an inline confirmation card (concierge_propose message). No config
+  // is mutated here; the change applies only when the user accepts the card
+  // (conciergeConfigBridge.confirmProposal).
+  if (hasConciergeProposals(displayContent)) {
+    const conciergeProposals = detectConciergeProposals(displayContent);
+    if (conciergeProposals.length > 0) {
+      await handleConciergeProposals(conversationId, agentType, conciergeProposals);
+    }
+    // Always strip the raw block - even when it was malformed and produced no
+    // card - so the [CONCIERGE_PROPOSE] tag never leaks verbatim into chat.
+    displayContent = stripConciergeProposals(displayContent);
     needsDisplayMessage = true;
   }
 
@@ -182,8 +199,100 @@ export async function processCronInMessage(
     for (const sysMsg of result.systemResponses) {
       emitSystemResponse(sysMsg);
     }
+
+    // Concierge 2b leak fix: the manager already streamed + persisted the RAW
+    // turn text, so the [CONCIERGE_PROPOSE] block leaks verbatim into the chat
+    // bubble (above the confirmation card). processAgentResponse built a stripped
+    // displayMessage that was previously discarded; persist it over the raw row
+    // so the saved + reloaded message shows only the friendly prose. The card
+    // still renders from the separate concierge_propose message created above.
+    if (hasConciergeProposals(extractTextFromMessage(message))) {
+      await persistStrippedTurnText(conversationId, message, result.displayMessage);
+    }
   } catch {
     // Silently handle errors
+  }
+}
+
+/**
+ * Overwrite the persisted assistant text row with the cleaned (block-stripped)
+ * content. This is a REPLACE, not an append: the message queue (addOrUpdateMessage)
+ * only ever appends streaming text deltas by msg_id, so writing the cleaned full
+ * text through it would double the content. We go straight to the DB's
+ * getMessageByMsgId + updateMessage replace path (the same primitive the streaming
+ * buffer uses) to swap the stored content in place.
+ *
+ * Runs AFTER processAgentResponse (which persists + broadcasts the concierge card
+ * via addMessage → a synchronous queue flush), so the raw turn text is already
+ * fully written by the time we overwrite it; there are no further queued text
+ * writes for this msg_id to re-dirty the row.
+ *
+ * Best-effort: a failed cleanup must never break the agent turn.
+ */
+async function persistStrippedTurnText(
+  conversationId: string,
+  original: TMessage,
+  displayMessage: TMessage | undefined
+): Promise<void> {
+  if (!displayMessage) return;
+  const msgId = original.msg_id || original.id;
+  if (!msgId) return;
+  const cleaned = extractTextFromMessage(displayMessage);
+  if (typeof cleaned !== 'string') return;
+
+  try {
+    const { getDatabase } = await import('@process/services/database/export');
+    const db = await getDatabase();
+    const existing = db.getMessageByMsgId(conversationId, msgId, 'text');
+    if (!existing.success || !existing.data) return;
+    const row = existing.data;
+    const updated = {
+      ...row,
+      content: { ...(row.content as Record<string, unknown>), content: cleaned },
+    } as TMessage;
+    db.updateMessage(row.id, updated);
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Concierge Phase 2b - turn detected [CONCIERGE_PROPOSE] blocks into inline
+ * confirmation cards (concierge_propose messages). NO config is mutated here:
+ * the card is the consent surface, and the change applies only when the user
+ * accepts (conciergeConfigBridge.confirmProposal). The proposal carries no
+ * secret (provider keys are entered in the card), so it is safe to persist +
+ * broadcast.
+ */
+async function handleConciergeProposals(
+  conversationId: string,
+  agentType: AgentBackend,
+  proposals: ConciergeProposal[]
+): Promise<void> {
+  for (const proposal of proposals) {
+    try {
+      const proposalMsgId = uuid();
+      const proposalContent = { ...proposal, status: 'pending' as const, agentType };
+      const proposalMessage: TMessage = {
+        id: proposalMsgId,
+        msg_id: proposalMsgId,
+        conversation_id: conversationId,
+        type: 'concierge_propose',
+        position: 'left',
+        content: proposalContent,
+        createdAt: Date.now(),
+        status: 'finish',
+      };
+      await addMessage(conversationId, proposalMessage);
+      ipcBridge.conversation.responseStream.emit({
+        type: 'concierge_propose',
+        conversation_id: conversationId,
+        msg_id: proposalMsgId,
+        data: proposalContent,
+      });
+    } catch {
+      // Best-effort: a failed card creation must not break the agent turn.
+    }
   }
 }
 

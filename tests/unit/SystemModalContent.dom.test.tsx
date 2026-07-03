@@ -269,6 +269,31 @@ describe('SystemModalContent', () => {
     expect(screen.getByText('settings.autoPreviewOfficeFilesDesc')).toBeInTheDocument();
   });
 
+  it('renders the Concierge default-persona toggle and persists concierge.defaultPersona on change', async () => {
+    const { ConfigStorage } = await import('@/common/config/storage');
+
+    render(<SystemModalContent />);
+
+    await waitFor(() => {
+      expect(screen.getByText('concierge.settings.defaultPersona')).toBeInTheDocument();
+    });
+    expect(screen.getByText('concierge.settings.defaultPersonaDesc')).toBeInTheDocument();
+
+    // Defaults ON (config get → undefined ⇒ !== false). Toggling writes false.
+    const row = screen.getByText('concierge.settings.defaultPersona').closest('.flex-1')?.parentElement;
+    const toggle = row?.querySelector('button[role="switch"]');
+    expect(toggle).toBeTruthy();
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+    await act(async () => {
+      fireEvent.click(toggle!);
+    });
+
+    await waitFor(() => {
+      expect(ConfigStorage.set).toHaveBeenCalledWith('concierge.defaultPersona', false);
+    });
+  });
+
   it('should toggle start on boot when the switch is clicked', async () => {
     render(<SystemModalContent />);
 

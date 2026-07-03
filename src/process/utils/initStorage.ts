@@ -11,12 +11,14 @@ import { getPlatformServices } from '@/common/platform';
 import { application } from '@/common/adapter/ipcBridge';
 import type { TMessage } from '@/common/chat/chatLib';
 import { ASSISTANT_PRESETS } from '@/common/config/presets/assistantPresets';
+import { nativeConfigDir } from '@process/agent/wcore/profilePaths';
 import type {
   IChannelAssistantConfigRefer,
   IChatConversationRefer,
   IConfigStorageRefer,
   IEnvStorageRefer,
   IMcpServer,
+  IProvider,
   TChatConversation,
   TProviderWithModel,
 } from '@/common/config/storage';
@@ -33,18 +35,29 @@ import {
 } from './utils';
 import { writeFileAtomic } from './atomicWrite';
 import { getOsUserName } from './osUserName';
+import { resolveFluxImageDefault } from './fluxImageDefault';
+import { readConnectedFluxKey } from '../connectors/fluxKey';
 import { getDatabase } from '../services/database/export';
 import type { AcpBackendConfig } from '@/common/types/acpTypes';
 import { migrateFromElectronConfig, importConfigFromFile } from './configMigration';
 import {
+  BUILTIN_CONCIERGE_DIAG_ID,
+  BUILTIN_CONCIERGE_DIAG_NAME,
   BUILTIN_IMAGE_GEN_ID,
   BUILTIN_IMAGE_GEN_LEGACY_NAMES,
   BUILTIN_IMAGE_GEN_NAME,
+  BUILTIN_PLAYWRIGHT_BLOCKED_ORIGINS,
+  BUILTIN_PLAYWRIGHT_ID,
+  BUILTIN_PLAYWRIGHT_LIBRARY_ENTRY_ID,
+  BUILTIN_PLAYWRIGHT_NAME,
+  BUILTIN_PLAYWRIGHT_PACKAGE,
   BUILTIN_SEARCH_SKILLS_ID,
   BUILTIN_SEARCH_SKILLS_NAME,
 } from '../resources/builtinMcp/constants';
+import { resolveNpxPath } from './shellEnv';
+import { getPlaywrightBrowsersDir } from '../services/mcpServices/playwrightBrowsers';
 import { getMcpScriptPath, inspectMcpScripts } from './mcpScriptDir';
-import { getAppDataExtensionsDir, EXTENSION_MANIFEST_FILE } from '../extensions/constants';
+import { getBuiltinCatalogAssistants } from './builtinCatalog';
 // Platform and architecture types (moved from deleted updateConfig)
 type PlatformType = 'win32' | 'darwin' | 'linux';
 type ArchitectureType = 'x64' | 'arm64' | 'ia32' | 'arm';
@@ -66,48 +79,6 @@ const getHomePage = getConfigPath;
 
 const mkdirSync = (path: string) => {
   return _mkdirSync(path, { recursive: true });
-};
-
-/**
- * Sync bundled business-pack extensions into the app-data extensions dir so
- * ExtensionLoader discovers them via the 'appdata' scan source. Mirrors the
- * builtin-skills sync: app-managed, overwrite-on-update, copies only our own
- * per-pack subdirs so user-installed extensions in the same dir are untouched.
- * Packaged-only: dev uses WAYLAND_EXTENSIONS_PATH, not this copy.
- *
- * Source (packaged): <process.resourcesPath>/bundled-extensions  (extraResources)
- * Target:            getAppDataExtensionsDir() = <userData>/extensions
- */
-const initBundledExtensions = async (): Promise<void> => {
-  const platform = getPlatformServices().paths;
-  // Dev resolves extensions via WAYLAND_EXTENSIONS_PATH; only sync when packaged.
-  if (!platform.isPackaged()) return;
-
-  const sourceRoot = path.join(process.resourcesPath, 'bundled-extensions');
-  if (!existsSync(sourceRoot)) return;
-
-  const targetRoot = getAppDataExtensionsDir();
-  if (!existsSync(targetRoot)) {
-    mkdirSync(targetRoot);
-  }
-
-  try {
-    const packs = readdirSync(sourceRoot, { withFileTypes: true });
-    for (const pack of packs) {
-      if (!pack.isDirectory()) continue;
-      const src = path.join(sourceRoot, pack.name);
-      // Only sync trees that are real extensions.
-      if (!existsSync(path.join(src, EXTENSION_MANIFEST_FILE))) continue;
-      // Overwrite the app-managed pack dir on every launch so bundled updates
-      // ship with app updates. We copy ONLY our own per-pack subdirs, so any
-      // user-installed extension sibling in <userData>/extensions is untouched.
-      await copyDirectoryRecursively(src, path.join(targetRoot, pack.name), {
-        overwrite: true,
-      });
-    }
-  } catch (error) {
-    console.warn('[Wayland] Failed to sync bundled extensions:', error);
-  }
 };
 
 /**
@@ -146,7 +117,11 @@ const migrateLegacyData = async () => {
           try {
             await fs.rm(oldDir, { recursive: true });
           } catch (cleanupError) {
-            console.warn('[Wayland] Failed to clean up original directory, please delete manually:', oldDir, cleanupError);
+            console.warn(
+              '[Wayland] Failed to clean up original directory, please delete manually:',
+              oldDir,
+              cleanupError
+            );
           }
         }
       }
@@ -616,6 +591,8 @@ const getBuiltinAssistants = (): AcpBackendConfig[] => {
     // Read default enabled skills from preset config (excluding cron, which is builtin and auto-injected)
     const defaultEnabledSkills = preset.defaultEnabledSkills;
     const enabledByDefault =
+      preset.id === 'concierge' ||
+      preset.id === 'ignition' ||
       preset.id === 'word-creator' ||
       preset.id === 'ppt-creator' ||
       preset.id === 'excel-creator' ||
@@ -648,7 +625,11 @@ const getBuiltinAssistants = (): AcpBackendConfig[] => {
     });
   }
 
-  return assistants;
+  // Native built-in catalog (waylandteams: 28 specialists + 60 team launchers).
+  // Appended here so they merge into config.assistants through the same prune/
+  // update machinery as the ASSISTANT_PRESETS rows. They carry kind/teammates/
+  // rituals/standing/kickoffs so the renderer surfaces teams on /teams.
+  return [...assistants, ...getBuiltinCatalogAssistants()];
 };
 
 /**
@@ -732,6 +713,27 @@ const ensureBuiltinMcpServers = async (): Promise<void> => {
       return env;
     };
 
+    // Default the image MCP to Flux when Flux is connected and the user hasn't
+    // chosen an image model. Seeds only (never clobbers an explicit choice), so
+    // a connected-Flux user gets working image generation with zero setup.
+    let imageConfig = oldConfig;
+    let seededImageConfig = false;
+    if (!oldConfig || !oldConfig.useModel) {
+      try {
+        const fluxKey = await readConnectedFluxKey();
+        const providers = (await configFile.get('model.config').catch((): IProvider[] => [])) || [];
+        const seed = resolveFluxImageDefault({ current: oldConfig, providers, fluxKey });
+        if (seed) {
+          imageConfig = seed;
+          seededImageConfig = true;
+          await configFile.set('tools.imageGenerationModel', seed);
+          console.log('[Wayland] Defaulted image generation to Flux (connected, no model chosen)');
+        }
+      } catch (seedError) {
+        console.error('[Wayland] Flux image-default seeding failed (non-fatal):', seedError);
+      }
+    }
+
     const buildOriginalJson = (scriptPathValue: string, env: Record<string, string>) =>
       JSON.stringify(
         {
@@ -758,24 +760,29 @@ const ensureBuiltinMcpServers = async (): Promise<void> => {
         ((existing.transport.args || [])[0] !== scriptPath || needsNameMigration);
 
       const needsMigration = shouldEnable && !existing.enabled;
+      // When we just seeded a Flux image default, push its env onto the
+      // already-existing built-in server so the MCP picks up WAYLAND_IMG_* on
+      // this boot (the env is otherwise only built when the server is created).
+      const needsSeedEnv = seededImageConfig && existing.transport.type === 'stdio';
+      const needsEnvUpdate = needsMigration || needsSeedEnv;
 
-      if (needsNameMigration || needsPathUpdate || needsMigration) {
+      if (needsNameMigration || needsPathUpdate || needsEnvUpdate) {
         let updatedTransport: IMcpServer['transport'] = existing.transport;
 
         if (existing.transport.type === 'stdio') {
-          const mergedEnv = needsMigration
-            ? { ...existing.transport.env, ...buildEnvFromConfig(oldConfig) }
+          const mergedEnv = needsEnvUpdate
+            ? { ...existing.transport.env, ...buildEnvFromConfig(imageConfig) }
             : existing.transport.env;
           updatedTransport = {
             ...existing.transport,
             ...(needsPathUpdate && { args: [scriptPath] }),
-            ...(needsMigration && { env: mergedEnv }),
+            ...(needsEnvUpdate && { env: mergedEnv }),
           };
         }
 
         const newOriginalJson =
-          needsPathUpdate && updatedTransport.type === 'stdio'
-            ? buildOriginalJson(scriptPath, updatedTransport.env ?? {})
+          (needsPathUpdate || needsEnvUpdate) && updatedTransport.type === 'stdio'
+            ? buildOriginalJson(updatedTransport.args?.[0] ?? scriptPath, updatedTransport.env ?? {})
             : existing.originalJson;
 
         mcpServers[existingIdx] = {
@@ -790,7 +797,7 @@ const ensureBuiltinMcpServers = async (): Promise<void> => {
       }
     } else {
       // Create new built-in image gen server
-      const env = buildEnvFromConfig(oldConfig);
+      const env = buildEnvFromConfig(imageConfig);
       const newServer: IMcpServer = {
         id: BUILTIN_IMAGE_GEN_ID,
         name: BUILTIN_IMAGE_GEN_NAME,
@@ -874,6 +881,180 @@ const ensureBuiltinMcpServers = async (): Promise<void> => {
         createdAt: now,
         updatedAt: now,
         originalJson: buildSearchSkillsOriginalJson(searchSkillsScriptPath),
+      };
+      mcpServers.push(newServer);
+      changed = true;
+    }
+
+    // ── Built-in concierge-diag MCP server (Phase 2a) ────────────────────────
+    // Read-only diagnostics tool (`wayland_concierge_diag`) that inspects
+    // on-disk state to answer "why isn't X working?". The standalone stdio
+    // subprocess has no Electron APIs, so the on-disk sources it reads are
+    // injected as env vars — using the EXACT same path expressions the app uses
+    // to write them:
+    //   - WAYLAND_CONFIG_PATH → the config file `configFile` writes (mcp.config).
+    //   - WAYLAND_CRON_DB / WAYLAND_PROVIDER_DB / WAYLAND_WORKSPACE_DB → the main
+    //     `wayland.db` (resolveDbPath() = path.join(getDataPath(), 'wayland.db'));
+    //     CronStore, ProviderRepository, and projects/conversations all share it.
+    //   - WAYLAND_LOG_DIR → the electron-log directory (same one getSystemDir()
+    //     reports).
+    //   - WAYLAND_APP_CONFIG_DIR / WAYLAND_ENGINE_CONFIG_DIR → the two distinct
+    //     config locations, for the configPaths report.
+    // Enabled by default — the tool is silent unless invoked and never mutates.
+    const conciergeDiagScriptPath = getBuiltinMcpScriptPath('builtin-mcp-concierge-diag');
+    const conciergeDiagDbPath = path.join(getDataPath(), 'wayland.db');
+    const conciergeDiagEnv: Record<string, string> = {
+      WAYLAND_CONFIG_PATH: path.join(cacheDir, STORAGE_PATH.config),
+      WAYLAND_CRON_DB: conciergeDiagDbPath,
+      WAYLAND_PROVIDER_DB: conciergeDiagDbPath,
+      // projects + conversations live in the same shared wayland.db (workspace health).
+      WAYLAND_WORKSPACE_DB: conciergeDiagDbPath,
+      WAYLAND_LOG_DIR: getPlatformServices().paths.getLogsDir(),
+      // The two distinct config locations, for the configPaths report: the app
+      // settings dir, and the wayland-core engine config dir.
+      WAYLAND_APP_CONFIG_DIR: cacheDir,
+      WAYLAND_ENGINE_CONFIG_DIR: nativeConfigDir(),
+    };
+    const conciergeDiagExistingIdx = mcpServers.findIndex(
+      (s) => s.builtin === true && s.id === BUILTIN_CONCIERGE_DIAG_ID
+    );
+
+    const buildConciergeDiagOriginalJson = (scriptPathValue: string, envValue: Record<string, string>) =>
+      JSON.stringify(
+        {
+          [BUILTIN_CONCIERGE_DIAG_NAME]: {
+            command: 'node',
+            args: [scriptPathValue],
+            env: envValue,
+          },
+        },
+        null,
+        2
+      );
+
+    if (conciergeDiagExistingIdx >= 0) {
+      // Update command path / injected env in case app location or paths changed.
+      // Narrow the transport union once so `args`/`env` are accessible (SSE/HTTP
+      // variants carry neither).
+      const existing = mcpServers[conciergeDiagExistingIdx];
+      const existingTransport = existing.transport;
+      if (existingTransport.type === 'stdio' && existingTransport.command === 'node') {
+        const needsPathUpdate = (existingTransport.args || [])[0] !== conciergeDiagScriptPath;
+        const needsEnvUpdate = JSON.stringify(existingTransport.env ?? {}) !== JSON.stringify(conciergeDiagEnv);
+
+        if (needsPathUpdate || needsEnvUpdate) {
+          const updatedTransport: IMcpServer['transport'] = {
+            ...existingTransport,
+            args: [conciergeDiagScriptPath],
+            env: conciergeDiagEnv,
+          };
+          mcpServers[conciergeDiagExistingIdx] = {
+            ...existing,
+            transport: updatedTransport,
+            originalJson: buildConciergeDiagOriginalJson(conciergeDiagScriptPath, conciergeDiagEnv),
+            updatedAt: now,
+          };
+          changed = true;
+        }
+      }
+    } else {
+      const newServer: IMcpServer = {
+        id: BUILTIN_CONCIERGE_DIAG_ID,
+        name: BUILTIN_CONCIERGE_DIAG_NAME,
+        description:
+          'Built-in read-only diagnostics tool that inspects on-disk state (scheduled tasks, MCP servers, providers, recent errors) to explain why something is not working. Never mutates anything; secrets are masked.',
+        enabled: true,
+        builtin: true,
+        transport: {
+          type: 'stdio',
+          command: 'node',
+          args: [conciergeDiagScriptPath],
+          env: conciergeDiagEnv,
+        },
+        createdAt: now,
+        updatedAt: now,
+        originalJson: buildConciergeDiagOriginalJson(conciergeDiagScriptPath, conciergeDiagEnv),
+      };
+      mcpServers.push(newServer);
+      changed = true;
+    }
+
+    // ── Built-in Playwright MCP server (browser capability, #465) ────────────
+    // The upstream @playwright/mcp server, run through the bundled bun (no system
+    // Node). Seeded ENABLED so the agent has browser tools out of the box. The
+    // `npx`->bun swap is app-side only (McpProtocol), but the wcore engine spawns
+    // MCP servers straight from its config.toml — so we pre-resolve the bundled
+    // bun HERE (command + `x --bun @playwright/mcp@<ver>`), so every spawn path
+    // (wcore engine, ACP CLIs, app SDK) runs it identically with no system Node.
+    // Chromium is fetched on first use into PLAYWRIGHT_BROWSERS_PATH; see
+    // playwrightBrowsers.ensurePlaywrightChromium (triggered from McpService).
+    // SSRF guardrail (#465): block link-local + cloud-metadata origins.
+    const playwrightBun = resolveNpxPath(process.env);
+    const playwrightArgs = [
+      'x',
+      '--bun',
+      BUILTIN_PLAYWRIGHT_PACKAGE,
+      '--blocked-origins',
+      BUILTIN_PLAYWRIGHT_BLOCKED_ORIGINS,
+    ];
+    const playwrightEnv: Record<string, string> = { PLAYWRIGHT_BROWSERS_PATH: getPlaywrightBrowsersDir() };
+    const buildPlaywrightOriginalJson = (command: string, args: string[], env: Record<string, string>) =>
+      JSON.stringify({ [BUILTIN_PLAYWRIGHT_NAME]: { command, args, env } }, null, 2);
+    // Match ANY existing Playwright server, not just our builtin id: a user may
+    // already have one (catalog/manual install) whose sanitized name collides
+    // with ours — two servers sharing the wcore config.toml [mcp.servers."<name>"]
+    // key is a TOML collision. Detect by id / libraryEntryId / name / @playwright/mcp arg.
+    const looksLikePlaywright = (s: IMcpServer): boolean => {
+      if (s.id === BUILTIN_PLAYWRIGHT_ID) return true;
+      if (s.libraryEntryId === BUILTIN_PLAYWRIGHT_LIBRARY_ENTRY_ID) return true;
+      if (s.name === BUILTIN_PLAYWRIGHT_NAME) return true;
+      return (
+        s.transport.type === 'stdio' &&
+        (s.transport.args ?? []).some((a) => typeof a === 'string' && a.includes('@playwright/mcp'))
+      );
+    };
+    const playwrightExistingIdx = mcpServers.findIndex(looksLikePlaywright);
+
+    if (playwrightExistingIdx >= 0 && mcpServers[playwrightExistingIdx].id !== BUILTIN_PLAYWRIGHT_ID) {
+      // ADOPT a pre-existing user/manual Playwright install: do NOT seed a second
+      // server (would collide on the wcore TOML key). The user owns that server's
+      // enabled state and args; we leave it untouched.
+      console.log('[Wayland] Adopting existing Playwright MCP server; skipping builtin seed');
+    } else if (playwrightExistingIdx >= 0) {
+      // Our builtin exists → refresh command/args/env in case the bundled bun
+      // path, managed browsers dir, or blocked-origins changed across an app
+      // update. Never flip `enabled` — respect a user who turned browsing off.
+      const existing = mcpServers[playwrightExistingIdx];
+      const t = existing.transport;
+      if (t.type === 'stdio') {
+        const needsUpdate =
+          t.command !== playwrightBun ||
+          JSON.stringify(t.args ?? []) !== JSON.stringify(playwrightArgs) ||
+          JSON.stringify(t.env ?? {}) !== JSON.stringify(playwrightEnv);
+        if (needsUpdate) {
+          mcpServers[playwrightExistingIdx] = {
+            ...existing,
+            transport: { ...t, command: playwrightBun, args: playwrightArgs, env: playwrightEnv },
+            originalJson: buildPlaywrightOriginalJson(playwrightBun, playwrightArgs, playwrightEnv),
+            updatedAt: now,
+          };
+          changed = true;
+        }
+      }
+    } else {
+      const newServer: IMcpServer = {
+        id: BUILTIN_PLAYWRIGHT_ID,
+        name: BUILTIN_PLAYWRIGHT_NAME,
+        description:
+          'Headless browser automation (navigate, click, type, screenshot) powered by Playwright. Chromium is downloaded on first use.',
+        enabled: true,
+        builtin: true,
+        source: 'library',
+        libraryEntryId: BUILTIN_PLAYWRIGHT_LIBRARY_ENTRY_ID,
+        transport: { type: 'stdio', command: playwrightBun, args: playwrightArgs, env: playwrightEnv },
+        createdAt: now,
+        updatedAt: now,
+        originalJson: buildPlaywrightOriginalJson(playwrightBun, playwrightArgs, playwrightEnv),
       };
       mcpServers.push(newServer);
       changed = true;
@@ -1019,9 +1200,10 @@ const initStorage = async () => {
   await ensureBuiltinMcpServers();
   mark('4.2 builtinMcpServers');
 
-  // 4.3 Sync bundled business-pack extensions into <userData>/extensions/ so
-  // ExtensionLoader (appdata scan source) finds them before the renderer asks.
-  await initBundledExtensions();
+  // 4.3 Bundled business-pack extensions are no longer copied out to
+  // <userData>/extensions. ExtensionLoader reads them in place from inside the
+  // app (asar) via the 'bundled' scan source — loose .md skill bodies tripped
+  // AV content heuristics (#275). See getBundledExtensionsDir().
   mark('4.3 bundledExtensions');
 
   // 5. Initialize builtin assistants

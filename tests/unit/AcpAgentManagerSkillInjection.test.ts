@@ -131,6 +131,8 @@ vi.mock('@process/utils/initAgent', () => ({
 vi.mock('@process/task/agentUtils', () => ({
   prepareFirstMessageWithSkillsIndex: mockPrepareFirstMessage,
   buildSystemInstructions: vi.fn(async () => undefined),
+  buildTurnSkillContext: vi.fn(async () => ({ advert: '', autoLoaded: [] })),
+  resolveCapabilitiesManifest: vi.fn(async () => undefined),
 }));
 
 // Mock AcpAgent class

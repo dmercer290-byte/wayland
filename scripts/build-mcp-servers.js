@@ -58,31 +58,47 @@ async function bundleWaylandMcp(pkgName, outName, opts = {}) {
   const src = candidates.find((p) => fs.existsSync(path.join(p, 'src', 'index.ts')));
   if (!src) {
     console.warn(
-      `[build-mcp-servers] @wayland/${pkgName} source not found in any of: ${candidates.join(', ')} - skipping.`,
+      `[build-mcp-servers] @wayland/${pkgName} source not found in any of: ${candidates.join(', ')} - skipping.`
     );
     return;
   }
 
-  await esbuild.build({
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    external: ['electron'],
-    loader: { '.wasm': 'empty' },
-    entryPoints: [path.join(src, 'src', 'index.ts')],
-    outfile: path.join(OUT_MAIN, outName),
-    nodePaths: [path.join(src, 'node_modules')],
-    // ESM-format bundles need a working `require` for inner CJS deps that
-    // dynamically pull node builtins (e.g. rss-parser → http). Without the
-    // banner, esbuild emits a stub that throws "Dynamic require not
-    // supported." `createRequire` makes those require() calls resolve at
-    // runtime against Node's real module system.
-    banner: {
-      js:
-        "import { createRequire as __wayland_createRequire } from 'module';\n" +
-        'const require = __wayland_createRequire(import.meta.url);',
-    },
-  });
+  // These sibling packages are OPTIONAL ship-with-installer extras (already
+  // skipped when their source is absent). A bundle failure of one - e.g. a
+  // transitive dep whose nested node_modules copy is incomplete on a given
+  // runner (an @opentelemetry/core ESM submodule failed to resolve on
+  // windows-x64) - must NOT take the entire app release down with it. Skip the
+  // one server loudly and let the core builtins + the other extras ship. The
+  // first-party core servers in main() still hard-fail (they must build
+  // everywhere); only these optional extras degrade to a skip.
+  try {
+    await esbuild.build({
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      external: ['electron'],
+      loader: { '.wasm': 'empty' },
+      entryPoints: [path.join(src, 'src', 'index.ts')],
+      outfile: path.join(OUT_MAIN, outName),
+      nodePaths: [path.join(src, 'node_modules')],
+      // ESM-format bundles need a working `require` for inner CJS deps that
+      // dynamically pull node builtins (e.g. rss-parser → http). Without the
+      // banner, esbuild emits a stub that throws "Dynamic require not
+      // supported." `createRequire` makes those require() calls resolve at
+      // runtime against Node's real module system.
+      banner: {
+        js:
+          "import { createRequire as __wayland_createRequire } from 'module';\n" +
+          'const require = __wayland_createRequire(import.meta.url);',
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `::warning::[build-mcp-servers] optional @wayland/${pkgName} failed to bundle and was SKIPPED (the builtin will be unavailable in this build): ${message.split('\n')[0]}`
+    );
+    return;
+  }
 
   if (opts.onSuccess) await opts.onSuccess(src);
 }
@@ -98,6 +114,20 @@ async function main() {
       ...SHARED_OPTIONS,
       entryPoints: [path.join(ROOT, 'src/process/resources/builtinMcp/searchSkillsServerEntry.ts')],
       outfile: path.join(ROOT, 'out/main/builtin-mcp-search-skills.js'),
+    }),
+    esbuild.build({
+      ...SHARED_OPTIONS,
+      // `better-sqlite3` is a NATIVE module. esbuild can inline its JS but NOT
+      // its `.node` binding; the inlined `bindings` loader then resolves
+      // relative to out/main (which has no build/Release) and throws
+      // "Could not locate the bindings file". Unlike the other stdio servers
+      // (which transitively reference the driver but never open a DB), the diag
+      // server ACTUALLY opens SQLite, so it must keep better-sqlite3 as an
+      // external require() resolved at runtime from the (asarUnpacked)
+      // node_modules - exactly how the Electron main process loads it.
+      external: [...SHARED_OPTIONS.external, 'better-sqlite3'],
+      entryPoints: [path.join(ROOT, 'src/process/resources/builtinMcp/conciergeDiagServerEntry.ts')],
+      outfile: path.join(ROOT, 'out/main/builtin-mcp-concierge-diag.js'),
     }),
     esbuild.build({
       ...SHARED_OPTIONS,

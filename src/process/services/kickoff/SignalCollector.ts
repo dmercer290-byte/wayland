@@ -8,6 +8,8 @@ import type { IConversationRepository } from '@process/services/database/IConver
 import type { CronService } from '@process/services/cron/CronService';
 import type { ITeamCrudRepository } from '@process/team/repository/ITeamRepository';
 import { ExtensionRegistry } from '@process/extensions/ExtensionRegistry';
+import { getBuiltinCatalogAssistants } from '@process/utils/builtinCatalog';
+import { ASSISTANT_PRESETS } from '@/common/config/presets/assistantPresets';
 import { getInstallUuid } from './installUuid';
 import { timeBucketFor } from './seededShuffle';
 import { RITUAL_RECENT_WINDOW_MS, type KickoffSignals } from './types';
@@ -37,9 +39,7 @@ export class SignalCollector {
     const timeBucket = timeBucketFor(now);
 
     const [recentConvs, ritualFired] = await Promise.all([
-      this.collectRecentConversations(assistantId).catch(
-        (): KickoffSignals['assistantRecentConversations'] => []
-      ),
+      this.collectRecentConversations(assistantId).catch((): KickoffSignals['assistantRecentConversations'] => []),
       this.detectRecentRitualOutput(assistantId, now).catch((): boolean => false),
     ]);
 
@@ -52,7 +52,9 @@ export class SignalCollector {
     };
   }
 
-  private async collectRecentConversations(assistantId: string): Promise<KickoffSignals['assistantRecentConversations']> {
+  private async collectRecentConversations(
+    assistantId: string
+  ): Promise<KickoffSignals['assistantRecentConversations']> {
     // v0.4.7.1 (ENGINE-3) - repo-level filter on `presetAssistantId` so the
     // 5-conv slice that follows isn't silently truncated by power users with
     // 50+ recent chats across all assistants. Try both prefix forms because
@@ -148,9 +150,7 @@ export class SignalCollector {
       if (!leader?.conversationId) continue;
       const jobs = await this.cronService.listJobsByConversation(leader.conversationId);
       const ritualJobs = jobs.filter(
-        (j) =>
-          j.metadata.createdBy === 'agent' &&
-          j.metadata.agentConfig?.configOptions?.kind === 'ritual'
+        (j) => j.metadata.createdBy === 'agent' && j.metadata.agentConfig?.configOptions?.kind === 'ritual'
       );
       for (const job of ritualJobs) {
         const lastRun = job.state.lastRunAtMs;
@@ -194,14 +194,51 @@ export function findAssistantInRegistry(assistantId: string): Record<string, unk
         matches.push(a);
       }
     }
-    if (matches.length === 0) return null;
     if (matches.length > 1) {
       console.warn(
         `[Kickoff] findAssistantInRegistry: ambiguous match for "${assistantId}" (${matches.length} hits); returning null`
       );
       return null;
     }
-    return matches[0]!;
+    if (matches.length === 1) return matches[0]!;
+
+    // #375 - the native built-in catalog (copy/research/cowork/... with their
+    // `prompts` + `kickoffs`) is NOT in ExtensionRegistry; it ships via
+    // getBuiltinCatalogAssistants() and merges into config.assistants. Without
+    // this fallback, suggestN returned 'unknown-assistant' for EVERY built-in
+    // assistant and the per-assistant suggested-prompts grid never rendered.
+    const catalog = getBuiltinCatalogAssistants();
+    const catMatches = catalog.filter((a) => {
+      const id = a.id;
+      return typeof id === 'string' && (id === assistantId || id === unprefixed || stripIdPrefix(id) === unprefixed);
+    });
+    if (catMatches.length === 1) return catMatches[0] as unknown as Record<string, unknown>;
+    if (catMatches.length > 1) {
+      console.warn(
+        `[Kickoff] findAssistantInRegistry: ambiguous catalog match for "${assistantId}" (${catMatches.length} hits); returning null`
+      );
+      return null;
+    }
+
+    // #375 follow-up - ASSISTANT_PRESETS (concierge, cowork, word-creator, ...)
+    // are seeded into config.assistants by initStorage, NOT contributed to
+    // ExtensionRegistry and NOT in the builtin catalog. Without this fallback
+    // suggestN returned 'unknown-assistant' for every preset assistant, so the
+    // Concierge/Cowork detail views opened with no suggested-prompt cards. The
+    // preset carries `promptsI18n`, which suggestN's readPromptsFallback renders
+    // as the grid - same surface every other assistant shows.
+    const presetMatches = ASSISTANT_PRESETS.filter((p) => {
+      const id = p.id;
+      return typeof id === 'string' && (id === assistantId || id === unprefixed || stripIdPrefix(id) === unprefixed);
+    });
+    if (presetMatches.length === 1) return presetMatches[0]! as unknown as Record<string, unknown>;
+    if (presetMatches.length > 1) {
+      console.warn(
+        `[Kickoff] findAssistantInRegistry: ambiguous preset match for "${assistantId}" (${presetMatches.length} hits); returning null`
+      );
+      return null;
+    }
+    return null;
   } catch {
     return null;
   }

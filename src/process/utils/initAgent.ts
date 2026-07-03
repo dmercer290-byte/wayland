@@ -17,6 +17,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getSkillsDir, getBuiltinSkillsCopyDir, getAutoSkillsDir, getSystemDir, ProcessConfig } from './initStorage';
 import { computeOpenClawIdentityHash } from './openclawUtils';
+import { writeWorkspaceGitignore } from './workspaceGitignore';
 
 /**
  * Minimal skills.preferences shape used by setupAssistantWorkspace.
@@ -51,7 +52,10 @@ export type WorkspaceSkillEntry = {
  * symlinked regardless of any other setting (B8 quarantines them physically;
  * this is the second filter).
  *
- * Only runs for temp workspaces (not user-specified) to avoid polluting user project dirs.
+ * Invoked (via setupWorkspaceSkills) for temp workspaces and for project
+ * workspaces (#455); a non-project user-picked custom workspace is left alone.
+ * For project workspaces a managed `.gitignore` keeps these dot-dirs out of the
+ * user's git, so skills resolve without polluting the folder.
  *
  * Note: Rules/personality are injected via system prompt, NOT written to context files
  */
@@ -202,6 +206,28 @@ export async function setupAssistantWorkspace(
 }
 
 /**
+ * Decide whether to lay down native skill symlinks for a workspace, and keep the
+ * user's folder tidy when we do (#455 scope 4).
+ *
+ * - Temp workspaces (the app-created `*-temp-*` dirs): always set up skills.
+ * - Project workspaces (managed or user-picked, identified by `projectId`): set
+ *   up skills too — a project chat needs them to resolve — and write a managed
+ *   `.gitignore` so the skill dot-dirs stay out of the user's git.
+ * - A non-project custom workspace the user picked for a one-off chat is left
+ *   untouched (never pollute a dir the app didn't create for a project).
+ */
+async function setupWorkspaceSkills(
+  workspace: string,
+  customWorkspace: boolean,
+  isProjectWorkspace: boolean,
+  options: Parameters<typeof setupAssistantWorkspace>[1]
+): Promise<void> {
+  if (customWorkspace && !isProjectWorkspace) return;
+  await setupAssistantWorkspace(workspace, options);
+  if (isProjectWorkspace) await writeWorkspaceGitignore(workspace);
+}
+
+/**
  * Create workspace directory (without copying files)
  *
  * Note: File copying is handled by copyFilesToDirectory in sendMessage
@@ -241,7 +267,8 @@ export const createGeminiAgent = async (
   sessionMode?: string,
   isHealthCheck?: boolean,
   extraSkillPaths?: string[],
-  excludeBuiltinSkills?: string[]
+  excludeBuiltinSkills?: string[],
+  projectId?: string
 ): Promise<TChatConversation> => {
   const { workspace: newWorkspace, customWorkspace: finalCustomWorkspace } = await buildWorkspaceWidthFiles(
     `gemini-temp-${Date.now()}`,
@@ -250,15 +277,13 @@ export const createGeminiAgent = async (
     customWorkspace
   );
 
-  // Set up skill symlinks for native SkillManager discovery
-  if (!finalCustomWorkspace) {
-    await setupAssistantWorkspace(newWorkspace, {
-      agentType: 'gemini',
-      enabledSkills,
-      extraSkillPaths,
-      excludeBuiltinSkills,
-    });
-  }
+  // Set up skill symlinks for native SkillManager discovery (temp + project ws).
+  await setupWorkspaceSkills(newWorkspace, finalCustomWorkspace, !!projectId, {
+    agentType: 'gemini',
+    enabledSkills,
+    extraSkillPaths,
+    excludeBuiltinSkills,
+  });
 
   return {
     type: 'gemini',
@@ -298,15 +323,13 @@ export const createAcpAgent = async (options: ICreateConversationParams): Promis
     extra.customWorkspace
   );
 
-  // Set up skill symlinks for temp workspace (native discovery)
-  if (!customWorkspace) {
-    await setupAssistantWorkspace(workspace, {
-      backend: extra.backend,
-      enabledSkills: extra.enabledSkills,
-      extraSkillPaths: extra.extraSkillPaths,
-      excludeBuiltinSkills: extra.excludeBuiltinSkills,
-    });
-  }
+  // Set up skill symlinks for temp + project workspaces (native discovery).
+  await setupWorkspaceSkills(workspace, customWorkspace, !!extra.projectId, {
+    backend: extra.backend,
+    enabledSkills: extra.enabledSkills,
+    extraSkillPaths: extra.extraSkillPaths,
+    excludeBuiltinSkills: extra.excludeBuiltinSkills,
+  });
 
   return {
     type: 'acp',
@@ -349,15 +372,13 @@ export const createNanobotAgent = async (options: ICreateConversationParams): Pr
     extra.customWorkspace
   );
 
-  // Set up skill symlinks for temp workspace
-  if (!customWorkspace) {
-    await setupAssistantWorkspace(workspace, {
-      agentType: 'nanobot',
-      enabledSkills: extra.enabledSkills,
-      extraSkillPaths: extra.extraSkillPaths,
-      excludeBuiltinSkills: extra.excludeBuiltinSkills,
-    });
-  }
+  // Set up skill symlinks for temp + project workspaces
+  await setupWorkspaceSkills(workspace, customWorkspace, !!extra.projectId, {
+    agentType: 'nanobot',
+    enabledSkills: extra.enabledSkills,
+    extraSkillPaths: extra.extraSkillPaths,
+    excludeBuiltinSkills: extra.excludeBuiltinSkills,
+  });
 
   return {
     type: 'nanobot',
@@ -383,13 +404,11 @@ export const createRemoteAgent = async (options: ICreateConversationParams): Pro
     extra.customWorkspace
   );
 
-  if (!customWorkspace) {
-    await setupAssistantWorkspace(workspace, {
-      enabledSkills: extra.enabledSkills,
-      extraSkillPaths: extra.extraSkillPaths,
-      excludeBuiltinSkills: extra.excludeBuiltinSkills,
-    });
-  }
+  await setupWorkspaceSkills(workspace, customWorkspace, !!extra.projectId, {
+    enabledSkills: extra.enabledSkills,
+    extraSkillPaths: extra.extraSkillPaths,
+    excludeBuiltinSkills: extra.excludeBuiltinSkills,
+  });
 
   return {
     type: 'remote',
@@ -419,15 +438,14 @@ export const createWCoreAgent = async (options: ICreateConversationParams): Prom
   // Set up skill symlinks for native discovery by wayland-core.
   // The engine looks in `.wayland-core/skills/` (engine paths.rs:46);
   // the 'wcore' agentType key is mapped to that directory in NON_ACP_SKILLS_DIRS
-  // so the symlinks land where the engine reads.
-  if (!customWorkspace) {
-    await setupAssistantWorkspace(workspace, {
-      agentType: 'wcore',
-      enabledSkills: extra.enabledSkills,
-      extraSkillPaths: extra.extraSkillPaths,
-      excludeBuiltinSkills: extra.excludeBuiltinSkills,
-    });
-  }
+  // so the symlinks land where the engine reads. Project workspaces (#455) get
+  // them too — with a managed .gitignore — so project chats can resolve skills.
+  await setupWorkspaceSkills(workspace, customWorkspace, !!extra.projectId, {
+    agentType: 'wcore',
+    enabledSkills: extra.enabledSkills,
+    extraSkillPaths: extra.extraSkillPaths,
+    excludeBuiltinSkills: extra.excludeBuiltinSkills,
+  });
 
   return {
     // 'wcore' is the canonical conversation type.
@@ -458,14 +476,12 @@ export const createOpenClawAgent = async (options: ICreateConversationParams): P
     extra.customWorkspace
   );
 
-  // Set up skill symlinks for temp workspace
-  if (!customWorkspace) {
-    await setupAssistantWorkspace(workspace, {
-      enabledSkills: extra.enabledSkills,
-      extraSkillPaths: extra.extraSkillPaths,
-      excludeBuiltinSkills: extra.excludeBuiltinSkills,
-    });
-  }
+  // Set up skill symlinks for temp + project workspaces
+  await setupWorkspaceSkills(workspace, customWorkspace, !!extra.projectId, {
+    enabledSkills: extra.enabledSkills,
+    extraSkillPaths: extra.extraSkillPaths,
+    excludeBuiltinSkills: extra.excludeBuiltinSkills,
+  });
 
   const expectedIdentityHash = await computeOpenClawIdentityHash(workspace);
   return {

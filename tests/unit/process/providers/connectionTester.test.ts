@@ -30,6 +30,23 @@ afterEach(() => {
 describe('ConnectionTester', () => {
   const tester = new ConnectionTester();
 
+  // fetchWithRetry does 3 bounded attempts with a 400ms + ~800ms setTimeout
+  // backoff between them, so retryable-error cases (network / abort / 429 / 5xx)
+  // otherwise wait the real ~1.2s+ — a top contributor to the shard-1/4
+  // imbalance (#358). Drive fake timers past the backoff instead. 3000ms covers
+  // the jittered backoffs and stays under the 15s per-attempt abort timeout, so
+  // those abort timers never fire.
+  async function testWithRetries(...args: Parameters<ConnectionTester['test']>): ReturnType<ConnectionTester['test']> {
+    vi.useFakeTimers();
+    try {
+      const p = tester.test(...args);
+      await vi.advanceTimersByTimeAsync(3_000);
+      return await p;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
   it('returns ok for a successful minimal completion (OpenAI)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ choices: [{ message: { content: 'hi' } }] }));
     vi.stubGlobal('fetch', fetchMock);
@@ -65,6 +82,23 @@ describe('ConnectionTester', () => {
     expect(Array.isArray(payload.messages)).toBe(true);
   });
 
+  // A Flux key wired as `openai` + OPENAI_BASE_URL=https://api.fluxrouter.ai/v1
+  // is scoped to the gateway's own models, so the canonical `gpt-4o-mini`
+  // inference probe against api.openai.com 401s. With a custom base URL the
+  // probe must instead GET <base>/models on the gateway host (auth-only check).
+  it('probes the custom base /models endpoint, not the canonical host, when a base URL is given', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ data: [{ id: 'flux-auto' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('openai', { key: 'sk-flux-test' }, 'https://api.fluxrouter.ai/v1');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.fluxrouter.ai/v1/models');
+    expect(url).not.toContain('api.openai.com');
+    expect(init.method).toBe('GET');
+    expect(result).toEqual({ ok: true });
+  });
+
   it('maps a 401 to unauthorized', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ error: 'bad key' }, 401)));
     const result = await tester.test('openai', { key: 'bad' });
@@ -88,7 +122,7 @@ describe('ConnectionTester', () => {
       'fetch',
       vi.fn().mockResolvedValue(response({ error: { message: 'You exceeded your current quota' } }, 429))
     );
-    const result = await tester.test('openai', { key: 'sk-test' });
+    const result = await testWithRetries('openai', { key: 'sk-test' });
     expect(result).toEqual({ ok: false, error: 'no-credit' });
   });
 
@@ -103,19 +137,19 @@ describe('ConnectionTester', () => {
 
   it('maps a network throw to offline', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
-    const result = await tester.test('openai', { key: 'sk-test' });
+    const result = await testWithRetries('openai', { key: 'sk-test' });
     expect(result).toEqual({ ok: false, error: 'offline' });
   });
 
   it('maps an abort/timeout to offline', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' })));
-    const result = await tester.test('openai', { key: 'sk-test' });
+    const result = await testWithRetries('openai', { key: 'sk-test' });
     expect(result).toEqual({ ok: false, error: 'offline' });
   });
 
   it('maps an unclassifiable 500 to unknown', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ error: 'server error' }, 500)));
-    const result = await tester.test('openai', { key: 'sk-test' });
+    const result = await testWithRetries('openai', { key: 'sk-test' });
     expect(result).toEqual({ ok: false, error: 'unknown' });
   });
 
@@ -214,6 +248,34 @@ describe('ConnectionTester', () => {
     expect(url).toContain('/models');
   });
 
+  it('runs a real inference probe for NVIDIA NIM, not a weak /v1/models check (issue #45)', async () => {
+    // Regression for #45: NVIDIA answers 200 on /v1/models even for a bad token.
+    // With a NIM test model, connect must POST a real completion to
+    // /v1/chat/completions so an invalid key fails instead of false-validating.
+    const fetchMock = vi.fn().mockResolvedValue(response({ choices: [{ message: { content: 'hi' } }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('nvidia', { key: 'nvapi-good' });
+    expect(result).toEqual({ ok: true });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('integrate.api.nvidia.com');
+    expect(url).toContain('chat/completions');
+    expect(url).not.toContain('/v1/models');
+    expect(init.method).toBe('POST');
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer nvapi-good');
+  });
+
+  it('reports unauthorized for a bad NVIDIA key instead of false-validating (issue #45)', async () => {
+    // The core bug: a bad NVIDIA token used to 200 on /v1/models. The inference
+    // probe makes the same bad token surface its real 401 as `unauthorized`.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ error: 'invalid api key' }, 401)));
+
+    const result = await tester.test('nvidia', { key: 'nvapi-bad' });
+    expect(result).toEqual({ ok: false, error: 'unauthorized' });
+  });
+
   it('returns unknown for a provider with neither a test model nor a models endpoint', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -232,8 +294,104 @@ describe('ConnectionTester', () => {
         throw new Error('sync explosion');
       })
     );
-    const result = await tester.test('openai', { key: 'sk-test' });
+    const result = await testWithRetries('openai', { key: 'sk-test' });
     expect(result.ok).toBe(false);
     expect(result.error).toBe('offline');
+  });
+
+  // ─── #339: custom OpenAI-compatible base with no /models listing (Cloudflare) ──
+  // Cloudflare Workers AI exposes /chat/completions + /embeddings but NO /models,
+  // so the happy-path /models probe 404s even with a valid key. The tester must
+  // fall back to an auth-only /chat/completions probe before declaring failure.
+  const CF_BASE = 'https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1';
+
+  it('connects a custom base whose /models 404s but whose /chat/completions authenticates (#339)', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        String(url).includes('/models')
+          ? response('no route for that URI', 404)
+          : response({ choices: [{ message: { content: 'hi' } }] }, 200)
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('openai-compatible', { key: 'cf-token' }, CF_BASE);
+    expect(result).toEqual({ ok: true });
+
+    // /models tried first (happy path), then the /chat/completions fallback POST.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [modelsUrl] = fetchMock.mock.calls[0] as [string];
+    const [chatUrl, chatInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(modelsUrl).toBe(`${CF_BASE}/models`);
+    expect(chatUrl).toBe(`${CF_BASE}/chat/completions`);
+    expect(chatInit.method).toBe('POST');
+  });
+
+  it('connects when the chat fallback rejects the placeholder model (auth proven past the model layer, #339)', async () => {
+    // The gateway authenticates the key, then 404s our deliberately-unknown probe
+    // model. A model-level rejection proves auth - the connect succeeds (degraded:
+    // the user supplies a real model id when adding the provider).
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        String(url).includes('/models')
+          ? response('not found', 404)
+          : response({ error: { message: 'model wayland-connectivity-probe not found' } }, 404)
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('openai-compatible', { key: 'cf-token' }, CF_BASE);
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the chat probe when /models returns an empty list (#339)', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        String(url).includes('/models')
+          ? response({ data: [] }, 200)
+          : response({ choices: [{ message: { content: 'hi' } }] }, 200)
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('openai-compatible', { key: 'cf-token' }, CF_BASE);
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT run the chat fallback when /models is a real auth failure (401) (#339)', async () => {
+    // A 401 from /models is a bad key - it must surface as unauthorized, never be
+    // rescued by the chat fallback.
+    const fetchMock = vi.fn().mockResolvedValue(response({ error: 'invalid token' }, 401));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('openai-compatible', { key: 'bad-token' }, CF_BASE);
+    expect(result).toEqual({ ok: false, error: 'unauthorized' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports unauthorized when the chat fallback itself rejects the key (#339)', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        String(url).includes('/models') ? response('not found', 404) : response({ error: 'invalid token' }, 401)
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('openai-compatible', { key: 'bad-token' }, CF_BASE);
+    expect(result).toEqual({ ok: false, error: 'unauthorized' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('still fails for a wrong base URL where neither /models nor /chat/completions exists (#339)', async () => {
+    // A bare 404 on both endpoints (no model signal) means the base URL is wrong -
+    // the fallback must NOT false-positive this into a successful connect.
+    const fetchMock = vi.fn().mockResolvedValue(response('not found', 404));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await tester.test('openai-compatible', { key: 'cf-token' }, CF_BASE);
+    expect(result.ok).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

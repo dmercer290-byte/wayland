@@ -57,6 +57,12 @@ vi.mock('react-i18next', () => ({
 // modelRegistry IPC surface (consumed by useModelRegistry + BrowseModal).
 const mockList = vi.fn();
 const mockConnect = vi.fn();
+// The single-key connect now routes through the parent's headless-aware
+// `connectKey(providerId, key, baseUrl?)` prop (#71); the cloud form still calls
+// the `connect` IPC directly. BrowseModal's contract is to invoke `connectKey`,
+// so the single-key tests assert against this mock; the parent owns the
+// desktop-vs-WebUI routing and is covered separately.
+const mockConnectKey = vi.fn();
 
 vi.mock('../../../src/common/adapter/ipcBridge', () => ({
   modelRegistry: {
@@ -99,13 +105,15 @@ const connectedProvider: IModelRegistryProviderView = {
 beforeEach(() => {
   mockList.mockReset().mockResolvedValue([]);
   mockConnect.mockReset().mockResolvedValue({ ok: true });
+  mockConnectKey.mockReset().mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
-const renderModal = (onClose: () => void = vi.fn()) => render(<BrowseModal visible onClose={onClose} />);
+const renderModal = (onClose: () => void = vi.fn()) =>
+  render(<BrowseModal visible onClose={onClose} connectKey={mockConnectKey} />);
 
 /** All provider-tile elements in DOM order. */
 const tiles = () => Array.from(document.querySelectorAll('[data-provider]'));
@@ -118,15 +126,41 @@ describe('BrowseModal', () => {
   it('renders the grouped provider grid', async () => {
     renderModal();
 
-    // Every group label renders.
+    // The remaining group labels render.
     expect(await screen.findByText('settings.modelsPage.browse.group.frontier')).toBeInTheDocument();
-    expect(screen.getByText('settings.modelsPage.browse.group.cloud')).toBeInTheDocument();
     expect(screen.getByText('settings.modelsPage.browse.group.open')).toBeInTheDocument();
     expect(screen.getByText('settings.modelsPage.browse.group.chinese')).toBeInTheDocument();
     expect(screen.getByText('settings.modelsPage.browse.group.voice')).toBeInTheDocument();
 
-    // All 33 providers render as tiles.
-    expect(tiles().length).toBe(33);
+    // Cloud providers (Bedrock / Vertex / Azure) now lead in the
+    // "Bring your own endpoint" front section, so the standalone Cloud group no
+    // longer renders when not searching.
+    expect(screen.getByText('settings.modelsPage.browse.byo.title')).toBeInTheDocument();
+    expect(screen.queryByText('settings.modelsPage.browse.group.cloud')).not.toBeInTheDocument();
+
+    // Every provider still has exactly one connect surface (featured Flux + the
+    // BYO cards led by openai-compatible + the rest grouped = 34 data-provider
+    // tiles), and no provider renders a duplicate connect surface.
+    const tileIds = tiles().map((el) => el.getAttribute('data-provider'));
+    expect(tileIds.length).toBe(34);
+    expect(new Set(tileIds).size).toBe(34);
+    // The custom OpenAI-compatible endpoint leads the BYO section.
+    expect(document.querySelector('[data-provider="openai-compatible"]')).toBeInTheDocument();
+  });
+
+  it('surfaces the OpenAI-compatible endpoint when searching an alias', async () => {
+    renderModal();
+    await screen.findByText('settings.modelsPage.browse.group.frontier');
+
+    // "self-hosted" appears in no display name, but it is an alias for the
+    // OpenAI-compatible endpoint - the whole point of the alias search.
+    const search = screen.getByPlaceholderText('settings.modelsPage.browse.searchPlaceholder');
+    fireEvent.change(search, { target: { value: 'self-hosted' } });
+
+    await waitFor(() => {
+      const visible = tiles().map((el) => el.getAttribute('data-provider'));
+      expect(visible).toContain('openai-compatible');
+    });
   });
 
   it('filters the grid by the search input', async () => {
@@ -179,18 +213,33 @@ describe('BrowseModal', () => {
     fireEvent.change(keyInput, { target: { value: 'sk-test-key' } });
     fireEvent.click(screen.getByText('settings.modelsPage.browse.connect'));
 
-    await waitFor(() =>
-      expect(mockConnect).toHaveBeenCalledWith({
-        providerId: 'openai',
-        creds: { key: 'sk-test-key' },
-      })
-    );
+    // The single-key flow routes through the parent's `connectKey` prop (no
+    // baseUrl for a plain single-key provider).
+    await waitFor(() => expect(mockConnectKey).toHaveBeenCalledWith('openai', 'sk-test-key', undefined));
     // A successful connect closes the modal.
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  it('connects Ollama (Local) keyless, with no API-key field', async () => {
+    const onClose = vi.fn();
+    renderModal(onClose);
+    await screen.findByText('settings.modelsPage.browse.group.frontier');
+
+    // Pick the keyless local-Ollama tile from the BYO section.
+    fireEvent.click(document.querySelector('[data-provider="ollama-local"]') as HTMLElement);
+
+    // A keyless provider shows NO API-key field...
+    expect(screen.queryByPlaceholderText('settings.modelsPage.browse.keyPlaceholder')).not.toBeInTheDocument();
+
+    // ...and Connect works with no key, sending an empty credential and no baseUrl
+    // (the engine resolves the canonical localhost:11434 default).
+    fireEvent.click(screen.getByText('settings.modelsPage.browse.connect'));
+    await waitFor(() => expect(mockConnectKey).toHaveBeenCalledWith('ollama-local', '', undefined));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
   it('shows the inline error when a single-key connect fails', async () => {
-    mockConnect.mockResolvedValue({ ok: false, error: 'unauthorized' });
+    mockConnectKey.mockResolvedValue({ ok: false, error: 'unauthorized' });
     renderModal();
     await screen.findByText('settings.modelsPage.browse.group.frontier');
 
@@ -200,7 +249,7 @@ describe('BrowseModal', () => {
     fireEvent.change(keyInput, { target: { value: 'sk-bad-key' } });
     fireEvent.click(screen.getByText('settings.modelsPage.browse.connect'));
 
-    await waitFor(() => expect(mockConnect).toHaveBeenCalled());
+    await waitFor(() => expect(mockConnectKey).toHaveBeenCalled());
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/browse\.errorUnauthorized/);
   });
@@ -325,7 +374,7 @@ describe('BrowseModal', () => {
     fireEvent.click(screen.getByText('settings.modelsPage.browse.back'));
 
     // The grid is back.
-    await waitFor(() => expect(tiles().length).toBe(33));
+    await waitFor(() => expect(tiles().length).toBe(34));
   });
 
   // ---- Ship-gate Fix B2 ----------------------------------------------------
@@ -345,11 +394,9 @@ describe('BrowseModal', () => {
     fireEvent.change(baseUrlInput, { target: { value: 'https://my-endpoint.example/v1' } });
     fireEvent.click(screen.getByText('settings.modelsPage.browse.connect'));
 
+    // openai-compatible threads the baseUrl through `connectKey`.
     await waitFor(() =>
-      expect(mockConnect).toHaveBeenCalledWith({
-        providerId: 'openai-compatible',
-        creds: { key: 'sk-anything', baseUrl: 'https://my-endpoint.example/v1' },
-      })
+      expect(mockConnectKey).toHaveBeenCalledWith('openai-compatible', 'sk-anything', 'https://my-endpoint.example/v1')
     );
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
@@ -364,12 +411,8 @@ describe('BrowseModal', () => {
     fireEvent.change(keyInput, { target: { value: 'sk-anything' } });
     fireEvent.click(screen.getByText('settings.modelsPage.browse.connect'));
 
-    await waitFor(() =>
-      expect(mockConnect).toHaveBeenCalledWith({
-        providerId: 'openai-compatible',
-        creds: { key: 'sk-anything' },
-      })
-    );
+    // A blank baseUrl is dropped to `undefined` before reaching `connectKey`.
+    await waitFor(() => expect(mockConnectKey).toHaveBeenCalledWith('openai-compatible', 'sk-anything', undefined));
   });
 
   it('does NOT render the Base URL input for non-openai-compatible single-key providers', async () => {

@@ -4,6 +4,266 @@ All notable changes to the Wayland Electron app are documented in this file. For
 
 ## [Unreleased]
 
+## [0.11.9] - 2026-07-01
+
+### Highlights
+
+- **Bundled engine → wayland-core v0.12.19.** Carries the GHSA-8r7g-7556-hj3j security batch: approval-token binding, project-config posture clamp, a boot-only opt-in gate for wire-driven Force/AutoEdit (`--force` / `WAYLAND_ALLOW_WIRE_FORCE=1`), default-deny project-config hooks, and shared MCP tool-name sanitization across all providers.
+
+### Security
+
+- **Adopt the engine's boot-only wire-Force gate (#495).** The desktop now opts the bundled engine into wire-driven mode changes (`WAYLAND_ALLOW_WIRE_FORCE=1`) so Autopilot/Force keeps working against v0.12.19, and closes the remote cron privilege-escalation surface it would otherwise expose: the full remote cron write/exec/skill command set (`add-job`, `update-job`, `run-now`, `save-skill`, `confirm-proposal`) is denied to paired-device WebSocket callers. Read-only cron views and local cron creation are unaffected.
+
+### Fixes
+
+- **Project chats write to the project workspace (#494).** Conversations created inside a project now share the project's workspace folder instead of a per-chat Temporary Space, and the folder opens correctly.
+- **Voice dictation on the signed macOS build (#496).** The microphone permission is requested on demand with the correct entitlement and usage string, and OpenAI Whisper reuses the key from your connected provider.
+
+## [0.11.8] - 2026-06-30
+
+### Highlights
+
+- **Wayland can drive a browser on its own.** A Playwright browser tool is now bundled and auto-enabled on first run — Wayland can open pages, click, fill, and read the web as part of a task, no setup. (#471)
+- **Computer-Use onboarding for macOS.** A guided permission flow for Screen Recording and Accessibility (deep-links + Info.plist usage strings) so Computer-Use is ready without hunting through System Settings. (#466)
+- **You control the response budget.** A new Auto/Fixed output-budget control, plus the engine now sizes per-model token budgets instead of guessing a single hardcoded number — fewer truncated answers, less waste. (#468, #456)
+- **Per-project workspaces persist.** Projects keep a stable workspace instead of defaulting to a disposable temp dir, so work and state survive across sessions. (#463)
+- **Concierge got diagnostics.** The diag tool now reports your workspace and config-path state, so setup problems are easy to see and explain. (#460)
+
+### Wayland Core engine
+
+- **Bundled wayland-core engine v0.12.16 → v0.12.17.** Carries three customer-driven fixes:
+  - **Named messaging channels now resolve correctly.** `send_message` to a channel registered under an instance name (e.g. an IMAP email channel registered as `email-imap`) reaches it instead of failing with "unknown channel" — outbound email and other named channels now work. (wayland-core #116)
+  - **Large project context no longer bloats the cached prompt.** Oversized `AGENTS.md`/`@`-includes/presets are capped, so big projects stop ballooning token usage and cost. (wayland-core #115)
+  - **Long-context replay no longer 400s on strict providers.** Internal routing metadata is stripped from outbound tool calls, fixing "Extra inputs are not permitted" rejections from strict OpenAI-compatible endpoints. (wayland-core #120)
+
+## [0.11.7] - 2026-06-29
+
+### Highlights
+
+- **Meet Concierge — the first built-in helper inside Wayland.** Concierge knows your actual setup (the models you've connected, your skills, your scheduled tasks) and answers from it in plain English. Ask it what Wayland can do, how to do anything, or why something didn't run. Better yet, it sets things up _for_ you: it proposes a change, you see a confirmation card, you click Apply — connect an AI provider, set your default model, add a connected tool, or edit an assistant. You stay in control; it does the legwork.
+- **Every assistant now opens with suggested starting cards** (Concierge and Cowork included), so you're never staring at a blank box. The home screen is cleaner.
+
+### Wayland Core engine
+
+- Bundled engine updated to **v0.12.16**: Flux Auto now gets a proper reasoning-tier output budget (long, reasoning-heavy replies stop getting cut off), plus sandboxed bash, WebFetch, and cleaner reasoning output.
+
+### Fixed
+
+- **Your chat draft survives a reload or restart** — close the app mid-thought and it's still there when you come back.
+- **macOS auto-update self-recovers from silent stuck updates** — if an update ever quietly failed to apply, Wayland now detects it and recovers instead of leaving you on an old version.
+- **Local tools (MCP servers) stay connected on macOS** instead of dropping out.
+- **Claude Code heals its own cache** after a partial download instead of refusing to start.
+- Telegram and Signal connectors fixed; OpenCode models now surface in the picker; macOS title-bar overlay close icons are clickable; the chat context menu no longer clips Delete.
+
+### Security
+
+- The Concierge diagnostics view now masks home paths and usernames from all output, and ignores model-proposed provider endpoints for known providers so a connected API key is never redirected.
+
+## [0.11.6] - 2026-06-29
+
+### Fixed
+
+- **Restored the entire built-in skills and workflows library.** 0.11.4 and 0.11.5 shipped without the bundled `skills-library` and `bundled-workflows` resources, so every built-in skill (2200+) and workflow showed up empty. The packed resources are now generated as a guaranteed part of every release build, and a fail-hard verification gate refuses to publish a build that is missing any critical bundled resource. Your skills and workflows are back, in full.
+
+### Build
+
+- The release build now stages the models.dev snapshot, the skill/workflow pack, and the Signal CLI runtime inside the build entrypoint itself, instead of relying on npm lifecycle hooks that CI bypassed. A new post-package check asserts every bundled resource is physically present in the shipped app before release.
+
+## [0.11.5] - 2026-06-28
+
+### Highlights
+
+- **Local models connect with zero setup.** Ollama (Local) and other self-hosted models now run with no API key at all — the engine recognizes loopback and private-network endpoints and connects cleanly, and the desktop connect form drops the key field for local providers entirely. No more "OpenAI API key is required" when you're running a model that lives entirely on your own machine (#398, wayland-core keyless self-hosted support).
+
+### Wayland Core engine
+
+- Bundled engine updated to **v0.12.15**. Keyless self-hosted endpoints are now first-class: when no API key is set and the endpoint is local (loopback, 0.0.0.0, `*.local`, private RFC1918, or Tailscale-CGNAT), the engine connects with a benign placeholder instead of failing — so local Ollama and other OpenAI-compatible local servers work out of the box. Public endpoints still require a key, as they should.
+
+### Fixed
+
+- **Ollama (Local) connects keyless.** The Browse provider tile for Ollama (Local) no longer demands an API key — the key field is hidden and Connect works with nothing entered, matching how local models actually run.
+- **Cloud credential form padding.** The AWS Bedrock / Vertex / Azure credential form in the Browse modal now has proper inset and spacing instead of sitting flush against the window edges.
+
+### Changed
+
+- **Quieter sidebar.** Removed the Flux Router status widget from the left sidebar so the nav stays focused on your own work. Flux Router is still one click away in Settings → Models.
+
+## [0.11.4] - 2026-06-28
+
+### Highlights
+
+- **Greatly improved chat streaming.** A ground-up rework of how responses stream and render: a real-time JSON progress stream drives a smooth, live activity view — an inline "orbit" indicator that animates while the assistant works and settles when it's done, a unified step-by-step timeline with plain-English labels for every backend, live reasoning summaries in the thinking block, and a per-message action toolbar that appears the moment a turn completes. Chat finally feels alive, legible, and fast (#337, #318, #288, and the observability rework series).
+- **Real tool-use on Windows — safely sandboxed.** Wayland now runs real shell commands and tools on Windows inside a locked-down AppContainer sandbox — so the assistant doesn't just talk, it does the work, even on a clean non-developer machine. Live-verified on Windows. (wayland-core v0.12.14)
+- **Your local models just work with tools.** Wayland detects tool support up front and transparently retries without tools for any backend that rejects them — so Ollama and llama.cpp models answer instead of erroring.
+
+### Wayland Core engine
+
+- Bundled engine updated to **v0.12.14**. Windows AppContainer shell tools now work end to end: absent developer-cache paths are skipped when applying the sandbox filesystem grant (no more hard-fail before the command runs), and the sandbox reaps its full job tree before draining output so commands return promptly instead of timing out (wayland-core #99, #100).
+- Local models that don't support function calling now just work: Wayland detects tool support up front (an Ollama capability probe) and, for any backend that still rejects a tools request, automatically retries without tools and remembers the result — so Ollama and llama.cpp models answer instead of erroring (#389).
+- Billing errors are classified more accurately, so a transient or unrelated provider error is no longer reported as "out of credit" (#329).
+- Tighter control over which environment variables and secrets reach sandboxed subprocesses, with a fail-closed sandbox toggle (#325–#327).
+- xAI / Grok sign-in uses a single, engine-preferred OAuth refresher so Grok sessions stay authenticated without token races (#390, #391).
+
+### Chat streaming & live activity (headline)
+
+- Responses now stream over a real-time JSON progress channel and render through a reworked live activity view, so chat updates feel immediate and smooth (#337).
+- An inline "orbit" indicator animates while the assistant is working and settles to a static state when the turn is done — a single, calm signal of what's happening (replaces the old flashing/duplicated indicators).
+- A unified, step-by-step activity timeline projects every backend's events into clean, human-readable labels, so you can follow exactly what the assistant is doing regardless of which model or tool is in play.
+- Reasoning models show a short, live summary of what they're working through as the heading of the thinking block, updated turn by turn (#318).
+- A per-message action toolbar (copy, retry, and more) appears the moment a turn completes — consolidated into one clean row.
+- The turn timer is anchored to the turn's real start, so elapsed time stays accurate even when you switch chats mid-response (#288).
+
+### Models & providers
+
+- The model picker shows a curated, accurate catalog for each connected provider, sourced live, and the Codex, Grok, and OpenCode pickers populate correctly instead of flashing "no models" (#374).
+- Assistants now run on Wayland Core by default rather than defaulting to a specific cloud model (#380).
+- Grok "Sign in with X" now bridges into the engine so Grok chats stop returning 403 after sign-in (#379).
+
+### Assistants & workspace
+
+- Each assistant shows a grid of suggested starting prompts so you can launch into a task in one click (#375).
+- Assistant send, model selection, and team multi-model setup were tightened end to end so the assistant you pick is the one that responds.
+
+### Reliability & fixes
+
+- Model-picker catalog, assistant surface, and workflow-launcher model selection hardened against empty or "no models" states.
+
+## [0.11.3] - 2026-06-24
+
+### Wayland Core engine
+
+- Bundled engine updated to v0.12.8: adds the Sakana AI (Fugu) provider and carries forward the full v0.12.7 fix batch — corrected context-window sizing (#255), Windows Bash reliability (#257), Windows MCP and path fixes (#262, #263, #267), an OpenAI image-generation model fix (#265), ChatGPT-subscription auth import (#293), and Core↔Flux routing improvements.
+
+### Models & providers
+
+- Fixed a routing bug where valid keys for OpenAI-compatible providers (Sakana, OpenRouter, and similar) were sent to api.openai.com and rejected — they now route to each provider's own endpoint, so connected keys work (the v2 registry bridge tag is resolved at spawn).
+- Added Sakana AI as a first-class provider, with its Fugu models and brand logo.
+- ChatGPT-subscription, MiniMax, and DashScope now pull their model lists live from each provider instead of a hardcoded catalog, so you see the current lineup.
+- ChatGPT-subscription chats route correctly through the engine's native ChatGPT provider and are selectable without being bounced to Settings (#243).
+- Local Ollama models now appear in the model picker and initialize without a key (#294, #268).
+- A Claude Code chat with no model pinned now defaults to Opus (the Claude Opus default) instead of Sonnet.
+- Models without tool support now show a clear, friendly message instead of a raw provider 404.
+
+### Memory
+
+- Your global Wayland Memory is injected into chat context, so the assistant can recall what you have saved (#256).
+
+### Reliability & fixes
+
+- Approval prompts are processed before the turn proceeds, and non-info approval requests are logged clearly (#264).
+- File-preview crashes are contained so they no longer break the surrounding chat (#253).
+- Back-after-error navigation and Windows npm resolution fixed (#254, #261).
+- WSL-installed CLIs are detected on Windows (#258).
+- MCP OAuth sign-in gained a timeout and a cancel (#242).
+- Onboarding persona styling, workspace/history git-noise filtering, and Doctor per-server diagnostics refined (#249, #251, #274).
+- Flux Voice speech-to-text has its own config block with provider-scoped error handling.
+- Build and typecheck given more heap headroom (#260).
+
+### Observability
+
+- The inline observability panel is simplified to a lightweight processing indicator for this release while a redesigned activity view is in progress.
+
+## [0.11.2] - 2026-06-22
+
+### Wayland Core engine
+
+- Bundled engine updated to v0.12.6: lower token spend on long sessions, ChatGPT-subscription model filtering so you only see models you can use, a MiniMax entry in the cost catalog, and FluxRouter spend caps (#174, #61, #158, #240).
+
+### Models & providers
+
+- MiniMax now routes through the engine's native MiniMax provider (Anthropic wire) instead of falling back to the OpenAI path, so MiniMax models work correctly (#135).
+- Pasting a Google `AQ.` key or an OpenAI service-account / admin key is now recognized on the spot, and GitHub Models keys (`ghp_` / `github_pat_`) are recognized too (#224).
+
+### Projects
+
+- The New-Project AI wizard surfaces the real provider error when a draft can't be generated, instead of a generic failure (#221).
+- Project chat transcripts show subtle date/time and gap markers so long conversations are easier to scan (#59).
+- Pin frequently-used files to a favorites section in the project Files panel (#142).
+
+### Migrate from another tool
+
+- New "Migrate" settings pane imports your provider keys and MCP servers from Hermes and OpenClaw in a guided scan → preview → import flow (secrets never leave the host).
+
+### Mission Control
+
+- Pop Mission Control out into its own dedicated window (#157).
+
+### Headless & reliability
+
+- The Project AI wizard now generates drafts from a headless/remote WebUI session over an authenticated host-side route, instead of hanging (#234).
+- The spawned engine now inherits `LD_LIBRARY_PATH`, fixing headless startup on ARM64 Linux where the engine needs it to resolve its OpenSSL dependency (#233).
+
+## [0.11.1] - 2026-06-21
+
+### Wayland Core engine
+
+- Bundled engine updated to v0.12.5, fixing a critical bug where every chat reply errored (`finish_reason: error`, 0 tokens) on every model and provider on Windows, and correcting the Gemini egress allowlist (#200, #223).
+
+### Models & providers
+
+- Teams: a Claude member no longer reverts to "Flux Fast" after the first message, and a Gemini member's model now routes to its Gemini provider instead of OpenRouter (#207).
+- A remote/WebUI session can now add a local OpenAI-compatible endpoint (#71).
+- Wayland Core workflows bind to the selected provider instead of blocking prompts with "No model selected" (#198).
+- Teams no longer fail to start with "No CLI path" on Wayland Core backends (#204).
+
+### Channels, voice & import
+
+- Obsidian import opens a folder picker and shows its results, and memory import now reads native Claude Code project memory (#133, #165).
+
+### Onboarding
+
+- "Get a free Gemini key" opens the browser, and the Gemini onboarding door points to a Google AI Studio key (#202).
+
+### Reliability & fixes
+
+- Installer resolves bun from `~/.bun/bin` so headless setup and systemd work (#201).
+- Windows uninstaller reaps orphaned processes left behind on close/uninstall (#139).
+- The GUI-spawned engine now inherits `WAYLAND_BASH_SHELL` (#197).
+- `wayland_search_skills` returns metadata instead of full skill bodies, fixing a Claude Code 25k-token Read overflow (#199).
+
+### Internal
+
+- Added `scripts/stage-wcore-bump.mjs` to stage bundled-engine version bumps from the signed release checksums (#222).
+
+## [0.11.0] - 2026-06-19
+
+### Models & providers
+
+- Redesigned provider picker: real brand logos, a bring-your-own-endpoint section up front, and full engine catalog coverage (104 providers).
+- Engine-native providers (xAI/Grok, Perplexity, OpenRouter, Groq, DeepSeek, Cerebras, NVIDIA, and more) now route natively instead of being forced through the OpenAI path (#177).
+- Sign in with Grok: xAI is spawned as the native `--provider xai`.
+- Friendly model names everywhere — the chat header and send box show "Claude Opus 4.8", not a raw model id.
+- Real brand logos in the connected-providers list (no more letter monograms).
+- Claude model picker fixed end to end (#184): it populates from the live agent, holds your selection, and actually switches the running model — pick Opus and it runs on Opus.
+- Fresh Flux connect defaults to Flux Auto instead of a local Ollama model.
+- Your model pick is kept while the provider list loads or is transiently filtered.
+- MiniMax inference uses the international host (#135); WCore/Gemini picks resolve via the registry bridge (#167, #168).
+- Unusable local vision/VLM models are hidden from the Ollama catalog.
+
+### Wayland Core engine
+
+- In-app engine updater for Wayland Core; this build bundles engine 0.12.3.
+- Egress firewall is now a user choice in the engine Security settings.
+- Engine-update archive extraction hardened against tag injection.
+
+### Channels, voice & import
+
+- Flux Voice added as a speech-to-text provider, with actionable error messages.
+- Test & Enable added to Twilio SMS settings (#185).
+- Shared 3-step, type-aware import modal wired into Assistants and Workflows.
+
+### Reliability & fixes
+
+- Transient provider HTTP faults are retried automatically.
+- ACP: a FIFO queue for pending slots, and mid-turn follow-up messages are queued instead of erroring.
+- Updater: no more false "Update available" when only IJFW needs attention; IJFW reports healthy for directory/symlink installs (#178, #179).
+- Headless/remote: file-key JWT secret is decrypted so WebSocket verification matches (#155), a headless Flux key registers as flux-router, a remote WebUI can resolve the chat-start model, the WebSocket reconnect storm on auth expiry is fixed, a fresh chat auto-picks a recommended model on cold start, and the installer ensures `libasound2` so the bundled engine starts on a fresh box.
+- Skills import hardened: recursive mkdir, builtin-shadowing guard, and frontmatter validation.
+- Standalone mode wires the missing project/team/skills bridge inits (#76).
+- Assigned chats are hidden from global recents (#77); macOS detection improved (#97).
+- Mobile WebUI: the Assistants filter rail stacks (#153) and library header actions wrap (#154).
+- App data is removed on Windows uninstall (#138); the Effort submenu is opaque so it no longer overlaps the model list.
+
 ### IJFW v0.6.3 - system service + first-boot install (Wave 1)
 
 - New `src/process/services/ijfwSystemService.ts` replaces the previous

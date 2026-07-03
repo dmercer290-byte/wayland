@@ -4,9 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { SKILL_SCANNER_VERSION, type SkillFinding, type SkillSecurityReport, type SkillVerdict } from '@/common/types/skillTypes';
+import {
+  SKILL_SCANNER_VERSION,
+  type SkillFinding,
+  type SkillSecurityReport,
+  type SkillVerdict,
+} from '@/common/types/skillTypes';
 import { SKILL_GUARD_RULES, type SkillScanInput } from './skillGuardRules';
 import { skillGuardLlmScan, type LlmScanCall } from './skillGuardLlmScan';
+import { skillContentHash } from './skillContentHash';
 
 /**
  * Skill Guard - layered security scan for imported / vendored skills.
@@ -17,7 +23,10 @@ import { skillGuardLlmScan, type LlmScanCall } from './skillGuardLlmScan';
  * boundary; Skill Guard surfaces signal so the user makes a better choice.
  */
 export class SkillGuard {
-  static async scan(skills: SkillScanInput[], opts: { llm?: boolean; llmCall?: LlmScanCall } = {}): Promise<SkillSecurityReport[]> {
+  static async scan(
+    skills: SkillScanInput[],
+    opts: { llm?: boolean; llmCall?: LlmScanCall } = {}
+  ): Promise<SkillSecurityReport[]> {
     // `llmScanned` on the report must reflect whether the LLM layer ACTUALLY
     // ran for each skill - not whether the caller merely requested it. If
     // `opts.llm` is true but no `llmCall` is wired, the seam returns
@@ -37,6 +46,9 @@ export class SkillGuard {
         scannedAt,
         scannerVersion: SKILL_SCANNER_VERSION,
         llmScanned: llmResult.ran,
+        // C5: bind the verdict to the exact content scanned. Keys the
+        // review-consent confirm step and the rescan short-circuit.
+        contentHash: skillContentHash(skill.body, skill.description),
       };
     });
   }

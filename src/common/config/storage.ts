@@ -240,6 +240,18 @@ export interface IConfigStorageRefer {
   'upload.saveToWorkspace'?: boolean;
   // Last selected agent type on the guid page
   'guid.lastSelectedAgent'?: string;
+  // Concierge default landing persona (reversible). Absent/true = a fresh
+  // install lands on the Concierge assistant; false = opt out (keep the
+  // first detected engine). Never overrides an explicit saved selection.
+  'concierge.defaultPersona'?: boolean;
+  // Runtime kill-switch for capabilities-manifest injection (Concierge + per-turn
+  // advert). Absent/true = enabled; false = disable all manifest injection from
+  // Settings without a release. Covers the cross-cutting injection that
+  // `concierge.defaultPersona` does not.
+  'concierge.capabilityInjection'?: boolean;
+  // Whether the user dismissed the cold-start "What can Wayland do?" panel.
+  // Absent/false = show; true = hidden (persisted per the dismiss control).
+  'concierge.panelDismissed'?: boolean;
   // Migration flag: fix assistant enabled default value issue from older versions
   'migration.assistantEnabledFixed'?: boolean;
   // Migration flag: add default enabled skills for the cowork assistant
@@ -369,6 +381,22 @@ export interface IConfigStorageRefer {
   // Ambient Mode: persisted bubble window position (displayId used for multi-monitor recovery)
   'ambient.bubblePosition'?: { x: number; y: number; displayId: number };
   /**
+   * Pop-out chat window bounds (#27 phase 2). A single shared bounds record
+   * reused for every pop-out so the user's last sizing/placement (e.g. parked on
+   * a second monitor) is honored on the next pop-out. Ephemeral per the owner
+   * decision - this persists only the geometry, never the window-to-conversation
+   * mapping (pop-outs are not restored on relaunch).
+   */
+  'conversation.popoutBounds'?: { x: number; y: number; width: number; height: number; displayId: number };
+  /**
+   * User-defined slash commands (issue #28). Each entry expands a prompt
+   * template into the composer and surfaces in the slash menu alongside
+   * agent-provided commands. Shape mirrors `UserSlashCommand` in
+   * `src/common/chat/slash/userCommands.ts` - declared as an import type so
+   * src/common/config stays free of chat-feature deps.
+   */
+  'slash.customCommands'?: import('@/common/chat/slash/userCommands').UserSlashCommand[];
+  /**
    * Wayland Core "raw engine mode" power-user toggle. When true, the embedded
    * engine should run on its OWN `config.toml` and NOT be overridden with
    * Desktop's per-session model / skills / overlay injection. Off by default.
@@ -378,6 +406,18 @@ export interface IConfigStorageRefer {
    * `TODO(orchestrator)` marker there).
    */
   'wcore.rawEngineMode'?: boolean;
+  /**
+   * #468 — desktop "Output budget" preference. `auto` (default / key absent)
+   * omits `--max-tokens` and lets the engine size the budget per-model (#456) —
+   * EXCEPT reasoning models, which the engine still gives a reasoning-aware cap
+   * (and Anthropic still gets its required value); omit ≠ "no budget" there.
+   * `fixed` passes `value` (clamped to `MIN_FIXED_BUDGET`) as the per-call
+   * `--max-tokens` (via buildSpawnConfig); a `fixed` entry with no positive
+   * `value` is treated as `auto`. RuntimePane persists it; `WCoreManager` reads
+   * it at spawn to enact it. Engine `[models] output_budget` config-key parity
+   * is a separate Core seam (wayland-core #112).
+   */
+  'wcore.outputBudget'?: { mode: 'auto' | 'fixed'; value?: number };
 }
 
 export interface IEnvStorageRefer {
@@ -427,6 +467,8 @@ export type TChatConversation =
         presetRules?: string; // System rules, injected at initialization
         /** Enabled skills list for filtering SkillManager skills */
         enabledSkills?: string[];
+        /** Per-conversation active MCP server ids (#348): undefined = all enabled servers, [] = none. */
+        activeMcpServers?: string[];
         /** Snapshot of actually loaded skills (persisted on first message) */
         loadedSkills?: Array<{ name: string; description: string }>;
         /** Preset assistant ID for displaying name and avatar in the conversation panel */
@@ -458,6 +500,8 @@ export type TChatConversation =
           presetContext?: string; // Preset context/rules from smart assistant
           /** Enabled skills list for filtering SkillManager skills */
           enabledSkills?: string[];
+          /** Per-conversation active MCP server ids (#348): undefined = all enabled servers, [] = none. */
+          activeMcpServers?: string[];
           /** Builtin auto-injected skills to exclude */
           excludeBuiltinSkills?: string[];
           /** Snapshot of actually loaded skills */
@@ -499,6 +543,8 @@ export type TChatConversation =
           cronJobId?: string;
           /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
           projectId?: string;
+          /** Per-conversation reasoning effort (Claude-ACP `effortLevel`). Absent => backend default. */
+          effort?: 'low' | 'medium' | 'high';
         }
       >,
       'model'
@@ -514,6 +560,8 @@ export type TChatConversation =
           presetContext?: string; // Preset context/rules from smart assistant
           /** Enabled skills list for filtering SkillManager skills */
           enabledSkills?: string[];
+          /** Per-conversation active MCP server ids (#348): undefined = all enabled servers, [] = none. */
+          activeMcpServers?: string[];
           /** Snapshot of actually loaded skills */
           loadedSkills?: Array<{ name: string; description: string }>;
           /** Preset assistant ID for displaying name and avatar in the conversation panel */
@@ -532,6 +580,8 @@ export type TChatConversation =
           cronJobId?: string;
           /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
           projectId?: string;
+          /** Per-conversation reasoning effort (Codex `model_reasoning_effort`). Absent => backend default. */
+          effort?: 'low' | 'medium' | 'high';
         }
       >,
       'model'
@@ -567,6 +617,8 @@ export type TChatConversation =
           };
           /** Enabled skills list */
           enabledSkills?: string[];
+          /** Per-conversation active MCP server ids (#348): undefined = all enabled servers, [] = none. */
+          activeMcpServers?: string[];
           /** Snapshot of actually loaded skills */
           loadedSkills?: Array<{ name: string; description: string }>;
           /** Preset assistant ID */
@@ -593,6 +645,8 @@ export type TChatConversation =
           customWorkspace?: boolean;
           /** Enabled skills list */
           enabledSkills?: string[];
+          /** Per-conversation active MCP server ids (#348): undefined = all enabled servers, [] = none. */
+          activeMcpServers?: string[];
           /** Snapshot of actually loaded skills */
           loadedSkills?: Array<{ name: string; description: string }>;
           /** Preset assistant ID */
@@ -623,6 +677,8 @@ export type TChatConversation =
           sessionKey?: string;
           /** Enabled skills list */
           enabledSkills?: string[];
+          /** Per-conversation active MCP server ids (#348): undefined = all enabled servers, [] = none. */
+          activeMcpServers?: string[];
           /** Snapshot of actually loaded skills */
           loadedSkills?: Array<{ name: string; description: string }>;
           /** Preset assistant ID */
@@ -652,6 +708,8 @@ export type TChatConversation =
         presetRules?: string;
         /** Enabled skills list */
         enabledSkills?: string[];
+        /** Per-conversation active MCP server ids (#348): undefined = all enabled servers, [] = none. */
+        activeMcpServers?: string[];
         /** Snapshot of actually loaded skills */
         loadedSkills?: Array<{ name: string; description: string }>;
         /** Preset assistant ID */
@@ -674,6 +732,8 @@ export type TChatConversation =
         cronJobId?: string;
         /** Project ID this conversation belongs to (umbrella scoping). Mirrors cronJobId - read via json_extract(extra,'$.projectId'). */
         projectId?: string;
+        /** Per-conversation reasoning effort (WCore `set_config.effort`). Absent => backend default. */
+        effort?: 'low' | 'medium' | 'high';
       }
     >;
 
@@ -708,6 +768,16 @@ export interface IProvider {
   baseUrl: string;
   apiKey: string;
   model: string[];
+  /**
+   * Image-generation model ids for this provider, sourced from the
+   * auto-refreshing model catalog (see `legacyModelConfigBridge`). Kept
+   * separate from `model` (which is text-only, for the chat pickers) so the
+   * image-tool picker can read current image models without polluting the chat
+   * dropdowns. Absent for providers the registry mirror skips (e.g. Google-auth
+   * Gemini) or manually-added legacy rows; the picker falls back to scanning
+   * `model` and a curated floor in those cases.
+   */
+  imageModels?: string[];
   /**
    * List of model capability tags. A tag's presence means the capability is supported; absence means it is not.
    */
@@ -819,6 +889,13 @@ export interface IMcpServer {
   tools?: IMcpTool[];
   status?: 'connected' | 'disconnected' | 'error' | 'testing'; // Connection status (also indicates service availability)
   lastConnected?: number;
+  /**
+   * Human-readable reason the last connection attempt failed (set when
+   * status === 'error'). Persisted so the Installed row can show WHY a server
+   * is broken and how to fix it, instead of a bare "Error" badge. Cleared on a
+   * successful connect.
+   */
+  lastError?: string;
   createdAt: number;
   updatedAt: number;
   originalJson: string; // Stores the raw JSON config for accurate display when editing
@@ -837,6 +914,14 @@ export interface IMcpServer {
    * http://localhost:57000/oauth/callback.
    */
   byoOAuth?: IByoOAuthCredentials;
+  /**
+   * Per-server tool allow-list (#348). The names of this server's tools the
+   * user has enabled. `undefined`/absent => ALL of the server's tools are
+   * enabled (the migration-free default); `[]` => none enabled. Shrinks the
+   * candidate pool surfaced by getCandidateTools() before Lane 3 (#344) ranks
+   * and caps it. Co-located with the server so it persists/removes with it.
+   */
+  allowedTools?: string[];
 }
 
 export interface IByoOAuthCredentials {

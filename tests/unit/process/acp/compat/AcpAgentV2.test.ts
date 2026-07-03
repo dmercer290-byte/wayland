@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AcpAgentV2, SESSION_START_TIMEOUT_MS } from '@process/acp/compat/AcpAgentV2';
+import { getFullAutoMode } from '@/common/types/agentModes';
 import type { SessionCallbacks } from '@process/acp/types';
 import type { OldAcpAgentConfig } from '@process/acp/compat/typeBridge';
 
@@ -126,6 +127,48 @@ describe('AcpAgentV2 - Lifecycle Methods', () => {
       const promise = agent.start();
       await expect(promise).rejects.toThrow('Session failed to start');
       expect(mockSessionMethods.start).toHaveBeenCalledOnce();
+    });
+
+    it('should reject with the real error reason when an error signal precedes error status (#483/#369)', async () => {
+      const agent = createAgent();
+
+      // Mirror AcpSession.enterError ordering: the detailed error signal fires
+      // first, then the status flips to 'error'. The reject must carry the real
+      // reason, not a generic string.
+      mockSessionMethods.start.mockImplementation(() => {
+        setTimeout(() => {
+          capturedCallbacks.onSignal({
+            type: 'error',
+            message: 'No API key configured for model claude-opus-4',
+            recoverable: false,
+          });
+          capturedCallbacks.onStatusChange('error');
+        }, 0);
+      });
+
+      const promise = agent.start();
+      await expect(promise).rejects.toThrow('No API key configured for model claude-opus-4');
+    });
+
+    it('should not carry an error reason from a prior failed start into the next start (#483/#369)', async () => {
+      const agent = createAgent();
+
+      // First start fails with a specific reason.
+      mockSessionMethods.start.mockImplementation(() => {
+        setTimeout(() => {
+          capturedCallbacks.onSignal({ type: 'error', message: 'stale reason from attempt 1', recoverable: false });
+          capturedCallbacks.onStatusChange('error');
+        }, 0);
+      });
+      await expect(agent.start()).rejects.toThrow('stale reason from attempt 1');
+
+      // Second start fails via a bare status change (no signal): must fall back to
+      // the generic message, NOT reuse the stale reason from the first attempt.
+      mockSessionMethods.start.mockReset();
+      mockSessionMethods.start.mockImplementation(() => {
+        setTimeout(() => capturedCallbacks.onStatusChange('error'), 0);
+      });
+      await expect(agent.start()).rejects.toThrow('Session failed to start');
     });
 
     it('should reject on timeout after the session-start budget', async () => {
@@ -641,10 +684,16 @@ describe('AcpAgentV2 - Config/Model/Mode Methods', () => {
   }
 
   describe('getModelInfo()', () => {
-    it('should return null initially', () => {
+    it('returns the static Sonnet/Opus/Haiku slot fallback initially for claude (#184)', () => {
+      // Claude Code's ACP wrapper never advertises a model list, so with no
+      // cc-switch data and no cache, getModelInfo falls back to the static slots
+      // (instead of null) so the in-chat picker is populated + switchable.
       const agent = createAgent();
 
-      expect(agent.getModelInfo()).toBe(null);
+      const info = agent.getModelInfo();
+      expect(info?.availableModels.map((m) => m.id)).toEqual(['sonnet', 'opus', 'haiku']);
+      expect(info?.canSwitch).toBe(true);
+      expect(info?.sourceDetail).toBe('claude-slots');
     });
 
     it('should return cached model info after onModelUpdate callback', async () => {
@@ -1039,19 +1088,21 @@ describe('AcpAgentV2 - Config/Model/Mode Methods', () => {
   });
 
   describe('enableYoloMode()', () => {
-    it('should delegate to setMode with bypassPermissions', async () => {
+    it('should delegate to setMode with the backend full-auto (guarded) mode', async () => {
       const agent = await createStartedAgent();
 
-      // Mock setMode to trigger onModeUpdate after a tick
+      // enableYoloMode now routes through getFullAutoMode so the guardrail's
+      // "auto guarded" mode is used instead of raw bypassPermissions.
+      const expectedMode = getFullAutoMode('claude');
       mockSessionMethods.setMode.mockImplementation(() => {
         setTimeout(() => {
-          capturedCallbacks.onModeUpdate({ currentMode: 'bypassPermissions' });
+          capturedCallbacks.onModeUpdate({ currentMode: expectedMode });
         }, 0);
       });
 
       await agent.enableYoloMode();
 
-      expect(mockSessionMethods.setMode).toHaveBeenCalledWith('bypassPermissions');
+      expect(mockSessionMethods.setMode).toHaveBeenCalledWith(expectedMode);
     });
 
     it('should propagate result from setMode', async () => {

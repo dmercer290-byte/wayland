@@ -15,16 +15,38 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { IMcpServer } from '@/common/config/storage';
 
-const { handleAddMcpServer, login, messageSuccess, messageError } = vi.hoisted(() => ({
-  handleAddMcpServer: vi.fn<
-    (data: Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'>) => Promise<IMcpServer | null>
-  >(),
-  login: vi.fn<
-    (server: IMcpServer) => Promise<{ success: boolean; error?: string }>
-  >(),
+const { handleAddMcpServer, login, messageSuccess, messageError, testMcpConnection } = vi.hoisted(() => ({
+  handleAddMcpServer: vi.fn<(data: Omit<IMcpServer, 'id' | 'createdAt' | 'updatedAt'>) => Promise<IMcpServer | null>>(),
+  login: vi.fn<(server: IMcpServer) => Promise<{ success: boolean; error?: string }>>(),
   messageSuccess: vi.fn<(msg: string) => void>(),
   messageError: vi.fn<(msg: string) => void>(),
+  // The redesigned api-key install path runs a real connection test before
+  // toasting success and enabling the server; default it to a passing probe.
+  testMcpConnection: vi.fn().mockResolvedValue({ success: true, data: { success: true, tools: [] } }),
 }));
+
+// The api-key save+connect flow probes the server through the IPC bridge.
+// Partial-mock so the bridge's other exports stay intact; only the MCP
+// connection probe is stubbed to a passing result.
+vi.mock('@/common/adapter/ipcBridge', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/common/adapter/ipcBridge')>();
+  return {
+    ...actual,
+    mcpService: {
+      ...actual.mcpService,
+      testMcpConnection: { invoke: testMcpConnection },
+    },
+    // DetailPage.buildServerData (#448) resolves the user's home via
+    // application.getPath to bake the filesystem server's directory arg. jsdom
+    // has no main process, so the real provider's invoke never resolves — stub
+    // it, or the install click rejects in buildServerData before it ever reaches
+    // handleAddMcpServer.
+    application: {
+      ...actual.application,
+      getPath: { invoke: vi.fn().mockResolvedValue('/Users/test') },
+    },
+  };
+});
 
 // Mutable container so tests can flip the mcpServers list to simulate "installed".
 const hookState: { mcpServers: IMcpServer[] } = { mcpServers: [] };
@@ -76,11 +98,15 @@ vi.mock('@renderer/hooks/mcp', () => ({
     handleDeleteMcpServer: vi.fn().mockResolvedValue(undefined),
     handleToggleMcpServer: vi.fn().mockResolvedValue(undefined),
   }),
+  useMcpConnection: () => ({
+    testingServers: {},
+    handleTestMcpConnection: vi.fn(),
+    refreshServerStatuses: vi.fn(),
+  }),
 }));
 
 vi.mock('@arco-design/web-react', async () => {
-  const actual =
-    await vi.importActual<typeof import('@arco-design/web-react')>('@arco-design/web-react');
+  const actual = await vi.importActual<typeof import('@arco-design/web-react')>('@arco-design/web-react');
   return {
     ...actual,
     Message: {
@@ -101,13 +127,11 @@ const BRAVE_ENTRY_ID = 'com.brave/brave-search-mcp';
 
 function renderDetail() {
   return render(
-    <MemoryRouter
-      initialEntries={[`/settings/mcp-library/${encodeURIComponent(BRAVE_ENTRY_ID)}`]}
-    >
+    <MemoryRouter initialEntries={[`/settings/mcp-library/${encodeURIComponent(BRAVE_ENTRY_ID)}`]}>
       <Routes>
-        <Route path="/settings/mcp-library/:entryId" element={<DetailPage />} />
+        <Route path='/settings/mcp-library/:entryId' element={<DetailPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -117,6 +141,8 @@ beforeEach(() => {
   login.mockReset();
   messageSuccess.mockReset();
   messageError.mockReset();
+  testMcpConnection.mockReset();
+  testMcpConnection.mockResolvedValue({ success: true, data: { success: true, tools: [] } });
 });
 
 afterEach(() => {
@@ -147,6 +173,10 @@ test('Install click calls handleAddMcpServer with library source + libraryEntryI
   // Wait for the entry to mount.
   await screen.findByText('Brave Search');
 
+  // The SetupGuide (with its env inputs) now lives behind the "Setup" tab in
+  // the redesigned DetailPage. Open it before typing the API key.
+  fireEvent.click(screen.getByRole('button', { name: /^Setup$/i }));
+
   // Type API key into the SetupGuide input.
   const input = await screen.findByLabelText(/Brave API key/i);
   fireEvent.change(input, { target: { value: 'sk_test_123' } });
@@ -165,19 +195,22 @@ test('Install click calls handleAddMcpServer with library source + libraryEntryI
     expect.objectContaining({
       source: 'library',
       libraryEntryId: BRAVE_ENTRY_ID,
-      name: BRAVE_ENTRY_ID,
+      // The catalog id carries a reverse-DNS slash; entryToServerData sanitizes
+      // it to the agent-config-safe form (the slash would fail validateMcpServer).
+      // libraryEntryId keeps the canonical slug for dedup/matching.
+      name: BRAVE_ENTRY_ID.replace(/[^A-Za-z0-9_.-]/g, '-'),
       enabled: false,
       transport: expect.objectContaining({
         type: 'stdio',
         env: expect.objectContaining({ BRAVE_API_KEY: 'sk_test_123' }),
       }),
-    }),
+    })
   );
 
   expect(messageSuccess).toHaveBeenCalledTimes(1);
 });
 
-test('button shows Installed (disabled) when the entry is already in mcpServers', async () => {
+test('shows the installed lifecycle (Remove, no Install CTA) when already in mcpServers', async () => {
   hookState.mcpServers = [
     {
       id: 'mcp_existing',
@@ -194,6 +227,9 @@ test('button shows Installed (disabled) when the entry is already in mcpServers'
 
   renderDetail();
 
-  const btn = await screen.findByRole('button', { name: /Installed/i });
-  expect(btn).toBeDisabled();
+  // The redesigned DetailPage replaces the old disabled "Installed" button with
+  // the installed lifecycle action card: a "Remove connector" control and no
+  // fresh "Install" CTA.
+  expect(await screen.findByRole('button', { name: /Remove connector/i })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Install$/ })).not.toBeInTheDocument();
 });

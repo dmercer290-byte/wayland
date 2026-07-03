@@ -9,7 +9,7 @@
 import type { IConfirmation } from '@/common/chat/chatLib';
 import type { AgentType, AgentStatus } from './agentTypes';
 
-export type AgentKillReason = 'idle_timeout' | 'team_deleted';
+export type AgentKillReason = 'idle_timeout' | 'team_deleted' | 'workspace_rehome';
 
 export interface IAgentManager {
   readonly type: AgentType;
@@ -24,7 +24,8 @@ export interface IAgentManager {
 
   sendMessage(data: unknown): Promise<void>;
   stop(): Promise<void>;
-  confirm(msgId: string, callId: string, data: unknown): void;
+  // #504: `answer` threads an AskUserQuestion choice back to the engine.
+  confirm(msgId: string, callId: string, data: unknown, answer?: string): void;
   getConfirmations(): IConfirmation[];
   /**
    * Terminate the agent and wait for its child process to actually exit.

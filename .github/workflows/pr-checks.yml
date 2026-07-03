@@ -42,7 +42,7 @@ on:
         default: false
   pull_request:
     types: [opened, synchronize, edited, closed, ready_for_review, reopened]
-    branches: [main, dev, 'feat/**', 'release/**']
+    branches: [main, dev, 'feat/**', 'release/**', 'integration/**']
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -134,11 +134,16 @@ jobs:
     name: Unit Tests Shard (${{ matrix.os }} ${{ matrix.shard }}/4)
     if: github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false)
     runs-on: ${{ matrix.os }}
-    # 20m headroom: windows-hosted runners are ~2.7x slower per shard than ubuntu
-    # (a quarter of the suite runs ~9.5m on windows vs ~3.5m on ubuntu). With the
-    # electron-log/renderer import-hang fixed, no shard should approach this - it
-    # only absorbs windows runner variance so a healthy ~9.5m shard can't tip over.
-    timeout-minutes: 20
+    # #358: shard 1/4 was ~19m on ubuntu (vs the ~3.5m average) from real-timer
+    # error-path tests + the skillRecall BM25 full-corpus gate. Those are now
+    # fixed — the BM25 gate is gated out of PR shards behind RUN_RELEASE_GATES
+    # (runs in release-gates.yml), and the iMessage delivery-poll / ConnectionTester
+    # retry / killChild escalation tests no longer wait real seconds. Post-fix CI
+    # on this PR: ubuntu/macos shards ~2min, windows shards 7.6-9.3min (windows
+    # runners are just slow; tracked separately). The 35m stopgap drops to 15m —
+    # ~1.6x over the slowest (windows, 9.3min). If windows variance trips the cap,
+    # raise toward 18-20m.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -433,26 +438,110 @@ jobs:
       # The restored node_modules cache has electron without a usable binary
       # (path.txt missing / dist incomplete), and bun's --frozen-lockfile install
       # doesn't re-run electron's download script for the already-present package.
-      # Official remedy: delete node_modules/electron and reinstall so bun re-runs
-      # electron's (trusted) install script. Then run install.js explicitly as a
-      # belt-and-suspenders, and verify require('electron') resolves so a bad
-      # install fails HERE (with `set -x` diagnostics) instead of mid-spec.
-      # electron's default CDN (github.com/electron/electron releases) truncates
-      # the binary zip on this runner, leaving a ~688KB partial dist with no
-      # path.txt. Use the npmmirror mirror, request remote checksums (so a partial
-      # is rejected, not silently accepted), and clear every cache so the download
-      # is genuinely fresh. Assert path.txt + the binary so a bad install fails HERE.
+      # Remedy: explicitly run electron's (trusted) install.js, asserting a
+      # COMPLETE dist (path.txt + the executable it names) so a bad install fails
+      # HERE (with `set -x` diagnostics) instead of mid-spec.
+      #
+      # #361: since ~2026-06-26 an environmental egress cap on this runner
+      # truncates the ~100MB binary zip to ~678KB (a lone v8_context_snapshot.bin)
+      # on EVERY external host, so no download path can recover it. The durable
+      # fix is to cache the extracted binary in GitHub infra (restore is NOT
+      # subject to the external egress cap) and make the install idempotent so a
+      # cache-warm binary is reused instead of nuked + re-downloaded every run.
+      - name: Restore Electron binary cache
+        id: electron-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            node_modules/electron/dist
+            node_modules/electron/path.txt
+          # Keyed on the resolved electron version (node_modules/electron exists
+          # post-install); a version bump invalidates the entry.
+          key: electron-bin-${{ runner.os }}-${{ hashFiles('node_modules/electron/package.json') }}
+
       - name: Ensure Electron binary is installed
+        # ROOT CAUSE (#361): "Ensure Electron binary is installed" has failed
+        # deterministically since ~2026-06-26 — dist/ ends up with only
+        # v8_context_snapshot.bin and no path.txt, identically whether
+        # ELECTRON_MIRROR points at npmmirror or the default github host. So it
+        # is NOT a host-specific egress cap (that hypothesis was tested and
+        # disproven on this PR). @electron/get's own failure is swallowed by a
+        # console.error()+process.exit() flush race, hiding whether the cause is
+        # a network truncation or extraction (disk).
+        #
+        # This step bypasses @electron/get: download the zip with curl (a client
+        # not subject to whatever truncates @electron/get) with retries, then
+        # HARD-ASSERT size + sha256 against electron's bundled checksums.json so a
+        # truncated download fails loudly with the real byte count instead of
+        # silently. Unzip into dist/ ourselves, with df before/after to surface
+        # any ENOSPC. npmmirror first, default github as fallback. A complete
+        # install here also finally lets the actions/cache Save warm for reuse.
         env:
-          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
-          electron_use_remote_checksums: '1'
+          npm_config_disturl: 'https://electronjs.org/headers'
         run: |
-          set -ex
-          rm -rf node_modules/electron/dist node_modules/electron/path.txt ~/.cache/electron
-          force_no_cache=true node node_modules/electron/install.js
+          set -x
+          df -h /
+          electron_ok() {
+            [ -s node_modules/electron/path.txt ] \
+              && [ -x "node_modules/electron/dist/$(cat node_modules/electron/path.txt)" ]
+          }
+          if electron_ok; then
+            echo "electron already present (cache-warm); skipping download"
+            exit 0
+          fi
+          VER="$(node -p "require('./node_modules/electron/package.json').version")"
+          ZIP="electron-v${VER}-linux-x64.zip"
+          EXPECT="$(node -e "process.stdout.write((require('./node_modules/electron/checksums.json')['${ZIP}']||'').toLowerCase())")"
+          echo "electron ${VER}; expected sha256=${EXPECT:-<none>}"
+          for base in \
+            "https://npmmirror.com/mirrors/electron/v${VER}" \
+            "https://github.com/electron/electron/releases/download/v${VER}"; do
+            url="${base}/${ZIP}"
+            echo "::group::download ${url}"
+            rm -f "/tmp/${ZIP}"
+            if ! curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 -o "/tmp/${ZIP}" "${url}"; then
+              echo "curl failed: ${url}"; echo "::endgroup::"; continue
+            fi
+            sz="$(stat -c%s "/tmp/${ZIP}")"
+            echo "downloaded bytes=${sz} from ${url}"
+            if [ "${sz}" -lt 50000000 ]; then
+              echo "TRUNCATED (${sz} bytes < 50MB) from ${url}"; echo "::endgroup::"; continue
+            fi
+            actual="$(sha256sum "/tmp/${ZIP}" | cut -d' ' -f1)"
+            if [ -n "${EXPECT}" ] && [ "${EXPECT}" != "${actual}" ]; then
+              echo "SHA256 MISMATCH expect=${EXPECT} actual=${actual} from ${url}"; echo "::endgroup::"; continue
+            fi
+            echo "download verified (size+sha256); extracting"
+            df -h /
+            rm -rf node_modules/electron/dist
+            mkdir -p node_modules/electron/dist
+            if ! unzip -q "/tmp/${ZIP}" -d node_modules/electron/dist; then
+              echo "UNZIP FAILED from ${url}"; df -h /; echo "::endgroup::"; continue
+            fi
+            chmod +x node_modules/electron/dist/electron || true
+            printf 'electron' > node_modules/electron/path.txt
+            if electron_ok; then
+              echo "INSTALLED OK from ${url}"; echo "::endgroup::"; break
+            fi
+            echo "post-extract check failed from ${url}"; echo "::endgroup::"
+          done
+          df -h /
           ls -la node_modules/electron/dist | head -12
-          test -s node_modules/electron/path.txt
+          electron_ok
           node -e "const p=require('electron'); require('node:fs').accessSync(p); console.log('electron binary OK:', p)"
+
+      # Save only a COMPLETE install: the prior step asserts electron_ok and
+      # fails (skipping this step) otherwise, so reaching here means the binary
+      # is good — a truncated download can never poison the cache. Subsequent
+      # runs then restore it from GitHub infra, immune to the egress cap.
+      - name: Save Electron binary cache
+        if: steps.electron-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            node_modules/electron/dist
+            node_modules/electron/path.txt
+          key: ${{ steps.electron-cache.outputs.cache-primary-key }}
 
       # This spec drives the BUILT Electron app via Playwright's _electron API
       # (electronApp.evaluate / page.evaluate); it never uses Playwright's bundled
@@ -470,10 +559,15 @@ jobs:
       # properties under test (sandbox, contextIsolation, nodeIntegration:false,
       # IPC handler registration, electron version) are identical in dev and
       # packaged mode.
+      # Electron is a GUI app: on the headless runner it aborts at startup with
+      # "Missing X server or $DISPLAY -> The platform failed to initialize.
+      # Exiting", so Playwright's _electron.launch never gets a window and times
+      # out after 60s (#361, surfaced once the binary install was fixed). Run
+      # under xvfb (preinstalled on ubuntu runners) to give it a virtual display.
       - name: Run security-audit e2e spec
         env:
           E2E_DEV: '1'
-        run: bunx playwright test tests/e2e/specs/security-audit-verification.e2e.ts
+        run: xvfb-run -a bunx playwright test tests/e2e/specs/security-audit-verification.e2e.ts
 
       - name: Upload Playwright report on failure
         if: failure()

@@ -10,9 +10,12 @@ import { dirname } from 'path';
 import { parse, stringify } from 'smol-toml';
 import { getEnhancedEnv } from '@process/utils/shellEnv';
 import { resolveWCoreBinary } from '@process/agent/wcore/binaryResolver';
+import { resolveActiveConfigPath } from '@process/agent/wcore/profilePaths';
 import type { McpOperationResult } from '../McpProtocol';
 import { AbstractMcpAgent } from '../McpProtocol';
 import type { IMcpServer, IMcpServerTransport } from '@/common/config/storage';
+import { ensurePlaywrightChromium } from '../playwrightBrowsers';
+import { BUILTIN_PLAYWRIGHT_ID } from '@process/resources/builtinMcp/constants';
 
 /**
  * wayland-core config.toml transport type (kebab-case)
@@ -61,6 +64,31 @@ function getWCoreConfigPath(cliPath?: string): string {
 
   cachedConfigPath = result;
   return result;
+}
+
+/**
+ * Resolve the config.toml path that the ENGINE actually reads for the active
+ * profile (Design B: `WAYLAND_HOME` = the active profile's config dir, set on
+ * every spawn in envBuilder.ts). The settings-time sync MUST write to this same
+ * file or the engine reads a config.toml that never got the connector.
+ *
+ * Previously this used `<binary> --config-path`, which always resolves the
+ * NATIVE (default-profile) dir because the main process never has `WAYLAND_HOME`
+ * set - so on a NAMED profile the sync wrote one file while the spawn read
+ * another, and the connector was invisible in wcore. `resolveActiveConfigPath`
+ * is the single source of truth both the spawn (`resolveActiveConfigDir`) and
+ * the config bridge resolve through, so they can never disagree.
+ *
+ * Best-effort: a resolution failure falls back to the binary `--config-path`
+ * (backward-compatible for the default profile) rather than throwing.
+ */
+async function getActiveWCoreConfigPath(cliPath?: string): Promise<string> {
+  try {
+    return await resolveActiveConfigPath();
+  } catch (error) {
+    console.warn('[WCoreMcpAgent] Failed to resolve active profile config path, falling back to --config-path:', error);
+    return getWCoreConfigPath(cliPath);
+  }
 }
 
 /**
@@ -167,7 +195,7 @@ export class WCoreMcpAgent extends AbstractMcpAgent {
    */
   private async readConfig(cliPath?: string): Promise<WCoreConfigFile> {
     try {
-      const content = await fs.readFile(getWCoreConfigPath(cliPath), 'utf-8');
+      const content = await fs.readFile(await getActiveWCoreConfigPath(cliPath), 'utf-8');
       return parse(content) as WCoreConfigFile;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -181,8 +209,10 @@ export class WCoreMcpAgent extends AbstractMcpAgent {
    * Write the wayland-core config file (preserving non-MCP sections)
    */
   private async writeConfig(config: WCoreConfigFile): Promise<void> {
-    // Ensure directory exists
-    const configPath = getWCoreConfigPath(this.resolvedCliPath);
+    // Ensure directory exists. Write to the ACTIVE-PROFILE config.toml so the
+    // engine spawn (which reads via WAYLAND_HOME = active profile dir) sees what
+    // we wrote - not the native default-profile path the binary reports.
+    const configPath = await getActiveWCoreConfigPath(this.resolvedCliPath);
     await fs.mkdir(dirname(configPath), { recursive: true });
     await fs.writeFile(configPath, stringify(config), 'utf-8');
   }
@@ -244,6 +274,15 @@ export class WCoreMcpAgent extends AbstractMcpAgent {
         }
 
         await this.writeConfig(config);
+
+        // #465 first-run browser provisioning: once the bundled Playwright MCP
+        // is written to the engine config, make sure chromium is installed into
+        // its managed dir so the agent's first browse finds it. Fire-and-forget
+        // + guarded (one download ever), so it never blocks the sync.
+        if (mcpServers.some((s) => s.id === BUILTIN_PLAYWRIGHT_ID)) {
+          void ensurePlaywrightChromium();
+        }
+
         return { success: true };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) };

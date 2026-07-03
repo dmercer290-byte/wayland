@@ -12,9 +12,9 @@ import QuickLaunchRow from '@/renderer/pages/guid/components/newChatStarter/Quic
 describe('QuickLaunchRow', () => {
   const baseProps = { onAnchorClick: vi.fn(), onViewAll: vi.fn() };
 
-  it('renders all 6 anchor cards', () => {
+  it('renders all 7 anchor cards', () => {
     const { container } = render(<QuickLaunchRow {...baseProps} />);
-    expect(container.querySelectorAll('[data-quicklaunch-id]')).toHaveLength(6);
+    expect(container.querySelectorAll('[data-quicklaunch-id]')).toHaveLength(7);
   });
 
   it('renders Cowork first', () => {
@@ -26,9 +26,13 @@ describe('QuickLaunchRow', () => {
     const onAnchorClick = vi.fn();
     const { container } = render(<QuickLaunchRow {...baseProps} onAnchorClick={onAnchorClick} />);
     fireEvent.click(container.querySelector('[data-quicklaunch-id="write-copy"]') as HTMLButtonElement);
-    expect(onAnchorClick).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'write-copy', label: 'Write copy', assistantId: 'ext-copy',
-    }));
+    expect(onAnchorClick).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'write-copy',
+        label: 'Write copy',
+        assistantId: 'builtin-copy',
+      })
+    );
   });
 
   it('renders a View-all link that calls onViewAll', () => {

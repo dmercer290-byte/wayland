@@ -21,12 +21,14 @@ import type {
   AcpSessionUpdate,
 } from '@/common/types/acpTypes';
 import { ACP_METHODS, JSONRPC_VERSION, parseInitializeResult } from '@/common/types/acpTypes';
+import { mapModeForAcpBridge } from '@/common/types/agentModes';
 import type { ChildProcess } from 'child_process';
 import type { AcpSessionMcpServer } from './mcpSessionConfig';
 import path from 'path';
 import { connectClaude, connectCodebuddy, connectCodex, spawnGenericBackend } from './acpConnectors';
 import type { SpawnResult } from './acpConnectors';
 import { killChild, readTextFile, writeJsonRpcMessage, writeTextFile } from './utils';
+import { trackAgentChild } from '@process/agent/agentChildRegistry';
 // W4 audit CRIT-1 (2026-05-19): route ACP fs ops through the imported-team
 // sandbox gate before falling back to the legacy direct-fs helpers.
 import { gateAcpFileOp } from '@process/team/sandbox/acpFileOpGate';
@@ -181,6 +183,11 @@ export class AcpConnection {
   private async spawnAndSetup(result: SpawnResult, backend: string): Promise<void> {
     this.child = result.child;
     this.isDetached = result.isDetached;
+    // #443: register with the last-resort reaper so a quit that truncates the
+    // graceful per-agent kill still force-kills this backend child (auto-removed
+    // on exit / disconnect). Pass isDetached so the reaper group-kills it exactly
+    // like terminateChild does.
+    trackAgentChild(this.child, this.isDetached);
     await this.setupChildProcessHandlers(backend);
   }
 
@@ -999,14 +1006,19 @@ export class AcpConnection {
       throw new Error('No active ACP session');
     }
 
+    // Translate Wayland-internal modes the bridge does not understand. Today only
+    // 'autoGuarded' -> 'default' (so the bridge escalates risky tool calls as
+    // permission requests that Wayland's guardrail then auto-approves-or-vetoes).
+    const bridgeModeId = mapModeForAcpBridge(modeId);
+
     const response = await this.sendRequest<AcpResponse>('session/set_mode', {
       sessionId: this.sessionId,
-      modeId,
+      modeId: bridgeModeId,
     });
 
-    // Optimistically update the cached modes state
+    // Optimistically update the cached modes state to what the bridge received
     if (this.modes) {
-      this.modes = { ...this.modes, currentModeId: modeId };
+      this.modes = { ...this.modes, currentModeId: bridgeModeId };
     }
 
     return response;
@@ -1130,6 +1142,29 @@ export class AcpConnection {
   }
 
   /**
+   * S4: Cheap honest liveness signal for the auto-reconnect guard.
+   *
+   * `isConnected` is presence-only (child alive), so a spawned-but-dead/hung
+   * CLI still reads "connected" and the guard would silently wait on a session
+   * that can never reply. This combines the presence check with the signals we
+   * already track at zero cost: an established session id, a completed
+   * initialize+setup handshake, and a child that has not exited
+   * (`exitCode === null`). It does NOT add a ping/echo round-trip (out of
+   * scope) - it only stops treating an obviously-dead session as ready so the
+   * caller reconnects (or surfaces an honest error) instead of hanging.
+   */
+  get isSessionReady(): boolean {
+    return (
+      this.child !== null &&
+      !this.child.killed &&
+      this.child.exitCode === null &&
+      this.sessionId !== null &&
+      this.isInitialized &&
+      this.isSetupComplete
+    );
+  }
+
+  /**
    * Get the current session ID (for session resume support).
    */
   get currentSessionId(): string | null {
@@ -1158,21 +1193,16 @@ export class AcpConnection {
   // teams fall through to the unchanged legacy direct-fs path.
   private async handleReadOperation(params: { path: string; sessionId?: string }): Promise<{ content: string }> {
     const conversationId = this.conversationId ?? '';
-    const gated = await gateAcpFileOp(
-      conversationId,
-      'read',
-      { path: params.path },
-      async () => {
-        const resolvedReadPath = this.resolveWorkspacePath(params.path);
-        this.onFileOperation({
-          method: 'fs/read_text_file',
-          path: resolvedReadPath,
-          sessionId: params.sessionId || '',
-        });
-        const { content } = await readTextFile(resolvedReadPath);
-        return { kind: 'read' as const, content };
-      }
-    );
+    const gated = await gateAcpFileOp(conversationId, 'read', { path: params.path }, async () => {
+      const resolvedReadPath = this.resolveWorkspacePath(params.path);
+      this.onFileOperation({
+        method: 'fs/read_text_file',
+        path: resolvedReadPath,
+        sessionId: params.sessionId || '',
+      });
+      const { content } = await readTextFile(resolvedReadPath);
+      return { kind: 'read' as const, content };
+    });
     if (gated.kind !== 'read') {
       throw new Error('handleReadOperation: gate returned non-read result');
     }

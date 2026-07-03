@@ -51,6 +51,9 @@ const SystemModalContent: React.FC = () => {
   const [agentIdleTimeout, setAgentIdleTimeout] = useState<number>(5);
   const [saveUploadToWorkspace, setSaveUploadToWorkspace] = useState(false);
   const [autoPreviewOfficeFiles, setAutoPreviewOfficeFiles] = useState(true);
+  // Concierge default landing persona (reversible). Default ON: a fresh chat
+  // starts on the Concierge assistant; off keeps the last-used engine.
+  const [conciergeDefaultPersona, setConciergeDefaultPersona] = useState(true);
   // L17 (AUDIT-05 F16): surface auto-updater bootstrap failures so users know auto-updates
   // are disabled until next launch. `null` = unknown/loading, `available: true` = healthy.
   const [updateChannelStatus, setUpdateChannelStatus] = useState<{ available: boolean; error?: string } | null>(null);
@@ -127,6 +130,12 @@ const SystemModalContent: React.FC = () => {
       .invoke()
       .then((status) => setUpdateChannelStatus(status))
       .catch((err) => console.warn('[SystemModalContent.getAutoUpdaterStatus]', err));
+  }, []);
+
+  useEffect(() => {
+    ConfigStorage.get('concierge.defaultPersona')
+      .then((val) => setConciergeDefaultPersona(val !== false))
+      .catch((err) => console.warn('[SystemModalContent.get concierge.defaultPersona]', err));
   }, []);
 
   const handleCloseToTrayChange = useCallback((checked: boolean) => {
@@ -220,6 +229,14 @@ const SystemModalContent: React.FC = () => {
     });
   }, []);
 
+  const handleConciergeDefaultPersonaChange = useCallback((checked: boolean) => {
+    setConciergeDefaultPersona(checked);
+    ConfigStorage.set('concierge.defaultPersona', checked).catch((err) => {
+      console.warn('[SystemModalContent.set concierge.defaultPersona]', err);
+      setConciergeDefaultPersona(!checked);
+    });
+  }, []);
+
   // Get system directory info
   const { data: systemInfo } = useSWR('system.dir.info', () => ipcBridge.application.systemInfo.invoke());
 
@@ -291,6 +308,18 @@ const SystemModalContent: React.FC = () => {
       description: t('settings.autoPreviewOfficeFilesDesc'),
       component: <Switch checked={autoPreviewOfficeFiles} onChange={handleAutoPreviewOfficeFilesChange} />,
     },
+    {
+      key: 'conciergeDefaultPersona',
+      label: t('concierge.settings.defaultPersona'),
+      description: t('concierge.settings.defaultPersonaDesc'),
+      component: (
+        <Switch
+          checked={conciergeDefaultPersona}
+          onChange={handleConciergeDefaultPersonaChange}
+          data-testid='concierge-default-persona-switch'
+        />
+      ),
+    },
   ];
 
   const saveDirConfigValidate = (_values: { cacheDir: string; workDir: string }): Promise<unknown> => {
@@ -352,6 +381,20 @@ const SystemModalContent: React.FC = () => {
                   error: updateChannelStatus.error || 'unknown',
                 })}
               />
+            )}
+            {isElectronDesktop() && (
+              <div className='w-full flex flex-col divide-y divide-border-2'>
+                <PreferenceRow
+                  label={t('settings.checkForUpdates', { defaultValue: 'Software updates' })}
+                  description={t('settings.checkForUpdatesDesc', {
+                    defaultValue: 'Check that you are running the latest version of Wayland.',
+                  })}
+                >
+                  <Button size='small' onClick={() => window.dispatchEvent(new Event('wayland-open-update-modal'))}>
+                    {t('settings.checkForUpdatesButton', { defaultValue: 'Check for updates' })}
+                  </Button>
+                </PreferenceRow>
+              </div>
             )}
             <div className='w-full flex flex-col divide-y divide-border-2'>
               {preferenceItems.map((item) => (

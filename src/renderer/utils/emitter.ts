@@ -35,7 +35,20 @@ interface EventTypes {
    * derived from the backend (route through Flux, add a provider key, or run the
    * CLI login command).
    */
-  'acp.auth.failed.card': [{ conversation_id: string; backend: string }];
+  'acp.auth.failed.card': [
+    {
+      conversation_id: string;
+      backend: string;
+      pendingInput?: string;
+      pendingFiles?: string[];
+      fluxAlreadyRouted?: boolean;
+    },
+  ];
+  /**
+   * Fired by AcpChat after a successful Flux failover. AcpSendBox listens and
+   * re-runs the failed turn through the now-flux-routed backend.
+   */
+  'acp.flux.replay': [{ conversation_id: string; input: string; files: string[] }];
   /**
    * Fired by WCoreSendBox when a Wayland Core turn fails to authenticate (the
    * inference provider rejected the key, e.g. 401). WCoreChat listens and shows
@@ -43,7 +56,24 @@ interface EventTypes {
    * provider (Wayland Core routes any registry provider) so the remedy can offer
    * to re-key that specific provider.
    */
-  'wcore.auth.failed.card': [{ conversation_id: string; providerLabel?: string }];
+  'wcore.auth.failed.card': [
+    {
+      conversation_id: string;
+      providerLabel?: string;
+      pendingInput?: string;
+      pendingFiles?: string[];
+      fluxAlreadyRouted?: boolean;
+    },
+  ];
+  /** Fired by WCoreChat after a successful Flux failover; WCoreSendBox replays the failed turn. */
+  'wcore.flux.replay': [{ conversation_id: string; input: string; files: string[] }];
+  /**
+   * #466 Fired by WCoreSendBox when the engine advertises (or drops) the
+   * Computer-Use capability for this conversation. WCoreChat listens and shows
+   * the macOS permission onboarding card while CUA is available + grants are
+   * missing. `hasCua` reflects the latest `computer_use` capability flag.
+   */
+  'wcore.cua.capability': [{ conversation_id: string; hasCua: boolean }];
   'codex.selected.file': [Array<string | FileOrFolderItem>];
   'codex.selected.file.append': [Array<string | FileOrFolderItem>];
   'codex.selected.file.clear': void;

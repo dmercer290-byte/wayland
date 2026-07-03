@@ -17,11 +17,17 @@ const {
   mockDb,
   mockTeamEventBusEmit,
   mockChannelEmitAgentMessage,
+  mockAddOrUpdateMessage,
+  mockMainError,
+  mockMainLog,
 } = vi.hoisted(() => ({
   emitResponseStream: vi.fn(),
   emitConfirmationAdd: vi.fn(),
   emitConfirmationUpdate: vi.fn(),
   emitConfirmationRemove: vi.fn(),
+  mockAddOrUpdateMessage: vi.fn(),
+  mockMainError: vi.fn(),
+  mockMainLog: vi.fn(),
   mockDb: {
     getConversationMessages: vi.fn(() => ({ data: [] })),
     getConversation: vi.fn(() => ({ success: false })),
@@ -92,7 +98,7 @@ vi.mock('@process/utils/initStorage', () => ({
 
 vi.mock('@process/utils/message', () => ({
   addMessage: vi.fn(),
-  addOrUpdateMessage: vi.fn(),
+  addOrUpdateMessage: mockAddOrUpdateMessage,
 }));
 
 vi.mock('@/common/utils', () => {
@@ -106,8 +112,8 @@ vi.mock('@/renderer/utils/common', () => {
 });
 
 vi.mock('@process/utils/mainLogger', () => ({
-  mainError: vi.fn(),
-  mainLog: vi.fn(),
+  mainError: mockMainError,
+  mainLog: mockMainLog,
   mainWarn: vi.fn(),
 }));
 
@@ -441,6 +447,82 @@ describe('GAP-8: WCoreManager Multi EventBus Emission', () => {
       const channelCalls = findChannelEmissions();
       const channelFinish = channelCalls.find(([convId]: [string]) => convId === 'conv-eb-2');
       expect(channelFinish).toBeDefined();
+    });
+  });
+
+  // ── #264: approval_required is pre-processed, never reaches transformMessage ─
+
+  describe('#264: approval_required pre-processed by WCoreManager', () => {
+    it('does NOT reach transformMessage as an unsupported type', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Non-empty msg_id is the bug condition: the event is stamped with the
+      // active msg_id, so it survives the empty-msg_id guard and would fall
+      // through to transformMessage's default branch on base.
+      emitEvent(manager, { type: 'start', data: '', msg_id: 'msg-1' });
+      emitEvent(manager, { type: 'approval_required', data: { callId: 'c1', reason: 'info' }, msg_id: 'msg-1' });
+
+      const unsupportedWarn = warnSpy.mock.calls.find(
+        ([msg]: [unknown]) => typeof msg === 'string' && msg.includes("Unsupported message type 'approval_required'")
+      );
+      expect(unsupportedWarn).toBeUndefined();
+
+      // Consumed: not re-emitted to the renderer and not persisted as a message.
+      expect(findIpcEmissions('approval_required')).toHaveLength(0);
+      expect(mockAddOrUpdateMessage).not.toHaveBeenCalled();
+    });
+
+    it('interactive mode: quiet info (renderer confirmation gate owns it), NOT a loud error (#390)', () => {
+      // Default (non-auto) mode. A non-info approval without a resume token is the
+      // normal exec/mcp case: the renderer tool-confirmation gate prompts the user
+      // and resumes the turn. The old build logged this as a loud mainError on
+      // every exec approval, falsely reading as a dropped approval (#390).
+      (manager as any).currentMode = 'default';
+      emitEvent(manager, { type: 'start', data: '', msg_id: 'msg-1' });
+      emitEvent(manager, {
+        type: 'approval_required',
+        data: { callId: 'c1', reason: 'destructive_operation' },
+        msg_id: 'msg-1',
+      });
+
+      const quiet = mockMainLog.mock.calls.find(
+        ([, msg]: [unknown, unknown]) =>
+          typeof msg === 'string' &&
+          msg.includes("reason='destructive_operation'") &&
+          msg.includes('renderer confirmation gate')
+      );
+      expect(quiet).toBeDefined();
+      // It must NOT loud-error in interactive mode.
+      const loud = mockMainError.mock.calls.find(
+        ([, msg]: [unknown, unknown]) => typeof msg === 'string' && msg.includes("reason='destructive_operation'")
+      );
+      expect(loud).toBeUndefined();
+
+      // Still consumed (handled by the renderer gate), not persisted.
+      expect(findIpcEmissions('approval_required')).toHaveLength(0);
+      expect(mockAddOrUpdateMessage).not.toHaveBeenCalled();
+    });
+
+    it('auto mode: loud error when a non-info approval cannot self-resume (real wedge, #264)', () => {
+      // In Autopilot/Auto-Edit the engine was supposed to self-resolve but could
+      // not (no resume token) and there is no HITL UI to fall back on, so the turn
+      // can genuinely wedge — that stays a loud mainError.
+      (manager as any).currentMode = 'yolo';
+      emitEvent(manager, { type: 'start', data: '', msg_id: 'msg-1' });
+      emitEvent(manager, {
+        type: 'approval_required',
+        data: { callId: 'c1', reason: 'destructive_operation' },
+        msg_id: 'msg-1',
+      });
+
+      const goneLoud = mockMainError.mock.calls.find(
+        ([, msg]: [unknown, unknown]) =>
+          typeof msg === 'string' && msg.includes("reason='destructive_operation'") && msg.includes('auto mode')
+      );
+      expect(goneLoud).toBeDefined();
+
+      expect(findIpcEmissions('approval_required')).toHaveLength(0);
+      expect(mockAddOrUpdateMessage).not.toHaveBeenCalled();
     });
   });
 

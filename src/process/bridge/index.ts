@@ -16,6 +16,7 @@ import { initBedrockBridge } from './bedrockBridge';
 import { initChannelBridge } from './channelBridge';
 import { initConversationBridge } from './conversationBridge';
 import { initCronBridge } from './cronBridge';
+import { initConciergeConfigBridge } from './conciergeConfigBridge';
 import { initProjectBridge } from './projectBridge';
 import { initDatabaseBridge } from './databaseBridge';
 import { initDialogBridge } from './dialogBridge';
@@ -29,6 +30,8 @@ import { initMcpBridge } from './mcpBridge';
 import { initModelBridge } from './modelBridge';
 import { initPreviewHistoryBridge } from './previewHistoryBridge';
 import { initShellBridge } from './shellBridge';
+import { initCuaPermissionBridge } from './cuaPermissionBridge';
+import { initMicPermissionBridge } from './micPermissionBridge';
 import { initStarOfficeBridge } from './starOfficeBridge';
 import { initSpeechToTextBridge } from './speechToTextBridge';
 import { initVoiceAssetBridge } from './voiceAssetBridge';
@@ -46,6 +49,7 @@ import { initModelHubBridge } from './modelHubBridge';
 import { initWikiBridge } from './wikiBridge';
 import { startWikiAutoSync } from '@process/services/wiki/wikiAutoSync';
 import { initImportBridge } from './importBridge';
+import { initMigrationBridge } from './migrationBridge';
 import { initSystemSettingsBridge } from './systemSettingsBridge';
 import { initFluxConnectorBridge } from './fluxConnectorBridge';
 import { initAmbientBridge } from './ambientBridge';
@@ -67,7 +71,9 @@ import type { TeamSessionService } from '@process/team/TeamSessionService';
 import { initModelRegistryIpc } from '@process/providers/ipc/modelRegistryIpc';
 import { initWcoreToolKeyIpc } from '@process/agent/wcore/toolKeyIpc';
 import { initWcoreConfigBridge } from './wcoreConfigBridge';
+import { initWcoreUpdateBridge } from './wcoreUpdateBridge';
 import { initPendingSendBridge } from './pendingSendBridge';
+import { initDoctorBridge } from './doctorBridge';
 
 export interface BridgeDependencies {
   conversationService: IConversationService;
@@ -83,6 +89,8 @@ export interface BridgeDependencies {
 export function initAllBridges(deps: BridgeDependencies): void {
   initDialogBridge();
   initShellBridge();
+  initCuaPermissionBridge();
+  initMicPermissionBridge();
   initFsBridge();
   initFileWatchBridge();
   initConversationBridge(deps.conversationService, deps.workerTaskManager, deps.teamSessionService);
@@ -106,6 +114,7 @@ export function initAllBridges(deps: BridgeDependencies): void {
   initDatabaseBridge(deps.conversationRepo);
   initExtensionsBridge(deps.conversationRepo, deps.workerTaskManager);
   initCronBridge();
+  initConciergeConfigBridge();
   initProjectBridge();
   initKickoffBridge();
   initSystemSettingsBridge();
@@ -118,6 +127,7 @@ export function initAllBridges(deps: BridgeDependencies): void {
   initWikiBridge();
   startWikiAutoSync();
   initImportBridge();
+  initMigrationBridge();
   initAmbientBridge();
   initNotificationBridge();
   initTaskBridge(deps.workerTaskManager);
@@ -140,12 +150,14 @@ export function initAllBridges(deps: BridgeDependencies): void {
   });
   initWcoreToolKeyIpc();
   initWcoreConfigBridge();
+  initWcoreUpdateBridge();
   initPendingSendBridge();
   initStorageBridge();
   initNicknamesBridge();
   initSyncIpc();
   initConstitutionBridge();
   initOnboardingBridge();
+  initDoctorBridge();
 }
 
 /**
@@ -171,6 +183,7 @@ export {
   initChannelBridge,
   initConversationBridge,
   initCronBridge,
+  initConciergeConfigBridge,
   initProjectBridge,
   initDatabaseBridge,
   initDialogBridge,
@@ -210,6 +223,8 @@ export {
   initIjfwDropBridge,
   initWikiBridge,
   initImportBridge,
+  initMigrationBridge,
+  initDoctorBridge,
 };
 export { initModelRegistryIpc } from '@process/providers/ipc/modelRegistryIpc';
 export { disposeAllSnapshots } from './workspaceSnapshotBridge';

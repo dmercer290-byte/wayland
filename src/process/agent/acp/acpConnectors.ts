@@ -13,7 +13,7 @@
 import type { ChildProcess, SpawnOptions } from 'child_process';
 import { execFile as execFileCb, execFileSync, spawn } from 'child_process';
 import { promisify } from 'util';
-import { promises as fs, rmSync } from 'fs';
+import { promises as fs, readdirSync, rmSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import {
@@ -22,6 +22,7 @@ import {
   CODEX_ACP_BRIDGE_VERSION,
   CODEX_ACP_NPX_PACKAGE,
 } from '@/common/types/acpTypes';
+import { resolveBridgePackage } from './bridgeVersionResolver';
 import {
   findSuitableNodeBin,
   getEnhancedEnv,
@@ -401,6 +402,83 @@ export function clearBunxCache(stderr: string): string | null {
   }
 }
 
+/** Escape a string for literal use inside a RegExp. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * #373 fallback: clear the agent's bunx WORKING dirs BY NAME when stderr has no
+ * extractable cache path. A partial extraction crashes with
+ * `error: Cannot find module 'zod/v4'` which prints NO bunx path (and the
+ * `@scope` layout lacks the `name@version/node_modules` segment `clearBunxCache`
+ * keys off), so the path-extraction self-heal returns null and the app retries
+ * forever against the same corrupt cache.
+ *
+ * Bun names its per-run working dir `bunx-<uid>-<scope-or-name>` under the OS
+ * temp dir (it does NOT honor `BUN_TMPDIR` for this on macOS/Linux - only
+ * Windows redirects TMP/TEMP). We remove ONLY directories matching that exact
+ * `bunx-<digits>-<pkg>` shape for THIS package, under the known temp roots, so
+ * nothing outside bun's own ephemeral working dirs is ever touched. The next
+ * `bun x` re-installs from scratch.
+ *
+ * @returns the absolute dirs removed (empty if none matched).
+ */
+export function clearBunxWorkingDirsForPackage(
+  npxPackage: string,
+  env: Record<string, string | undefined> = process.env
+): string[] {
+  // `@scope/name@1.2.3` -> bunx dir suffix `@scope`; `name@1.2.3` -> `name`.
+  const spec = npxPackage.replace(/@[^@/]+$/, '');
+  const suffix = spec.split('/')[0];
+  if (!suffix) return [];
+  // Case-insensitive: Windows/macOS filesystems are case-insensitive, so the
+  // on-disk bunx dir may not match the package's exact casing.
+  const dirRe = new RegExp(`^bunx-\\d+-${escapeRegExp(suffix)}`, 'i');
+
+  // bunx writes its working dir under the OS temp dir (macOS/Linux) or the
+  // Windows-redirected TMP/TEMP (= BUN_TMPDIR). Also scan bun's install cache
+  // and home (`~/.bun`, `%LOCALAPPDATA%\\.bun` on Windows) so a corrupt extract
+  // is cleared wherever bun placed it.
+  const roots = [
+    env.BUN_TMPDIR,
+    env.TMPDIR,
+    env.TMP,
+    env.TEMP,
+    env.BUN_INSTALL_CACHE_DIR,
+    env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, '.bun') : undefined,
+    path.join(os.homedir(), '.bun'),
+    os.tmpdir(),
+  ].filter((r): r is string => typeof r === 'string' && r.length > 0);
+  const removed: string[] = [];
+  const seenRoots = new Set<string>();
+  const seenDirs = new Set<string>();
+  for (const root of roots) {
+    if (seenRoots.has(root)) continue;
+    seenRoots.add(root);
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (!dirRe.test(name)) continue;
+      const full = path.join(root, name);
+      if (seenDirs.has(full)) continue;
+      seenDirs.add(full);
+      try {
+        if (!statSync(full).isDirectory()) continue;
+        rmSync(full, { recursive: true, force: true });
+        removed.push(full);
+      } catch {
+        // best-effort: skip dirs we can't stat / remove
+      }
+    }
+  }
+  return removed;
+}
+
 /**
  * Detect bun "moving to cache dir" EPERM failures.
  * On Windows, antivirus (Windows Defender) locks files during scanning,
@@ -638,9 +716,16 @@ async function connectNpxBackend(config: {
     // forces a fresh install with complete dependencies.
     const errMsg = error instanceof Error ? error.message : '';
 
-    // Retry 1: bunx cache corruption (missing transitive dependencies)
+    // Retry 1: bunx cache corruption (missing transitive deps / partial extract)
     if (isBunxCacheCorruption(errMsg)) {
-      const cleared = clearBunxCache(errMsg);
+      let cleared = clearBunxCache(errMsg);
+      if (!cleared) {
+        // #373: the crash (`Cannot find module 'zod/v4'` from a partial zod
+        // extraction) prints no extractable bunx path, so clear the agent's
+        // bunx working dirs by name instead of retrying the same corrupt cache.
+        const dirs = clearBunxWorkingDirsForPackage(npxPackage, cleanEnv);
+        if (dirs.length > 0) cleared = dirs.join(', ');
+      }
       if (cleared) {
         console.log(`[ACP ${backend}] Cleared corrupted bunx cache: ${cleared}, retrying...`);
         await setup(spawnNpxBackend(backend, npxPackage, npxCommand, cleanEnv, workingDir, isWindows, false, opts));
@@ -682,15 +767,21 @@ export function connectClaude(
   hooks: NpxConnectHooks,
   customEnv?: Record<string, string>
 ): Promise<void> {
-  return connectNpxBackend({
-    backend: 'claude',
-    npxPackage: CLAUDE_ACP_NPX_PACKAGE,
-    prepareFn: prepareClaude,
-    workingDir,
-    ...hooks,
-    customEnv,
-    detached: process.platform !== 'win32',
-  });
+  return (async () => {
+    // Resolve the LATEST published claude-agent-acp at spawn time (new models /
+    // features) instead of a stale pin; falls back to CLAUDE_ACP_NPX_PACKAGE
+    // offline. Cached for hours so this is a no-op after the first spawn.
+    const npxPackage = await resolveBridgePackage(CLAUDE_ACP_NPX_PACKAGE);
+    return connectNpxBackend({
+      backend: 'claude',
+      npxPackage,
+      prepareFn: prepareClaude,
+      workingDir,
+      ...hooks,
+      customEnv,
+      detached: process.platform !== 'win32',
+    });
+  })();
 }
 
 /** Connect to Codex ACP bridge via npx. */
@@ -701,10 +792,13 @@ export function connectCodex(
 ): Promise<void> {
   return (async () => {
     const codexPlatformPackage = resolvePreferredCodexAcpPlatformPackage();
+    // Resolve the latest published codex-acp at spawn time (fallback to the
+    // pinned CODEX_ACP_NPX_PACKAGE offline).
+    const codexAcpPackage = await resolveBridgePackage(CODEX_ACP_NPX_PACKAGE);
     const preferDirectPackage = codexPlatformPackage !== null && shouldPreferDirectCodexAcpPackage();
     const codexPackageCandidates = preferDirectPackage
-      ? [codexPlatformPackage, CODEX_ACP_NPX_PACKAGE]
-      : [CODEX_ACP_NPX_PACKAGE, ...(codexPlatformPackage ? [codexPlatformPackage] : [])];
+      ? [codexPlatformPackage, codexAcpPackage]
+      : [codexAcpPackage, ...(codexPlatformPackage ? [codexPlatformPackage] : [])];
 
     let lastError: Error | null = null;
 
@@ -730,7 +824,7 @@ export function connectCodex(
           index === 0 &&
           !preferDirectPackage &&
           codexPlatformPackage !== null &&
-          npxPackage === CODEX_ACP_NPX_PACKAGE &&
+          npxPackage === codexAcpPackage &&
           isCodexMetaPackageOptionalDependencyError(lastError.message);
         const hasRemainingCandidates = index < codexPackageCandidates.length - 1;
 
@@ -768,13 +862,16 @@ export function connectCodex(
 
 /** Connect to CodeBuddy ACP via npx. */
 export function connectCodebuddy(workingDir: string, hooks: NpxConnectHooks): Promise<void> {
-  return connectNpxBackend({
-    backend: 'codebuddy',
-    npxPackage: CODEBUDDY_ACP_NPX_PACKAGE,
-    prepareFn: prepareCodebuddy,
-    workingDir,
-    ...hooks,
-    extraArgs: ['--acp'],
-    detached: process.platform !== 'win32',
-  });
+  return (async () => {
+    const npxPackage = await resolveBridgePackage(CODEBUDDY_ACP_NPX_PACKAGE);
+    return connectNpxBackend({
+      backend: 'codebuddy',
+      npxPackage,
+      prepareFn: prepareCodebuddy,
+      workingDir,
+      ...hooks,
+      extraArgs: ['--acp'],
+      detached: process.platform !== 'win32',
+    });
+  })();
 }

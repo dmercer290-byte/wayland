@@ -1,0 +1,39 @@
+/* Branded orbit "thinking" indicator for the observability rework. Rendered
+   inline as the message-list footer (under the last block, Claude-style). One
+   line: animated OrbitGlyph + label + elapsed. Tokens only (no hardcoded hex).
+   Aligned to the message column (max-width 780, centered, 8px gutter) so the
+   glyph lines up with the message text. */
+
+.container {
+  min-height: 28px;
+  /* Generous bottom padding so the orbit is never crammed/overlapped by the
+     activity badge or the composer (it stays parked under the last block). */
+  padding: 8px 8px 28px;
+  max-width: 780px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+}
+
+/* Active line: orbit glyph + label + elapsed. */
+.activeStep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.label {
+  color: var(--text-secondary);
+}
+
+/* The real current action reads slightly brighter than the rotating filler. */
+.labelReal {
+  color: var(--text-primary);
+}
+
+.elapsed {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

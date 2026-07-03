@@ -44,7 +44,7 @@ repos:
     hooks:
       - id: typecheck
         name: TypeScript Check
-        entry: bunx tsc --noEmit
+        entry: bun run typecheck
         language: system
         files: \.(ts|tsx)$
         pass_filenames: false
@@ -67,6 +67,10 @@ repos:
         entry: bun run format
         language: system
         files: \.(ts|tsx|js|jsx|json|css|md|yaml|yml|toml)$
+        # Generated, pretty-printed resource catalogs (copied verbatim at build by
+        # scripts/build-with-builder.js). They are data, not source, and are not
+        # oxfmt-canonical on main either; formatting them would churn 60k+ lines.
+        exclude: ^src/process/resources/(skills-library|bundled-workflows)/index\.json$
         pass_filenames: true
 
   # i18n translation files validation

@@ -33,6 +33,7 @@ import fs from 'fs';
 import path from 'path';
 import { migrateConversationToDatabase } from './migrationUtils';
 import { ConversationSideQuestionService } from './services/ConversationSideQuestionService';
+import { getDatabase } from '@process/services/database';
 
 const refreshTrayMenuSafely = async (): Promise<void> => {
   try {
@@ -488,6 +489,19 @@ export function initConversationBridge(
     return { success: true };
   });
 
+  ipcBridge.conversation.deleteMessagesAfter.provider(async ({ conversation_id, afterTimestamp }) => {
+    try {
+      const db = await getDatabase();
+      const result = db.deleteMessagesAfter(conversation_id, afterTimestamp);
+      if (!result.success) {
+        return { success: false, msg: result.error };
+      }
+      return { success: true, data: { deleted: result.data ?? 0 } };
+    } catch (error) {
+      return { success: false, msg: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
   // Placeholder: runtime config hot-swap is not yet supported.
   // Model switching always uses kill-restart; thinking/effort may be added later.
   ipcBridge.conversation.setConfig.provider(async () => {
@@ -707,10 +721,10 @@ export function initConversationBridge(
 
   // Generic confirmMessage - dispatches based on conversation type
 
-  ipcBridge.conversation.confirmation.confirm.provider(async ({ conversation_id, msg_id, data, callId }) => {
+  ipcBridge.conversation.confirmation.confirm.provider(async ({ conversation_id, msg_id, data, callId, answer }) => {
     const task = workerTaskManager.getTask(conversation_id);
     if (!task) return { success: false, msg: 'conversation not found' };
-    task.confirm(msg_id, callId, data);
+    task.confirm(msg_id, callId, data, answer);
     return { success: true };
   });
   ipcBridge.conversation.confirmation.list.provider(async ({ conversation_id }) => {

@@ -105,6 +105,11 @@ vi.mock('@process/utils/initAgent', () => ({
 vi.mock('@process/task/agentUtils', () => ({
   prepareFirstMessageWithSkillsIndex: vi.fn(async (c: string) => ({ content: c, loadedSkills: [] })),
   buildSystemInstructions: vi.fn(async () => undefined),
+  // AcpAgentManager imports these for the Concierge capability/diag wiring; the
+  // mock must expose them or accessing them throws and aborts initAgent.
+  isConciergeAssistant: vi.fn(() => false),
+  resolveCapabilitiesManifest: vi.fn(async () => undefined),
+  CAPABILITIES_MANIFEST_HEADER: '## Wayland capabilities (live)',
 }));
 
 // Mock AcpAgent (type-only import in AcpAgentManager - still needs a stub)

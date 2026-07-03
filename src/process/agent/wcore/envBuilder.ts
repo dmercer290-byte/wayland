@@ -5,15 +5,34 @@
  */
 
 import type { TProviderWithModel } from '@/common/config/storage';
-import { isOpenAIHost } from '@/common/utils/urlValidation';
+import { isLocalBaseUrl, isOpenAIHost } from '@/common/utils/urlValidation';
+import { CHATGPT_SUBSCRIPTION_PROVIDER_ID } from '@process/providers/catalog/chatgptSubscriptionModels';
 import { loadBaselineProviderCatalog } from '@process/providers/catalog/providerCatalogStore';
+import { PROVIDER_ENV_VARS } from '@process/providers/detection/KeyDiscovery';
+import type { ProviderId } from '@process/providers/types';
 import { getEnhancedEnv } from '@process/utils/shellEnv';
 
 /**
- * The four wcore providers Wayland configures natively (each carries its own
- * auth + base-url handling in {@link buildSpawnConfig}).
+ * The wcore providers Wayland configures natively (each carries its own auth +
+ * base-url handling in {@link buildSpawnConfig}). `xai` is the engine's native
+ * Grok provider (0.12.2+): it owns api.x.ai as its base URL and refreshes a Grok
+ * OAuth bearer itself, so it must be spawned as `--provider xai` (not the
+ * generic openai+base-url path) to get the token refresh + the grok-4.3
+ * stop-param fix.
  */
-type NativeWCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex';
+type NativeWCoreProvider = 'anthropic' | 'openai' | 'bedrock' | 'vertex' | 'xai' | 'openai-chatgpt';
+
+/**
+ * The engine `--provider` value for a ChatGPT subscription connected via OAuth
+ * (#243). The engine drives inference against the ChatGPT backend
+ * (`chatgpt.com/backend-api`) and reads the OAuth token from `~/.codex/auth.json`
+ * (written by `writeCodexAuthFile` at sign-in), so the desktop must route this
+ * provider to the engine's native slug instead of collapsing it to
+ * `--provider openai` (which presents the OAuth bearer to api.openai.com -> a
+ * non-working spawn that errors on send). The provider owns the backend host, so
+ * NO `--base-url` and NO key env var are emitted (see {@link buildSpawnConfig}).
+ */
+const CHATGPT_SUBSCRIPTION_ENGINE_PROVIDER = 'openai-chatgpt';
 
 /**
  * A wcore `--provider` value. Either a {@link NativeWCoreProvider} literal or a
@@ -86,16 +105,112 @@ function catalogIdFor(model: TProviderWithModel): string | undefined {
 }
 
 /**
+ * Engine-native providers (#177). The app persists these as generic
+ * `openai-compatible` rows (their real base URL lives only in the model
+ * registry, stripped from the legacy bridge row), so without this they collapse
+ * to `--provider openai` and the engine presents the key to api.openai.com -> a
+ * false 401 (the Perplexity symptom in #177).
+ *
+ * The bundled wcore (0.12.2) resolves each of these slugs natively from its own
+ * baked provider catalog: passing `--provider <id>` lets the engine own the
+ * base URL + scoped key (e.g. Perplexity -> api.perplexity.ai with
+ * PERPLEXITY_API_KEY). Every slug here is accepted by the 0.12.2 binary as a
+ * `--provider` value and has a canonical key env var in {@link PROVIDER_ENV_VARS}
+ * (the single, models.dev-checked source of truth - reused so the two tables
+ * can never diverge, which is the exact failure class behind #177).
+ *
+ * Generalizes the original one-off xai arm: xai stays in the set (same routing),
+ * and the engine additionally refreshes a Grok OAuth bearer when one exists,
+ * ignoring XAI_API_KEY in that case.
+ */
+const NATIVE_ENGINE_PROVIDER_IDS = [
+  'xai',
+  'perplexity',
+  'openrouter',
+  'groq',
+  'mistral',
+  'cohere',
+  'deepseek',
+  'together',
+  'fireworks',
+  'cerebras',
+  'nvidia',
+  // minimax is an Anthropic-wire native provider in the bundled engine (0.12.5):
+  // `--provider minimax` -> api.minimax.io/anthropic with MINIMAX_API_KEY. Without
+  // this it falls through to `--provider openai` and breaks (#135).
+  'minimax',
+] as const;
+const NATIVE_ENGINE_PROVIDER_SET: ReadonlySet<string> = new Set(NATIVE_ENGINE_PROVIDER_IDS);
+
+/**
+ * The engine-native provider id for a model, or `undefined`. Mirrors
+ * {@link catalogIdFor}: the id survives only in the `v2:<id>` registry bridge
+ * tag (the legacy `platform` collapses to `openai-compatible`); the
+ * `platform === '<id>'` arm is forward-compat for a future direct-platform
+ * store. Validated against {@link NATIVE_ENGINE_PROVIDER_SET} so an unrecognized
+ * id never reaches `--provider`.
+ */
+function nativeEngineProviderId(model: TProviderWithModel): string | undefined {
+  const tag = (model as unknown as Record<string, unknown>).__waylandModelRegistryBridge;
+  if (typeof tag === 'string' && tag.startsWith('v2:')) {
+    const id = tag.slice('v2:'.length);
+    if (NATIVE_ENGINE_PROVIDER_SET.has(id)) return id;
+  }
+  if (model.platform && NATIVE_ENGINE_PROVIDER_SET.has(model.platform)) return model.platform;
+  return undefined;
+}
+
+/**
+ * The scoped key env var for an engine-native provider value (e.g.
+ * `perplexity` -> `PERPLEXITY_API_KEY`), or `undefined` if `provider` is not a
+ * native engine provider. Sourced from {@link PROVIDER_ENV_VARS}.
+ */
+function nativeEngineEnvVar(provider: WCoreProvider): string | undefined {
+  if (!NATIVE_ENGINE_PROVIDER_SET.has(provider)) return undefined;
+  return PROVIDER_ENV_VARS[provider as ProviderId]?.[0];
+}
+
+/**
+ * True if the model is a ChatGPT subscription connected via OAuth (#243).
+ * Detected by the registry bridge tag `v2:chatgpt-subscription` written by
+ * `legacyModelConfigBridge.mirrorConnectOrRekey` (the legacy `platform`
+ * collapses to `openai-compatible`, so the tag is the only surviving carrier of
+ * the provider id - mirrors {@link catalogIdFor} / {@link nativeEngineProviderId}).
+ */
+function isChatGptSubscription(model: TProviderWithModel): boolean {
+  const tag = (model as unknown as Record<string, unknown>).__waylandModelRegistryBridge;
+  return tag === `v2:${CHATGPT_SUBSCRIPTION_PROVIDER_ID}`;
+}
+
+/**
  * Map provider name to wcore provider name.
  *
  * Platform values: 'custom' | 'new-api' | 'gemini' | 'gemini-vertex-ai' | 'anthropic' | 'bedrock'
  */
 function mapProvider(model: TProviderWithModel): WCoreProvider {
+  // ChatGPT subscription (OAuth): route to the engine's native slug so it drives
+  // the ChatGPT backend + reads the token from ~/.codex/auth.json, instead of
+  // collapsing to `--provider openai` against api.openai.com (#243).
+  if (isChatGptSubscription(model)) return CHATGPT_SUBSCRIPTION_ENGINE_PROVIDER;
+
   // Catalog provider (one of the ~100): pass the catalog id through verbatim so
   // the engine resolves base_url/api_path/env_var from its own providers.toml.
   // Takes precedence over the native platform mapping below.
   const catalogId = catalogIdFor(model);
   if (catalogId) return catalogId;
+
+  // Engine-native providers (xai, perplexity, openrouter, groq, ...): route to
+  // the engine's native slug so it owns the base URL + scoped key, instead of
+  // the generic openai+base-url path that 401s against api.openai.com (#177).
+  // xai additionally gets the engine's Grok OAuth refresh + grok-4.3 stop fix.
+  const nativeId = nativeEngineProviderId(model);
+  if (nativeId) return nativeId;
+
+  // ChatGPT subscription: route to the engine's native `openai-chatgpt` provider
+  // (platform set by CHAT_START_PLATFORM). The engine reads the OAuth token from
+  // its own store (~/.codex/auth.json, written by the desktop on sign-in), so we
+  // pass NO key env var and NO --base-url - it owns the ChatGPT backend (#243).
+  if (model.platform === 'openai-chatgpt') return 'openai-chatgpt';
 
   // Special handling for new-api: respect per-model protocol setting
   if (model.platform === 'new-api' && model.useModel && model.modelProtocols) {
@@ -119,42 +234,52 @@ function mapProvider(model: TProviderWithModel): WCoreProvider {
 const GEMINI_OPENAI_COMPAT_PATH = '/v1beta/openai';
 
 /**
- * Default `--max-tokens` budget for reasoning-tier models when the caller
- * does not specify one.
+ * Dummy bearer token injected for a KEYLESS, LOCAL OpenAI-compatible backend
+ * (the local Ollama daemon being the canonical case, #268).
  *
- * Why this exists: wcore has no model-aware default for
- * `max_tokens`. Reasoning models (Gemini Pro/Preview, future
- * `*-thinking`/`*-reasoning` variants) burn ~50-60 hidden "thinking" tokens
- * before emitting any visible output. With wcore's low built-in default,
- * thinking consumes the entire budget, the API returns
- * `finish_reason: length`, and the user sees an empty response. Flash
- * variants are non-reasoning and work cleanly at low budgets, so we leave
- * them alone - bumping their budget would just waste tokens.
+ * Why this is load-bearing: the engine's `resolve_api_key` HARD-REQUIRES a key
+ * for the `openai` provider - with no `--api-key`, no `OPENAI_API_KEY`, and no
+ * OAuth it `bail!`s "No API key found", `bootstrap.build()` returns Err, and the
+ * spawned wcore exits 1 BEFORE emitting `ready`. The desktop then surfaces only
+ * "wcore exited with code 1 during init" (`index.ts`). The working CLI path uses
+ * `--profile ollama`, whose example config carries `api_key = "ollama"`, so the
+ * engine never reaches that bail - which is exactly why the CLI succeeds while
+ * the keyless desktop spawn fails on the same daemon.
  *
- * Detection is intentionally name-pattern based:
- *   - Suffix match (`-pro` / `-preview` / `-thinking` / `-reasoning`) catches
- *     Gemini Pro, Preview, and any future explicit reasoning variant.
- *   - Anchored match (`^o\d+(-mini)?$`) catches OpenAI's bare o-series
- *     reasoning models (`o1`, `o3`, `o3-mini`, `o4`, `o4-mini`). Their names
- *     lack a reasoning-indicating suffix, so the suffix regex misses them.
- *     Listed in `src/renderer/utils/model/modelContextLimits.ts`, so they
- *     are reachable through any OpenAI-protocol provider in Wayland.
- *
- * `-flash` variants short-circuit first - they are non-reasoning and work
- * cleanly at low budgets; bumping them would just waste tokens. Callers that
- * pass an explicit `maxTokens` always win - this is only a fallback.
+ * The local daemon ignores the Authorization header, so the value is irrelevant
+ * to the request; it only needs to be non-empty to clear the engine's key gate.
+ * Matches `LOCAL_KEYLESS_PLACEHOLDER` in `modelBridge.ts` (the legacy spawn path
+ * already injects the identical value for the same reason).
  */
-const REASONING_MODEL_DEFAULT_MAX_TOKENS = 32768;
+const LOCAL_KEYLESS_PLACEHOLDER = 'ollama';
 
-export function defaultMaxTokensForModel(modelName: string): number | undefined {
-  if (!modelName) return undefined;
-  if (/-flash/i.test(modelName)) return undefined;
-  // TODO(reasoning-detector): only catches o-prefixed reasoning models (o1/o3/o4-mini etc.).
-  // When OpenAI ships a non-o-prefixed reasoning model (e.g. gpt-5-reasoning), revisit
-  // this matcher - see .blackboard/audits/hard-coded-values.md HC-5.
-  if (/^o\d+(-mini)?$/i.test(modelName)) return REASONING_MODEL_DEFAULT_MAX_TOKENS;
-  return /(-pro|-preview|-thinking|-reasoning)\b/i.test(modelName) ? REASONING_MODEL_DEFAULT_MAX_TOKENS : undefined;
-}
+/**
+ * `--max-tokens` policy (#456): the desktop does NOT name-guess a budget.
+ *
+ * The bundled engine (pin `v0.12.16`) sizes `max_tokens` per-model up front
+ * itself (`size_output_cap` in wcore-agent): when the desktop omits
+ * `--max-tokens` the engine substitutes a generous default (64000) and clamps
+ * it to the model's REAL output ceiling - a known model to its documented limit
+ * (`wcore-config::limits::model_output_ceiling`: e.g. sonnet-4 -> 64000,
+ * opus-4 -> 32000, gpt-4o -> 16384), and an unknown / router-aliased model
+ * (`flux-auto`, `flux-pinned-*`, OpenRouter ids, bare `o`-series) to a
+ * conservative 8192 floor that grows to 32768 on a reasoning turn
+ * (`UNKNOWN_REASONING_CAP`, engine #426 - this replaces the desktop's old
+ * `REASONING_MODEL_DEFAULT_MAX_TOKENS` floor, applied server-side only when the
+ * turn actually carries a thinking budget / `reasoning_effort`).
+ *
+ * So the desktop OMITS `--max-tokens` unless the caller passes an explicit
+ * value, and lets the engine apply the model-aware budget. A fixed desktop
+ * number could only LOWER a known model's real ceiling; omitting is always
+ * >= pushing. Truncation detection is unaffected: the engine emits
+ * `finish_reason:'length'` definitively (see `WCoreManager.detectTruncation`).
+ *
+ * NOTE: raising the budget for engine-UNKNOWN models above 8192/32768 (e.g.
+ * resolving `flux-pinned-*` / OpenRouter ids from models.dev) is engine-gated -
+ * `size_output_cap` hard-clamps unknown models, so a desktop-pushed value is
+ * clamped right back. That path needs an engine change (Core), not a desktop
+ * one.
+ */
 
 /**
  * Resolve base URL for OpenAI-compatible providers.
@@ -211,11 +336,13 @@ export function buildSpawnConfig(
   env: Record<string, string>;
   projectConfig: string;
   /**
-   * The max_tokens value actually passed to wcore (or undefined if no `--max-tokens`
-   * arg was added). Callers persist this so WCoreManager's truncation heuristic
-   * can compare `output_tokens` against the real budget - including the silent
-   * reasoning-model default from `defaultMaxTokensForModel`, which would otherwise
-   * be invisible to anything above the wrapper.
+   * The max_tokens value actually passed to wcore via `--max-tokens`, or
+   * `undefined` when none was added (#456: that is now the common case - the
+   * desktop only passes a value when the caller set one explicitly, otherwise
+   * the engine sizes the budget per-model itself). Callers persist this so
+   * WCoreManager's legacy truncation heuristic can compare `output_tokens`
+   * against the budget on old engines; on the shipping engine the definitive
+   * signal is the emitted `finish_reason:'length'`, which is budget-independent.
    */
   resolvedMaxTokens: number | undefined;
 } {
@@ -237,7 +364,9 @@ export function buildSpawnConfig(
   const env: Record<string, string> = {};
   const args: string[] = ['--json-stream', '--provider', provider, '--model', model.useModel];
 
-  const resolvedMaxTokens = options.maxTokens ?? defaultMaxTokensForModel(model.useModel);
+  // #456: omit `--max-tokens` unless the caller explicitly set one; the engine
+  // sizes per-model itself (see the policy note above `buildSpawnConfig`).
+  const resolvedMaxTokens = options.maxTokens;
   if (resolvedMaxTokens) {
     args.push('--max-tokens', String(resolvedMaxTokens));
   }
@@ -279,6 +408,29 @@ export function buildSpawnConfig(
     return { args, env, projectConfig, resolvedMaxTokens };
   }
 
+  // Engine-native providers (#177): the app persists these as openai-compatible
+  // but the bundled engine resolves <id> -> base_url + scoped key from its own
+  // baked catalog. Set ONLY the scoped env var (e.g. PERPLEXITY_API_KEY) and pass
+  // NO --base-url, so the engine routes to the provider's real host instead of
+  // api.openai.com. Mirrors the catalog block above.
+  const nativeEnvVar = nativeEngineEnvVar(provider);
+  if (nativeEnvVar !== undefined) {
+    if (model.apiKey) env[nativeEnvVar] = model.apiKey;
+    const projectConfig = buildProjectConfig(model, provider);
+    return { args, env, projectConfig, resolvedMaxTokens };
+  }
+
+  // ChatGPT subscription (#243): the engine owns the ChatGPT backend host and
+  // reads the OAuth token from ~/.codex/auth.json (bridged by writeCodexAuthFile
+  // at sign-in), so pass NEITHER a --base-url NOR a key env var - just the native
+  // `--provider openai-chatgpt`. Setting OPENAI_API_KEY here would present the
+  // OAuth bearer to api.openai.com (the rejected path); the base URL must stay
+  // engine-owned, not the openai-compatible backend URL on the legacy row.
+  if (provider === CHATGPT_SUBSCRIPTION_ENGINE_PROVIDER) {
+    const projectConfig = buildProjectConfig(model, provider);
+    return { args, env, projectConfig, resolvedMaxTokens };
+  }
+
   switch (provider) {
     case 'anthropic':
       if (model.apiKey) env.ANTHROPIC_API_KEY = model.apiKey;
@@ -286,8 +438,17 @@ export function buildSpawnConfig(
       break;
 
     case 'openai': {
-      if (model.apiKey) env.OPENAI_API_KEY = model.apiKey;
       const baseUrl = resolveOpenAIBaseUrl(model);
+      // Keyless LOCAL backend (local Ollama, #268): the engine still demands a
+      // key for `--provider openai` or it bails at init, so inject the dummy
+      // placeholder (the local daemon ignores Authorization). A keyless CLOUD
+      // endpoint is a genuine misconfig and is left to fail as before.
+      const trimmedKey = model.apiKey?.trim();
+      if (trimmedKey) {
+        env.OPENAI_API_KEY = trimmedKey;
+      } else if (isLocalBaseUrl(baseUrl)) {
+        env.OPENAI_API_KEY = LOCAL_KEYLESS_PLACEHOLDER;
+      }
       if (baseUrl) args.push('--base-url', stripTrailingV1(baseUrl));
       break;
     }
@@ -417,6 +578,18 @@ const ENGINE_ENV_ALLOWLIST: readonly string[] = [
   'TMP',
   'TEMP',
   'PWD',
+  // ── Linux dynamic linker ───────────────────────────────────────────────
+  // Shared-library search path. Required on ARM64 Ubuntu 24.04 (Noble) when
+  // the engine needs OpenSSL 1.1 from a non-system prefix. Without it the
+  // dynamic linker can't find the .so and the engine fails on startup (#233).
+  'LD_LIBRARY_PATH',
+  // ── Wayland engine config (non-secret) ─────────────────────────────────
+  // The user's bash-tool shell selection. Set in the environment (never by the
+  // app), so a GUI-launched engine only receives it when it survives this
+  // filter; CLI/headless already inherit the full env. Without it the engine
+  // falls back to its default shell (#197). Reaches `full` via process.env or
+  // the login-shell capture (see SHELL_INHERITED_ENV_VARS in shellEnv.ts).
+  'WAYLAND_BASH_SHELL',
   // ── Windows system (load-bearing for spawning + DLL resolution) ─────────
   'SYSTEMROOT',
   'SYSTEMDRIVE',
@@ -526,6 +699,49 @@ export function buildEngineSpawnEnv(opts: {
   if (opts.waylandHome) {
     out.WAYLAND_HOME = opts.waylandHome;
   }
+
+  // Opt the bundled engine into honoring a wire `set_mode` that loosens
+  // permission (AutoEdit / Force). Engine >=0.12.19 (GHSA-8r7g-7556-hj3j)
+  // IGNORES a permission-loosening `set_mode` sent over the json-stream wire
+  // unless it was launched with `--force` or this env is set. The desktop's
+  // composer "Permission/Autopilot" selector drives `set_mode` over that wire
+  // (AgentModeSelector -> acp.set-mode -> WCoreManager.setMode -> WCoreAgent),
+  // so without opting in, selecting Autopilot/Force would silently no-op after
+  // the 0.12.19 bundle bump (#495).
+  //
+  // Blanket-enabling is safe here (not scoped per-mode / no respawn) because:
+  //  1. The gate is BOOT-ONLY (set once at launch, immutable mid-session), so a
+  //     per-mode approach would force a kill+respawn on every switch into a
+  //     looser mode.
+  //  2. This engine is the desktop's OWN trusted child, spawned over a private
+  //     stdin the desktop exclusively writes. `set_mode` is emitted only from an
+  //     explicit local user action (the composer selector) or a cron job whose
+  //     mode was set by the local user - NEVER from model output (inbound engine
+  //     events never call setMode). The model cannot induce a `set_mode`. A
+  //     paired REMOTE device cannot author a looser cron mode either: the full
+  //     cron write/exec/skill surface (cron.add-job/update-job/run-now/save-skill/
+  //     confirm-proposal) is remote-denied in bridgeAllowlist, so a remote caller
+  //     cannot plant a Force/AutoEdit job nor a skill file it would run.
+  //  3. Remote/WebUI callers reach `acp.set-mode` only through the paired-device
+  //     WebSocket, which is already gated by the WebUI's own token/pairing auth
+  //     (see bridgeAllowlist). Opening the gate restores exactly the pre-0.12.19
+  //     behavior for that already-authenticated surface; it grants no new
+  //     capability. The engine's default (gate closed) still protects any OTHER
+  //     spawner (standalone CLI, third-party) from an untrusted wire peer.
+  out.WAYLAND_ALLOW_WIRE_FORCE = '1';
+
+  // #537: opt the engine into host-delegated `send_message`. The desktop never
+  // writes channel `.toml` into WAYLAND_HOME/channels, so the engine's own
+  // channel table is empty and an agent `send_message` (e.g. to "email") fails
+  // with "unknown channel: email". With this set, the engine keeps the tool
+  // registered but routes the send back to the HOST (a `host_send_message_request`
+  // event), which fulfils it through the desktop's outbound channel plugins — the
+  // same path that already delivers replies — so there is ONE send path and the
+  // engine owns no channel credentials. Always set for the desktop's own trusted
+  // child: when no matching channel is configured the host replies with a clear
+  // error instead of the opaque "unknown channel". Standalone/CLI engines (which
+  // DO hand-author channel toml) never set this and are unaffected.
+  out.WAYLAND_SEND_MESSAGE_HOST_DELEGATE = '1';
 
   return out;
 }

@@ -74,8 +74,16 @@ export type WCoreCapabilities = {
   gepa_enabled?: boolean;
 };
 
-/** `stream_end.finish_reason` - required field in v0.2.x engine; absent on ≤0.1.21. */
-export type FinishReason = 'stop' | 'length' | 'error';
+/**
+ * `stream_end.finish_reason` - required field in v0.2.x engine; absent on ≤0.1.21.
+ *
+ * #457: `'max_turns'` is forward-additive. Today the engine maps a MaxTurns stop
+ * to `'length'` (engine.rs MaxTurns->length), making "needs more turns"
+ * indistinguishable from token truncation and surfacing the wrong remedy. The
+ * engine (Rust) leg to emit a distinct `'max_turns'` is owned by Core; the
+ * desktop tolerates and surfaces it here the moment Core ships it.
+ */
+export type FinishReason = 'stop' | 'length' | 'error' | 'max_turns';
 
 /** Circuit breaker states emitted by `provider_circuit_event`. */
 export type CircuitState = 'closed' | 'open' | 'half_open';
@@ -98,7 +106,7 @@ export type WCoreEvent =
     }
   | { type: 'stream_start'; msg_id: string }
   | { type: 'text_delta'; text: string; msg_id: string }
-  | { type: 'thinking'; text: string; msg_id: string }
+  | { type: 'thinking'; text: string; msg_id: string; subject?: string }
   | {
       type: 'tool_request';
       msg_id: string;
@@ -273,6 +281,23 @@ export type WCoreEvent =
       op: string;
       app?: string;
       reason: string;
+    }
+  // #537 host-send-transport hook. When the engine is host-delegated
+  // (WAYLAND_SEND_MESSAGE_HOST_DELEGATE=1 at spawn) its `send_message` tool
+  // routes the send to the HOST instead of the engine's channel table (which is
+  // empty under the desktop → "unknown channel: email"). The engine emits this
+  // request; the host fulfils it through its own outbound channel plugins and
+  // replies with `host_send_message_result` (correlated by `call_id`).
+  // `platform`/`chat_id`/`thread_id` mirror the engine's ParsedTarget.
+  | {
+      type: 'host_send_message_request';
+      call_id: string;
+      platform: string;
+      chat_id?: string;
+      thread_id?: string;
+      body: string;
+      subject?: string;
+      conversation_id?: string;
     };
 
 // ============================================
@@ -282,8 +307,16 @@ export type WCoreEvent =
 export type WCoreCommand =
   | { type: 'message'; msg_id: string; content: string; files?: string[] }
   | { type: 'stop' }
-  | { type: 'tool_approve'; call_id: string; scope: 'once' | 'always' }
+  // `answer` (wayland-core v0.9.3+, additive) threads an AskUserQuestion-class
+  // tool's chosen option back through the approval channel; the engine
+  // synthesizes the tool result from it (guarded engine-side on
+  // tool_name == "AskUserQuestion"). Omitted for a plain approval; older
+  // engines ignore the extra field (serde default None).
+  | { type: 'tool_approve'; call_id: string; scope: 'once' | 'always'; answer?: string }
   | { type: 'tool_deny'; call_id: string; reason?: string }
+  // W7 S4 HITL: resume a suspended turn waiting on an `approval_required`.
+  // Engine-side resolve is idempotent — a stale/duplicate token is ignored.
+  | { type: 'approval_resume'; resume_token: string; approved: boolean }
   | { type: 'init_history'; text: string }
   | { type: 'set_mode'; mode: 'default' | 'auto_edit' | 'yolo' }
   | {
@@ -302,5 +335,16 @@ export type WCoreCommand =
       env?: Record<string, string>;
       url?: string;
       headers?: Record<string, string>;
+    }
+  // #537 reply to `host_send_message_request`. `ok=true` → the engine resolves
+  // the tool call as sent (optional `message_id` receipt); `ok=false`/`error`
+  // → the engine surfaces a real send failure to the model (never a false
+  // success). Correlated to the request by `call_id`.
+  | {
+      type: 'host_send_message_result';
+      call_id: string;
+      ok: boolean;
+      message_id?: string;
+      error?: string;
     }
   | { type: 'ping' };

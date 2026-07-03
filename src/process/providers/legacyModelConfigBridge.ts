@@ -39,6 +39,7 @@
  */
 
 import type { IProvider } from '@/common/config/storage';
+import { isImageModelName } from '@/common/config/imageModels';
 import { uuid } from '@/common/utils';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { Curator } from './catalog/Curator';
@@ -139,10 +140,49 @@ export function selectMirrorModelIds(catalog: CatalogModel[], overrides: Registr
   const curated = new Curator().curate(catalog);
   const overrideEnabled = new Map(overrides.map((o) => [o.modelId, o.enabled]));
   const enabled = curated.filter((m) => overrideEnabled.get(m.id) ?? m.enabled);
-  // Never hand the picker an empty list: if nothing is curated-enabled (e.g. a
-  // provider with no eligible flagship family), fall back to the full curated
-  // text set rather than blanking the dropdown.
-  return (enabled.length > 0 ? enabled : curated).map((m) => m.id);
+  // Never hand the picker an empty list WHEN the emptiness isn't the user's doing:
+  // a provider with no eligible flagship family (Curator enables none, no user
+  // overrides) falls back to the full curated text set rather than blanking the
+  // dropdown. But if the user EXPLICITLY disabled models (a disabling override is
+  // present), an empty result is intentional - "disable all of provider X" must
+  // actually empty X's picker/default candidacy, not silently re-populate it
+  // (#538: disabling every OpenAI model still left gpt-5.5 as the new-chat
+  // default because this fallback re-added the whole set).
+  // "Disabled some" means the user explicitly turned off a model that is IN the
+  // curated set - the only overrides that can empty `enabled`. Scoping to curated
+  // avoids a stale override for a non-curated / dropped model spuriously
+  // suppressing the never-blank fallback.
+  const userDisabledCurated = curated.some((m) => overrideEnabled.get(m.id) === false);
+  const selected = enabled.length > 0 ? enabled : userDisabledCurated ? [] : curated;
+  // Drop image-named models: a brand-new image model (e.g. `gpt-image-2`) that
+  // models.dev hasn't enriched yet defaults to `kind: 'text'` and would slip
+  // through the Curator into the chat pickers. It belongs only in the image
+  // picker (see selectImageModelIds), never the chat dropdown.
+  return selected.filter((m) => !isImageModelName(m.id)).map((m) => m.id);
+}
+
+/**
+ * The image-generation model ids to mirror into the legacy `model.config` row's
+ * `imageModels` field for the image-tool picker.
+ *
+ * This is the inverse of {@link selectMirrorModelIds}: the `Curator` keeps only
+ * `kind: 'text'` (chat pickers), so image models were silently dropped from the
+ * mirror and never reached the image picker. Here we take the catalog's image
+ * models directly, newest-first by `releaseDate` so the best current model leads
+ * the dropdown.
+ *
+ * We match on `kind: 'image'` OR an image-looking id. The id check is essential:
+ * a model too new for models.dev (e.g. `gpt-image-2`) lands UNENRICHED with the
+ * default `kind: 'text'` and no `image` tag - exactly the latest model the user
+ * most wants. Enrichment is not a prerequisite for showing it. The catalog
+ * auto-refreshes, so new image models appear on the next refresh, enriched or
+ * not, with no code change.
+ */
+export function selectImageModelIds(catalog: CatalogModel[]): string[] {
+  return catalog
+    .filter((m) => m.kind === 'image' || isImageModelName(m.id))
+    .toSorted((a, b) => (b.releaseDate ?? '').localeCompare(a.releaseDate ?? ''))
+    .map((m) => m.id);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -177,7 +217,9 @@ export function mirrorConnectOrRekey(repo: ProviderRepository, providerId: Provi
     if (!apiKey && providerId !== 'ollama-local') return;
 
     const baseUrl = typeof stored.creds.baseUrl === 'string' ? stored.creds.baseUrl : '';
-    const modelIds = selectMirrorModelIds(repo.getRegistryCatalog(providerId), repo.listRegistryOverrides(providerId));
+    const catalog = repo.getRegistryCatalog(providerId);
+    const modelIds = selectMirrorModelIds(catalog, repo.listRegistryOverrides(providerId));
+    const imageModelIds = selectImageModelIds(catalog);
     const modelProtocols =
       stored.creds.protocols && typeof stored.creds.protocols === 'object'
         ? (stored.creds.protocols as Record<string, string>)
@@ -206,6 +248,7 @@ export function mirrorConnectOrRekey(repo: ProviderRepository, providerId: Provi
       baseUrl,
       apiKey,
       model: modelIds,
+      ...(imageModelIds.length > 0 ? { imageModels: imageModelIds } : {}),
       ...(modelProtocols ? { modelProtocols } : {}),
       ...(priorEnabled !== undefined ? { enabled: priorEnabled } : {}),
       ...(priorModelEnabled !== undefined ? { modelEnabled: priorModelEnabled } : {}),

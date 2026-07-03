@@ -25,6 +25,7 @@ import { readDirectoryRecursive } from '@process/utils';
 import { writeFileAtomic } from '@process/utils/atomicWrite';
 import { getDatabase } from '@process/services/database';
 import { ExtensionRegistry } from '@process/extensions/ExtensionRegistry';
+import { getBuiltinCatalogContext, isBuiltinCatalogId } from '@process/utils/builtinCatalog';
 import { confinePath, registerAuthorizedRoot } from './pathConfinement';
 import { resolveWithinApprovedDirectory } from './userApprovedPaths';
 import type { IWorkspaceFlatFile } from '@/common/adapter/ipcBridge';
@@ -176,6 +177,17 @@ async function readAssistantResource(
     }
   }
 
+  // Native built-in catalog (waylandteams): context bodies live in the in-memory
+  // catalog, not on disk. builtin-<id> catalog records have no per-locale .md
+  // file, so the disk lookup below would return '' and spawn with no system
+  // prompt. Serve the catalog context directly - it is the source of truth.
+  if (resourceType === 'rules' && isBuiltinCatalogId(assistantId)) {
+    const context = getBuiltinCatalogContext(assistantId);
+    if (typeof context === 'string' && context.length > 0) {
+      return context;
+    }
+  }
+
   const assistantsDir = getAssistantsDir();
   const locales = [locale, 'en-US', 'zh-CN'].filter((l, i, arr) => arr.indexOf(l) === i);
 
@@ -216,9 +228,17 @@ async function writeAssistantResource(
   fileNamePattern: (id: string, loc: string) => string
 ): Promise<boolean> {
   try {
+    // SECURITY: the assistant id becomes part of the written filename, so a
+    // traversal id (e.g. `../../../etc/foo`) would escape the assistants dir.
+    // Confine it the same way skill names are sanitized; refuse anything unsafe.
+    const safeId = sanitizeSkillName(assistantId);
+    if (!safeId) {
+      console.error(`[fsBridge] Refused assistant ${resourceType} write: unsafe id`);
+      return false;
+    }
     const assistantsDir = getAssistantsDir();
     await fs.mkdir(assistantsDir, { recursive: true });
-    const fileName = fileNamePattern(assistantId, locale);
+    const fileName = fileNamePattern(safeId, locale);
     await fs.writeFile(path.join(assistantsDir, fileName), content, 'utf-8');
     console.log(`[fsBridge] Wrote assistant ${resourceType}: ${fileName}`);
     return true;
@@ -251,6 +271,16 @@ async function deleteAssistantResource(resourceType: ResourceType, filePattern: 
 // File name patterns for rules and skills
 const ruleFilePattern = (id: string, loc: string) => `${id}.${loc}.md`;
 const skillFilePattern = (id: string, loc: string) => `${id}-skills.${loc}.md`;
+
+/**
+ * Write an assistant's rules/persona markdown from MAIN (Concierge Phase 2b
+ * `edit_assistant` apply path). Thin wrapper over the module-private
+ * `writeAssistantResource` so callers outside this module don't reach into its
+ * internals. Returns true on success.
+ */
+export async function writeAssistantRules(assistantId: string, content: string, locale = 'en-US'): Promise<boolean> {
+  return writeAssistantResource('rules', assistantId, content, locale, ruleFilePattern);
+}
 
 const workspaceFileListCache = new Map<string, IWorkspaceFlatFile[]>();
 const workspaceFileListInFlight = new Map<string, Promise<IWorkspaceFlatFile[]>>();
@@ -1013,7 +1043,7 @@ export function initFsBridge(): void {
   });
 
   // Copy files into the workspace
-  ipcBridge.fs.copyFilesToWorkspace.provider(async ({ filePaths, workspace, sourceRoot }) => {
+  ipcBridge.fs.copyFilesToWorkspace.provider(async ({ filePaths, workspace, sourceRoot, allowExternalSource }) => {
     try {
       const copiedFiles: string[] = [];
       const failedFiles: Array<{ path: string; error: string }> = [];
@@ -1036,10 +1066,19 @@ export function initFsBridge(): void {
       for (const filePath of filePaths) {
         try {
           // Confine each source path (SEC-IPC-02): block copying arbitrary
-          // files (e.g. ~/.ssh/id_rsa) into the workspace.
-          const safeFilePath = await confinePath(filePath);
+          // files (e.g. ~/.ssh/id_rsa) into the workspace. A drag-drop/paste is
+          // an explicit user grant of that specific file, so allowExternalSource
+          // permits a source outside the static roots while the
+          // secret/traversal/symlink guards still reject sensitive locations.
+          // The destination workspace above stays strictly confined regardless.
+          const safeFilePath = await confinePath(filePath, { allowOutsideRoots: allowExternalSource === true });
           if (safeFilePath === null) {
-            failedFiles.push({ path: filePath, error: 'Source path is outside the allowed roots' });
+            failedFiles.push({
+              path: filePath,
+              error: allowExternalSource
+                ? 'Blocked: this file is in a protected or unsafe location'
+                : 'Source path is outside the allowed roots',
+            });
             continue;
           }
 

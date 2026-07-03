@@ -4,16 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  Zap,
-  PenLine,
-  Handshake,
-  Rocket,
-  BarChart3,
-  Landmark,
-  Bot,
-  type LucideIcon,
-} from 'lucide-react';
+import { Zap, Sparkles, PenLine, Handshake, Rocket, BarChart3, Landmark, Bot, type LucideIcon } from 'lucide-react';
 import type { PaletteKey } from '@/renderer/pages/guid/components/AssistantIconTile';
 import { categoryToPaletteKey } from '@/renderer/pages/guid/components/AssistantIconTile';
 import { QUICK_LAUNCH_ANCHORS } from '@/renderer/pages/guid/quickLaunchAnchors';
@@ -64,16 +55,16 @@ export type LaunchpadBarEntry = {
 };
 
 const LUCIDE_ICON_MAP: Record<string, LucideIcon> = {
-  'zap': Zap,
+  zap: Zap,
+  sparkles: Sparkles,
   'pen-line': PenLine,
-  'handshake': Handshake,
-  'rocket': Rocket,
+  handshake: Handshake,
+  rocket: Rocket,
   'bar-chart-3': BarChart3,
-  'landmark': Landmark,
+  landmark: Landmark,
 };
 
-const stripPrefix = (id: string): string =>
-  id.startsWith('builtin-') ? id.slice('builtin-'.length) : id;
+const stripPrefix = (id: string): string => (id.startsWith('builtin-') ? id.slice('builtin-'.length) : id);
 
 /**
  * Resolve a raw assistant id (as stored in bar order) into the shape the
@@ -170,9 +161,7 @@ function entryFromAssistant(rawId: string, a: AssistantListItem, localeKey: stri
  *   5. Single-char/emoji → render as a glyph.
  *   6. Anything else → fall back to the Bot icon.
  */
-function iconFromAvatar(
-  avatar: string | undefined
-): { Icon: LucideIcon; avatarUrl?: string; avatarEmoji?: string } {
+function iconFromAvatar(avatar: string | undefined): { Icon: LucideIcon; avatarUrl?: string; avatarEmoji?: string } {
   const value = avatar?.trim();
   if (!value) return { Icon: Bot };
 

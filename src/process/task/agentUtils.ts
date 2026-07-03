@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getSkillsDir, getBuiltinSkillsCopyDir, loadSkillsContent } from '@process/utils/initStorage';
+import { getSkillsDir, getBuiltinSkillsCopyDir, loadSkillsContent, ProcessConfig } from '@process/utils/initStorage';
 import { AcpSkillManager, buildSkillsIndexText, type SkillIndex } from './AcpSkillManager';
 import { SkillLibrary } from '@process/services/skills/SkillLibrary';
 import { SkillRetriever } from '@process/services/skills/SkillRetriever';
+import type { SkillIndexEntry } from '@/common/types/skillTypes';
 import { getDatabase } from '@process/services/database';
 import { mainWarn } from '@process/utils/mainLogger';
 import { getTeamGuidePrompt } from '@process/team/prompts/teamGuidePrompt.ts';
@@ -15,6 +16,128 @@ import { resolveLeaderAssistantLabel } from '@process/team/prompts/teamGuideAssi
 import { composePrompt } from '@process/services/constitution/composePrompt';
 import { composeWorkflowSystemPrompt } from '@process/services/workflow/composeWorkflowSystemPrompt';
 import { getWorkflowSessionService } from '@process/services/workflow/workflowSessionServiceSingleton';
+import { buildCapabilitiesManifest } from '@process/services/capabilities/CapabilitiesManifest';
+
+/** Runtime id of the built-in Concierge assistant (preset id `concierge`). */
+export const BUILTIN_CONCIERGE_ASSISTANT_ID = 'builtin-concierge';
+
+/**
+ * Single source of truth for "is this conversation the built-in Concierge?".
+ * Used to gate Concierge-only surfaces (e.g. the read-only diagnostics MCP
+ * server) across every backend so the check can't drift per call site. Accepts
+ * either a presetAssistantId or a customAgentId (both carry the runtime id).
+ */
+export function isConciergeAssistant(assistantId?: string | null): boolean {
+  return assistantId === BUILTIN_CONCIERGE_ASSISTANT_ID;
+}
+
+/** Header the live capabilities manifest is wrapped in when injected. */
+export const CAPABILITIES_MANIFEST_HEADER = '## Wayland capabilities (live)';
+
+/**
+ * Detects "what can Wayland do / how do I X" capability-intent turns, so the
+ * live capabilities manifest can be surfaced on those turns for ANY assistant
+ * (Concierge always carries it via its system prompt). Pure + cheap (regex
+ * only) so it is safe to call on every turn before the heavier skill retrieval.
+ */
+export function isCapabilityIntent(userText: string): boolean {
+  const t = (userText ?? '').toLowerCase();
+  if (!t.trim()) return false;
+  // NOUNS are deliberately Wayland-SPECIFIC: bare generic words (model, team,
+  // skill, automation) were removed because they fire on unrelated chat
+  // ("build a model airplane", "team roster", "add a skill to my resume").
+  // VERBS are Wayland setup verbs (broad build/create/add removed for the same
+  // reason) and only count when paired with a Wayland noun. So "connect a
+  // provider" / "set up a workflow" / "how do I add an MCP server" trigger, but
+  // "create a data model" / "build a team roster" do NOT. The trade-off is a few
+  // false-negatives on bare-generic phrasings (e.g. "switch models") - acceptable
+  // because the Concierge persona always carries the manifest regardless, and
+  // this gate only governs NON-Concierge assistants. (regex bounded, no
+  // catastrophic backtracking.)
+  const WL_NOUN = '(provider|assistant|workflow|mcp|flux|wayland|integration|api key|cron|scheduled task)';
+  const WL_VERB = '(connect|set\\s?up|configure|launch|schedule|install|enable|turn on|switch|import)';
+  return (
+    // "what/which can you/it/wayland ... do?"
+    /\b(what|which)\b.{0,40}\b(can|could)\b.{0,24}\b(you|it|wayland|this app|this)\b.{0,20}\bdo\b/.test(t) ||
+    // "what features/capabilities ..."
+    /\bwhat\b.{0,30}\b(features?|capabilities)\b/.test(t) ||
+    // "what can/are you able ..."
+    /\b(tell me )?what\b.{0,20}\b(you|wayland)\b.{0,15}\b(can|able)\b/.test(t) ||
+    // "what do you/wayland/it do"
+    /\bwhat\s+do\s+(you|wayland|it)\s+do\b/.test(t) ||
+    // "show/list/tell me everything / your tools|features|skills|workflows|assistants|teams"
+    /\b(show|list|tell)\s+(me\s+)?(everything|all|your\s+(tools|features|capabilities|skills|workflows|assistants|teams))\b/.test(
+      t
+    ) ||
+    // "what's possible / able to do"
+    /\bwhat('?s| is| are)\b.{0,20}\b(possible|able to do)\b/.test(t) ||
+    // "how do/can/would/to I ... <wayland noun>"  (noun-anchored; allow plural)
+    new RegExp(`\\b(how\\s+(do|can|would|to)\\s+i?|can\\s+(you|wayland|it|this))\\b.{0,40}\\b${WL_NOUN}s?\\b`).test(
+      t
+    ) ||
+    // "<wayland verb> ... <wayland noun>"  (verb+noun; allow plural)
+    new RegExp(`\\b${WL_VERB}\\b.{0,30}\\b${WL_NOUN}s?\\b`).test(t)
+  );
+}
+
+/**
+ * Runtime kill-switch for ALL capabilities-manifest injection (Concierge and
+ * per-turn advert alike). The manifest is a cross-cutting change that touches
+ * every assistant/backend with no other in-field reversibility, so a single
+ * `concierge.capabilityInjection` config flag (default ON) can disable it from
+ * Settings without a release if `isCapabilityIntent` or the manifest build ever
+ * misbehaves in the field. Defaults to enabled and never throws.
+ */
+async function capabilityInjectionEnabled(): Promise<boolean> {
+  try {
+    return (await ProcessConfig.get('concierge.capabilityInjection')) !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Resolve the live capabilities manifest for a first-message system prompt.
+ * Built for Concierge ALWAYS; for other assistants only when the first user
+ * message is a capability intent. Returns undefined when not applicable or on
+ * any failure (never throws into prompt assembly).
+ */
+export async function resolveCapabilitiesManifest(opts: {
+  presetAssistantId?: string;
+  userText?: string;
+  agentKey?: string;
+}): Promise<string | undefined> {
+  if (!(await capabilityInjectionEnabled())) return undefined;
+  const isConcierge = opts.presetAssistantId === BUILTIN_CONCIERGE_ASSISTANT_ID;
+  if (!isConcierge && !(opts.userText && isCapabilityIntent(opts.userText))) return undefined;
+  try {
+    const manifest = await buildCapabilitiesManifest({ agentKey: opts.agentKey });
+    return manifest && manifest.trim().length > 0 ? manifest : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * For NON-Concierge assistants, surface the live capabilities manifest on a
+ * capability-intent turn (Concierge already carries it in its system prompt, so
+ * skip to avoid duplication). Returns '' when not a capability turn / not
+ * applicable / on failure.
+ */
+async function resolveTurnCapabilityAdvert(
+  userText: string,
+  opts?: { alwaysOnNames?: string[]; assistantId?: string; agentKey?: string }
+): Promise<string> {
+  if (opts?.assistantId === BUILTIN_CONCIERGE_ASSISTANT_ID) return '';
+  if (!isCapabilityIntent(userText ?? '')) return '';
+  if (!(await capabilityInjectionEnabled())) return '';
+  try {
+    const manifest = await buildCapabilitiesManifest({ agentKey: opts?.agentKey });
+    return manifest && manifest.trim().length > 0 ? `${CAPABILITIES_MANIFEST_HEADER}\n${manifest}` : '';
+  } catch {
+    return '';
+  }
+}
 
 /**
  * One-line advertisement for the wayland_search_skills MCP tool.
@@ -126,15 +249,25 @@ let turnRetrieverEntryCount = -1;
  */
 export async function buildTurnSkillContext(
   userText: string,
-  opts?: { alwaysOnNames?: string[] }
+  opts?: { alwaysOnNames?: string[]; assistantId?: string; agentKey?: string }
 ): Promise<TurnSkillContext> {
   const empty: TurnSkillContext = { advert: '', autoLoaded: [] };
+
+  // Capability self-knowledge: surface the live manifest on "what can Wayland
+  // do / how do I X" turns for non-Concierge assistants. Computed up-front so it
+  // rides along even when the skill-retrieval gates below return `empty` (a
+  // short "what can you do?" has too few discriminative terms to trip BM25).
+  const capabilityAdvert = await resolveTurnCapabilityAdvert(userText, opts);
+  const withCapability = (ctx: TurnSkillContext): TurnSkillContext =>
+    capabilityAdvert
+      ? { advert: [capabilityAdvert, ctx.advert].filter(Boolean).join('\n\n'), autoLoaded: ctx.autoLoaded }
+      : ctx;
 
   // Gate 1: ignore greetings / conversational filler. A turn needs at least
   // MIN_QUERY_TERMS distinct content words (stopwords stripped) before we even
   // hit the index - "hello", "this is a test", "thanks so much" surface nothing.
   const terms = discriminativeQueryTerms(userText ?? '');
-  if (terms.length < MIN_QUERY_TERMS) return empty;
+  if (terms.length < MIN_QUERY_TERMS) return withCapability(empty);
   // Retrieve on the discriminative terms only, so common words can't accumulate
   // BM25 score on unrelated skills.
   const query = terms.join(' ');
@@ -143,9 +276,9 @@ export async function buildTurnSkillContext(
   try {
     entries = await SkillLibrary.getInstance().list();
   } catch {
-    return empty;
+    return withCapability(empty);
   }
-  if (!entries || entries.length === 0) return empty;
+  if (!entries || entries.length === 0) return withCapability(empty);
 
   // (Re)build the BM25 index when the library size changes.
   if (!turnRetriever || turnRetrieverEntryCount !== entries.length) {
@@ -155,13 +288,13 @@ export async function buildTurnSkillContext(
   }
 
   const hits = turnRetriever.retrieve(query, TURN_ADVERT_LIMIT + 3);
-  if (hits.length === 0) return empty;
+  if (hits.length === 0) return withCapability(empty);
 
   // Gate 2: relevance. The best match must genuinely share multiple query terms,
   // not ride in on a single incidental word - otherwise this turn has no truly
   // relevant skill and we surface nothing instead of the least-bad guesses.
   const topScore = hits[0].score;
-  if (hits[0].matchedTerms < MATCH_MIN_TERMS) return empty;
+  if (hits[0].matchedTerms < MATCH_MIN_TERMS) return withCapability(empty);
 
   const alwaysOn = new Set(opts?.alwaysOnNames ?? []);
 
@@ -194,7 +327,7 @@ export async function buildTurnSkillContext(
     .filter((h) => h.score >= advertFloor && !alwaysOn.has(h.name) && !autoLoaded.some((a) => a.name === h.name))
     .slice(0, TURN_ADVERT_LIMIT);
 
-  if (advertHits.length === 0 && !autoBody) return empty;
+  if (advertHits.length === 0 && !autoBody) return withCapability(empty);
 
   const advertBlock =
     advertHits.length > 0
@@ -203,7 +336,51 @@ export async function buildTurnSkillContext(
           .join('\n')}`
       : '';
 
-  return { advert: [advertBlock, autoBody].filter(Boolean).join('\n\n'), autoLoaded };
+  return withCapability({ advert: [advertBlock, autoBody].filter(Boolean).join('\n\n'), autoLoaded });
+}
+
+/**
+ * Rank library skills for a composer draft, reusing the SAME BM25 retriever and
+ * relevance gate as buildTurnSkillContext so the composer's "Suggested for
+ * '<draft>'" list mirrors what the agent would auto-surface on that turn.
+ * Returns full SkillIndexEntry rows (skills only, blocked excluded) so the
+ * Skills flyout can render and add them. Empty for greetings / no clear match.
+ */
+export async function retrieveSkillSuggestions(query: string, limit = 2): Promise<SkillIndexEntry[]> {
+  const terms = discriminativeQueryTerms(query ?? '');
+  if (terms.length < MIN_QUERY_TERMS) return [];
+
+  let entries;
+  try {
+    entries = await SkillLibrary.getInstance().list();
+  } catch {
+    return [];
+  }
+  if (!entries || entries.length === 0) return [];
+
+  if (!turnRetriever || turnRetrieverEntryCount !== entries.length) {
+    turnRetriever = new SkillRetriever({ entries });
+    turnRetriever.buildIndex(entries);
+    turnRetrieverEntryCount = entries.length;
+  }
+
+  const hits = turnRetriever.retrieve(terms.join(' '), limit + 3);
+  if (hits.length === 0 || hits[0].matchedTerms < MATCH_MIN_TERMS) return [];
+
+  // Same coherent-cluster floor the agent advert uses, so weak tail matches
+  // don't surface as suggestions.
+  const floor = ADVERT_RATIO * hits[0].score;
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  const out: SkillIndexEntry[] = [];
+  for (const h of hits) {
+    if (h.score < floor) break;
+    const entry = byName.get(h.name);
+    if (entry && entry.type === 'skill' && entry.security?.verdict !== 'blocked') {
+      out.push(entry);
+    }
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /**
@@ -301,6 +478,13 @@ export interface FirstMessageConfig {
    * unavailable or the session id no longer resolves.
    */
   workflowSessionId?: string;
+  /**
+   * Live Wayland capabilities manifest (Concierge self-knowledge). When set, it
+   * is injected after the skills index / team guide and before the workflow
+   * protocol so the assistant can answer "what can Wayland do / how do I X" from
+   * real product data. Populate via `resolveCapabilitiesManifest()`.
+   */
+  capabilitiesManifest?: string;
 }
 
 /**
@@ -355,6 +539,12 @@ export async function buildSystemInstructions(config: FirstMessageConfig): Promi
   if (config.enableTeamGuide) {
     const leaderLabel = await resolveLeaderAssistantLabel(config.presetAssistantId);
     instructions.push(getTeamGuidePrompt({ backend: config.backend, leaderLabel }));
+  }
+
+  // Inject the live Wayland capabilities manifest (Concierge self-knowledge)
+  // after the skills index / team guide and before the workflow protocol.
+  if (config.capabilitiesManifest) {
+    instructions.push(`${CAPABILITIES_MANIFEST_HEADER}\n${config.capabilitiesManifest}`);
   }
 
   // Workflow Launch Surface - append WORKFLOW_PROTOCOL LAST so it sits at the
@@ -472,6 +662,12 @@ If you find yourself about to escalate scheduling outside of Wayland or use a no
     instructions.push(getTeamGuidePrompt({ backend: config.backend, leaderLabel }));
   }
 
+  // Inject the live Wayland capabilities manifest (Concierge self-knowledge)
+  // after the skills index / team guide and before the workflow protocol.
+  if (config.capabilitiesManifest) {
+    instructions.push(`${CAPABILITIES_MANIFEST_HEADER}\n${config.capabilitiesManifest}`);
+  }
+
   // 4. Workflow Launch Surface - append WORKFLOW_PROTOCOL LAST so it sits at
   // the end of the rules content (SPEC §7.3 "primacy at the end").
   const workflowProtocol = await tryComposeWorkflowProtocol(config.workflowSessionId);
@@ -531,6 +727,12 @@ export async function buildSystemInstructionsWithSkillsIndex(config: FirstMessag
   if (config.enableTeamGuide) {
     const leaderLabel = await resolveLeaderAssistantLabel(config.presetAssistantId);
     instructions.push(getTeamGuidePrompt({ backend: config.backend, leaderLabel }));
+  }
+
+  // Inject the live Wayland capabilities manifest (Concierge self-knowledge)
+  // after the skills index / team guide and before the workflow protocol.
+  if (config.capabilitiesManifest) {
+    instructions.push(`${CAPABILITIES_MANIFEST_HEADER}\n${config.capabilitiesManifest}`);
   }
 
   // Workflow Launch Surface - append WORKFLOW_PROTOCOL LAST so it sits at the

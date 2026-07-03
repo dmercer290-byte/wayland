@@ -62,6 +62,7 @@ export function initAcpConversationBridge(workerTaskManager: IWorkerTaskManager)
         extensionName: 'extensionName' in agent ? (agent.extensionName as string | undefined) : undefined,
         isPreset: 'isPreset' in agent ? (agent.isPreset as boolean | undefined) : undefined,
         customAgentId: 'customAgentId' in agent ? (agent.customAgentId as string | undefined) : undefined,
+        version: 'version' in agent ? (agent.version as string | undefined) : undefined,
       }));
       return Promise.resolve({ success: true as const, data });
     } catch (error) {
@@ -193,15 +194,20 @@ export function initAcpConversationBridge(workerTaskManager: IWorkerTaskManager)
     return Promise.resolve({ success: true, data: task.getMode() });
   });
 
-  ipcBridge.acpConversation.getModelInfo.provider(({ conversationId }) => {
+  ipcBridge.acpConversation.getModelInfo.provider(async ({ conversationId, backend }) => {
     const task = workerTaskManager.getTask(conversationId);
     if (!task || !(task instanceof AcpAgentManager)) {
-      return Promise.resolve({ success: true, data: { modelInfo: null } });
+      // No live task yet (cold start on a new chat). Some backends — Claude Code —
+      // can resolve their model catalog offline from local config; derive it so
+      // the picker populates immediately instead of showing the first-connection
+      // tooltip. Returns null for backends without an offline source.
+      const modelInfo = backend ? await AcpAgentManager.getStaticModelInfo(backend) : null;
+      return { success: true, data: { modelInfo } };
     }
-    return Promise.resolve({
+    return {
       success: true,
       data: { modelInfo: task.getModelInfo() },
-    });
+    };
   });
 
   // Set model for ACP agents

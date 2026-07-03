@@ -27,6 +27,8 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { ClientSideConnection, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import { AgentDisconnectedError, AgentSpawnError, AgentStartupError } from '@process/acp/errors/AcpError';
+import { normalizeError } from '@process/acp/errors/errorNormalize';
+import { mapModeForAcpBridge } from '@/common/types/agentModes';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { CreateSessionParams, ForkSessionParams, LoadSessionParams } from '@process/acp/infra/AcpProtocol';
@@ -69,6 +71,10 @@ export class ProcessAcpClient implements AcpClient {
   private _lastExit: AgentExitInfo | null = null;
   private disconnectHandler: ((info: DisconnectInfo) => void) | null = null;
   private hasActivePrompt = false;
+
+  // Learned capability: set to true once the agent rejects session/set_model
+  // with -32601 (Method not found), so we stop re-sending it (#298).
+  private setModelUnsupported = false;
 
   // Pending request tracking
   private readonly pendingRequests = new Set<PendingRequest>();
@@ -221,11 +227,33 @@ export class ProcessAcpClient implements AcpClient {
   }
 
   async setModel(sessionId: string, modelId: string): Promise<void> {
-    await this.runConnectionRequest(() => this.conn.unstable_setSessionModel({ sessionId, modelId }));
+    // Feature-detect session/set_model. Some agents (e.g. opencode v1.17.9) do
+    // not implement it and reject with JSON-RPC -32601 "Method not found". Once
+    // learned, skip the call instead of repeating it on every prompt re-assert -
+    // which otherwise floods the logs and never selects a model (#298).
+    if (this.setModelUnsupported) return;
+    try {
+      await this.runConnectionRequest(() => this.conn.unstable_setSessionModel({ sessionId, modelId }));
+    } catch (err) {
+      if (normalizeError(err).code === 'ACP_METHOD_NOT_FOUND') {
+        this.setModelUnsupported = true;
+        console.warn(
+          `[ProcessAcpClient] ${this.options.backend}: session/set_model not supported by this agent; ` +
+            'skipping model selection (the agent manages its own model).'
+        );
+        return;
+      }
+      throw err;
+    }
   }
 
   async setMode(sessionId: string, modeId: string): Promise<void> {
-    await this.runConnectionRequest(() => this.conn.setSessionMode({ sessionId, modeId }));
+    // Translate Wayland-internal modes the bridge does not understand before
+    // session/set_mode. Today only 'autoGuarded' -> 'default' (so the bridge
+    // escalates risky tool calls as permission requests that Wayland's guardrail
+    // then auto-approves-or-vetoes). Real bridge modes pass through unchanged.
+    const bridgeModeId = mapModeForAcpBridge(modeId);
+    await this.runConnectionRequest(() => this.conn.setSessionMode({ sessionId, modeId: bridgeModeId }));
   }
 
   async setConfigOption(sessionId: string, configId: string, value: string | boolean): Promise<void> {

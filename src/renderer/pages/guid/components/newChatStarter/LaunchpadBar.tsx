@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   closestCenter,
   DndContext,
@@ -25,7 +25,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, Plus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAssistantList } from '@/renderer/hooks/assistant';
-import { useLaunchpadBar, LAUNCHPAD_MAX_ENTRIES } from '@/renderer/hooks/launchpad/useLaunchpadBar';
+import { useLaunchpadBar, LAUNCHPAD_MAX_ENTRIES, PINNED_BAR_IDS } from '@/renderer/hooks/launchpad/useLaunchpadBar';
 import AssistantIconTile from '@/renderer/pages/guid/components/AssistantIconTile';
 import type { QuickLaunchAnchor } from '@/renderer/pages/guid/quickLaunchAnchors';
 import { resolveBarEntry, type LaunchpadBarEntry } from './launchpadCatalog';
@@ -71,6 +71,46 @@ const LaunchpadBar: React.FC<LaunchpadBarProps> = ({ onAnchorClick, onViewAll, m
       .map((id) => resolveBarEntry(id, assistants, localeKey))
       .filter((e): e is LaunchpadBarEntry => e !== null);
   }, [barOrder, assistants, localeKey]);
+
+  // One-time heal: the waylandteams catalog moved from extension (`ext-<id>`) to
+  // native built-ins (`builtin-<id>`). Stale `ext-` pins from before the change
+  // no longer resolve, so they vanish from the bar yet still count against the
+  // 10-shortcut cap (the picker would wrongly report "Maximum 10" with far fewer
+  // visible). Remap any `ext-<id>` whose `builtin-<id>` twin now exists in the
+  // live catalogue, de-dupe, and persist once. Runs after the catalogue loads;
+  // a no-op for fresh installs (defaults already use builtin- ids).
+  const healedRef = useRef(false);
+  useEffect(() => {
+    if (!loaded || healedRef.current || assistants.length === 0) return;
+    const knownIds = new Set(assistants.map((a) => a.id));
+    const seen = new Set<string>();
+    const healed: string[] = [];
+    let changed = false;
+    // Structurally-dead pins: double-prefixed ids (e.g. `builtin-ext-sales`,
+    // `ext-ext-x`) left by an earlier add bug. They can never resolve to an
+    // assistant, so they only inflate the cap - drop them. A legitimate
+    // extension pin is a single `ext-<name>`, never double-prefixed.
+    const isDead = (id: string) => /^(builtin-ext-|builtin-builtin-|ext-ext-|ext-builtin-)/.test(id);
+    for (const id of barOrder) {
+      if (isDead(id)) {
+        changed = true;
+        continue;
+      }
+      let next = id;
+      if (id.startsWith('ext-') && knownIds.has(`builtin-${id.slice(4)}`)) {
+        next = `builtin-${id.slice(4)}`;
+        changed = true;
+      }
+      if (seen.has(next)) {
+        changed = true; // drop duplicate produced by the remap
+        continue;
+      }
+      seen.add(next);
+      healed.push(next);
+    }
+    healedRef.current = true;
+    if (changed) setBarOrder(healed);
+  }, [loaded, barOrder, assistants, setBarOrder]);
 
   const sortableIds = useMemo(() => entries.map((e) => e.id), [entries]);
 
@@ -156,6 +196,7 @@ const LaunchpadBar: React.FC<LaunchpadBarProps> = ({ onAnchorClick, onViewAll, m
                 <SortableCard
                   key={entry.id}
                   entry={entry}
+                  pinned={PINNED_BAR_IDS.includes(entry.id)}
                   onClick={handleCardClick}
                   onRemove={handleRemove}
                   removeLabel={t('guid.launchpad.remove', {
@@ -190,24 +231,14 @@ const LaunchpadBar: React.FC<LaunchpadBarProps> = ({ onAnchorClick, onViewAll, m
 
       <div className={styles.actions}>
         {entries.length > 0 ? (
-          <button
-            type='button'
-            className={styles.reset}
-            onClick={resetToDefaults}
-            data-testid='launchpad-reset'
-          >
+          <button type='button' className={styles.reset} onClick={resetToDefaults} data-testid='launchpad-reset'>
             {t('guid.launchpad.reset', { defaultValue: 'Reset to defaults' })}
           </button>
         ) : (
           <span />
         )}
         {mode === 'compact' && onViewAll ? (
-          <button
-            type='button'
-            className={styles.viewAll}
-            onClick={onViewAll}
-            data-testid='launchpad-view-all'
-          >
+          <button type='button' className={styles.viewAll} onClick={onViewAll} data-testid='launchpad-view-all'>
             {t('guid.launchpad.viewAll', {
               defaultValue: 'View all {{count}} →',
               count: assistantCount,
@@ -231,13 +262,15 @@ const LaunchpadBar: React.FC<LaunchpadBarProps> = ({ onAnchorClick, onViewAll, m
 
 type SortableCardProps = {
   entry: LaunchpadBarEntry;
+  /** Pinned cards (Concierge) are always-available - no remove button is rendered. */
+  pinned: boolean;
   onClick: (entry: LaunchpadBarEntry) => void;
   onRemove: (id: string) => void;
   removeLabel: string;
   dragLabel: string;
 };
 
-const SortableCard: React.FC<SortableCardProps> = ({ entry, onClick, onRemove, removeLabel, dragLabel }) => {
+const SortableCard: React.FC<SortableCardProps> = ({ entry, pinned, onClick, onRemove, removeLabel, dragLabel }) => {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: entry.id,
   });
@@ -273,15 +306,17 @@ const SortableCard: React.FC<SortableCardProps> = ({ entry, onClick, onRemove, r
       >
         <GripVertical size={12} aria-hidden='true' />
       </button>
-      <button
-        type='button'
-        className={styles.removeBtn}
-        onClick={handleRemoveClick}
-        aria-label={removeLabel}
-        data-testid={`launchpad-remove-${entry.id}`}
-      >
-        <X size={10} aria-hidden='true' />
-      </button>
+      {pinned ? null : (
+        <button
+          type='button'
+          className={styles.removeBtn}
+          onClick={handleRemoveClick}
+          aria-label={removeLabel}
+          data-testid={`launchpad-remove-${entry.id}`}
+        >
+          <X size={10} aria-hidden='true' />
+        </button>
+      )}
     </div>
   );
 };

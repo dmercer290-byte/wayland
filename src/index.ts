@@ -63,6 +63,8 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { initMainAdapterWithWindow } from './common/adapter/main';
 import { ipcBridge } from './common';
+import { closeAllPopouts, isPopoutWebContents } from '@process/utils/popoutWindowManager';
+import { initPopoutBridge } from '@process/bridge/popoutBridge';
 import { AION_ASSET_PROTOCOL } from '@process/extensions';
 import { resolveAllowedAssetPath } from '@process/extensions/protocol/assetAllowlist';
 import { initializeProcess } from './process';
@@ -77,6 +79,7 @@ import { onCloseToTrayChanged, onLanguageChanged } from './process/bridge/system
 import { setInitialLanguage } from '@process/services/i18n';
 import { workerTaskManager } from './process/task/workerTaskManagerSingleton';
 import { setupApplicationMenu } from './process/utils/appMenu';
+import { attachContextMenu } from './process/utils/contextMenu';
 import { startWebServer } from './process/webserver';
 import { initializeZoomFactor, setupZoomForWindow } from './process/utils/zoom';
 import { getOrCreateAnalyticsId } from './process/utils/analyticsId';
@@ -350,6 +353,10 @@ app.on('web-contents-created', (_event, contents) => {
   // links through shell.openExternal; guests have no legitimate popup need.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
+  // Wire a native right-click menu (cut/copy/paste/spellcheck). Electron has no
+  // default context menu, so without this paste-via-mouse is impossible (#523).
+  attachContextMenu(contents);
+
   // Only add the guest navigation lock to webview contents. The main window's
   // own will-navigate guard (in createWindow) already fully constrains it, and
   // double-binding here would risk blocking its legitimate in-app file:// nav.
@@ -554,7 +561,11 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
     const mainWebContentsId = mainWindow.webContents.id;
     const GRANTED_PERMISSIONS = new Set(['media', 'mediaKeySystem', 'audioCapture', 'videoCapture']);
     const isFirstPartyRenderer = (wc: Electron.WebContents | null | undefined): boolean => {
-      if (!wc || wc.id !== mainWebContentsId) {
+      // First-party = the main renderer OR a pop-out chat window (#27 phase 2).
+      // Pop-outs load the same origin-locked renderer and must be able to use the
+      // mic for voice; their navigation is guarded identically in
+      // popoutWindowManager (will-navigate origin check + deny window.open).
+      if (!wc || (wc.id !== mainWebContentsId && !isPopoutWebContents(wc.id))) {
         return false;
       }
       try {
@@ -607,10 +618,15 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   setupZoomForWindow(mainWindow);
   registerWindowMaximizeListeners(mainWindow);
 
-  // Initialize auto-updater service (skip when disabled via env, e.g. E2E / CI)
+  // Initialize auto-updater service (skip when disabled via env, e.g. E2E / CI,
+  // and in unpackaged dev where there is no installed app to update - the updater
+  // would otherwise hit the GitHub feed on every dev launch and log spurious errors)
   const isCiRuntime = process.env.CI === 'true' || process.env.CI === '1' || process.env.GITHUB_ACTIONS === 'true';
   const disableAutoUpdater =
-    process.env.WAYLAND_DISABLE_AUTO_UPDATE === '1' || process.env.WAYLAND_E2E_TEST === '1' || isCiRuntime;
+    !app.isPackaged ||
+    process.env.WAYLAND_DISABLE_AUTO_UPDATE === '1' ||
+    process.env.WAYLAND_E2E_TEST === '1' ||
+    isCiRuntime;
   if (!disableAutoUpdater) {
     Promise.all([import('./process/services/autoUpdaterService'), import('./process/bridge/updateBridge')])
       .then(([{ autoUpdaterService }, { createAutoUpdateStatusBroadcast }]) => {
@@ -618,6 +634,10 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         const statusBroadcast = createAutoUpdateStatusBroadcast();
         autoUpdaterService.initialize(statusBroadcast);
         globalThis.__waylandUpdateChannelStatus = { available: true };
+        // Detect a silent install failure from the previous launch (downloaded +
+        // attempted but the version never advanced) before the first check, so the
+        // imminent re-offer is surfaced as a failure instead of looped silently (#286).
+        autoUpdaterService.reconcilePendingInstall();
         // Check for updates after 3 seconds delay
         setTimeout(() => {
           void autoUpdaterService.checkForUpdatesAndNotify();
@@ -816,6 +836,14 @@ const handleAppReady = async (): Promise<void> => {
     console.error('Failed to initialize process:', error);
     app.exit(1);
     return;
+  }
+
+  // #27 phase 2: register pop-out window providers (conversation.popout /
+  // dockBack). Cheap + idempotent; creates no windows until the renderer asks.
+  try {
+    initPopoutBridge();
+  } catch (error) {
+    console.error('[Wayland] Failed to init pop-out bridge:', error);
   }
 
   try {
@@ -1106,6 +1134,13 @@ type CleanupModules = {
   // L16 (AUDIT-05 F18): shut down cron timers from before-quit so scheduled
   // work cannot outlive the app's quit sequence.
   cron: typeof import('@process/services/cron/cronServiceSingleton');
+  // #139: reap webhook tunnel CLIs (cloudflared/ngrok/tailscale) on quit so
+  // their long-lived child processes don't orphan past the app.
+  tunnel: typeof import('@process/channels/tunnel');
+  // #443: last-resort reaper for wayland-core / ACP engine children. Runs after
+  // the graceful per-agent kill to force-kill any child left over (e.g. when the
+  // per-step budget truncates a slow kill), so engine processes never orphan.
+  agentChildren: typeof import('@process/agent/agentChildRegistry');
 };
 let _cleanupModulesPromise: Promise<CleanupModules> | undefined;
 
@@ -1120,17 +1155,35 @@ const prefetchCleanupModules = (): Promise<CleanupModules> => {
     import('@process/services/database/export'),
     import('@process/services/cron/cronServiceSingleton'),
     import('@process/bridge/fileWatchBridge'),
-  ]).then(([ambient, channels, webuiBridge, webserverAdapter, officeWatch, pptPreview, database, cron, fileWatch]) => ({
-    ambient,
-    channels,
-    webuiBridge,
-    webserverAdapter,
-    officeWatch,
-    pptPreview,
-    database,
-    cron,
-    fileWatch,
-  }));
+    import('@process/channels/tunnel'),
+    import('@process/agent/agentChildRegistry'),
+  ]).then(
+    ([
+      ambient,
+      channels,
+      webuiBridge,
+      webserverAdapter,
+      officeWatch,
+      pptPreview,
+      database,
+      cron,
+      fileWatch,
+      tunnel,
+      agentChildren,
+    ]) => ({
+      ambient,
+      channels,
+      webuiBridge,
+      webserverAdapter,
+      officeWatch,
+      pptPreview,
+      database,
+      cron,
+      fileWatch,
+      tunnel,
+      agentChildren,
+    })
+  );
 };
 
 // Ensure we don't miss the ready event when running in CLI/WebUI mode
@@ -1200,6 +1253,10 @@ app.on('before-quit', async () => {
   setIsQuitting(true);
   isExplicitQuit = true;
   destroyTray();
+  // #27 phase 2: pop-outs are ephemeral - tear them down on quit (synchronous,
+  // cheap; their `closed` handlers fire popoutClosed but the main window is also
+  // closing so the broadcast is a harmless no-op).
+  closeAllPopouts();
 
   // M17: per-step budget. A single slow step (e.g. WebSocket close) cannot
   // starve later steps. Total ceiling stays at 10s.
@@ -1264,6 +1321,12 @@ app.on('before-quit', async () => {
       safeImport('database', () => import('@process/services/database/export')),
       safeImport('cron', () => import('@process/services/cron/cronServiceSingleton')),
       safeImport('fileWatch', () => import('@process/bridge/fileWatchBridge')),
+      safeImport('tunnel', () => import('@process/channels/tunnel')),
+      // #443: must be in the fallback list too - the fallback path is hit exactly
+      // when the prefetch rejected (e.g. a native module failed to load, common
+      // on Windows - the platform this reaper targets), so omitting it here would
+      // silently disable the reaper in the case it is most needed.
+      safeImport('agentChildren', () => import('@process/agent/agentChildRegistry')),
     ]);
     const out: Partial<CleanupModules> = {};
     for (const [k, v] of entries) {
@@ -1333,6 +1396,19 @@ app.on('before-quit', async () => {
       PER_STEP_TIMEOUT_MS
     );
 
+    // #139: reap webhook tunnel CLIs. ChannelManager.shutdown() does not own
+    // the tunnels (the WebhookExposureService singleton does), so they must be
+    // torn down explicitly here or the cloudflared/ngrok/tailscale process
+    // orphans past the app.
+    const tunnelStep = withTimeout(
+      'stopAllTunnels',
+      (async () => {
+        if (!mods.tunnel) return;
+        await mods.tunnel.stopAllTunnels();
+      })(),
+      PER_STEP_TIMEOUT_MS
+    );
+
     const webServerStep = withTimeout(
       'webServer.close',
       (async () => {
@@ -1389,11 +1465,27 @@ app.on('before-quit', async () => {
       ambientStep,
       teamStep,
       channelsStep,
+      tunnelStep,
       webServerStep,
       officeWatchStep,
       pptPreviewStep,
       fileWatchStep,
     ]);
+
+    // #443: last-resort engine-child reaper. Runs AFTER the graceful path above
+    // (workerStep -> WorkerTaskManager.clear() -> per-agent kill), so normally
+    // there is nothing left. It force-kills any wayland-core / ACP child still
+    // alive - e.g. when a per-agent graceful kill was truncated by its 2s budget,
+    // or a child was spawned outside a tracked manager - so engine processes
+    // never orphan past the app (the "two sets of Wayland" report).
+    await withTimeout(
+      'killAllAgentChildren',
+      (async () => {
+        if (!mods.agentChildren) return;
+        await mods.agentChildren.killAllAgentChildren();
+      })(),
+      PER_STEP_TIMEOUT_MS
+    );
   };
 
   // Master ceiling: hard 10s upper bound on the entire cleanup phase.

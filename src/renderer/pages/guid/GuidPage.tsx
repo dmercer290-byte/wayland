@@ -9,7 +9,7 @@ import { ipcBridge } from '@/common';
 import { resolveLocaleKey } from '@/common/utils';
 
 import { useInputFocusRing } from '@/renderer/hooks/chat/useInputFocusRing';
-import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
+import { isElectronDesktop, resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 import { isImageAvatar } from '@/renderer/utils/avatar';
 import { getLucideIcon } from '@/renderer/utils/lucideAvatar';
 import { useConversationTabs } from '@/renderer/pages/conversation/hooks/ConversationTabsContext';
@@ -17,6 +17,7 @@ import { CUSTOM_AVATAR_IMAGE_MAP } from './constants';
 import AssistantIconTile, { categoryToPaletteKey, type PaletteKey } from './components/AssistantIconTile';
 import AssistantSelectionArea from './components/AssistantSelectionArea';
 import Greeting from './components/newChatStarter/Greeting';
+import NoModelCtaCard from './components/newChatStarter/NoModelCtaCard';
 import KickoffCard from './components/newChatStarter/KickoffCard';
 import IntentPillBar from './components/newChatStarter/IntentPillBar';
 import IntentSuggestionPanel from './components/newChatStarter/IntentSuggestionPanel';
@@ -53,6 +54,7 @@ import { getAgentLogo } from '@/renderer/utils/model/agentLogo';
 import type { AcpBackendConfig } from './types';
 import { Button, ConfigProvider, Dropdown, Menu, Message } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { warmCuratedForAgent } from '@/renderer/hooks/useModelRegistry';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styles from './index.module.css';
@@ -69,6 +71,12 @@ const GuidPage: React.FC = () => {
 
   const localeKey = resolveLocaleKey(i18n.language);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+  // #52: when running as the headless web server (remote), the Models page is
+  // read-only, so the no-model CTA guides to Flux / server-side config rather
+  // than local key entry. Reuses the app's existing desktop-vs-web detection
+  // (isElectronDesktop) - the same flag GuidActionRow uses for `isWebUI`.
+  const isWebServer = !isElectronDesktop();
 
   // W3 (v0.6.2) - discoverability HomeHintBar visibility counter. Persisted in
   // localStorage so it auto-hides after the user's 5th chat across sessions.
@@ -95,11 +103,16 @@ const GuidPage: React.FC = () => {
     projectId?: string;
     /** Project name, shown as a "New chat in {project}" indicator above the composer. */
     projectName?: string;
+    /** The project's managed workspace folder, auto-filled as the chat's dir. */
+    projectWorkspace?: string;
   } | null;
   // Project scoping: when present, useGuidSend stamps extra.projectId on the new
   // conversation. Backend / model / assistant pickers stay fully free.
   const projectId = workflowRouteState?.projectId;
   const projectName = workflowRouteState?.projectName;
+  // The project's own folder, when the composer opened from a project. Threaded
+  // into useGuidSend so an auto-filled project dir is NOT flagged customWorkspace.
+  const projectWorkspace = workflowRouteState?.projectWorkspace;
   const workflowSession = useWorkflowSession(
     workflowRouteState?.workflowSessionId,
     workflowRouteState?.initialWorkflowSession
@@ -108,6 +121,9 @@ const GuidPage: React.FC = () => {
   // --- Skills state ---
   const [builtinAutoSkills, setBuiltinAutoSkills] = useState<Array<{ name: string; description: string }>>([]);
   const [guidDisabledBuiltinSkills, setGuidDisabledBuiltinSkills] = useState<string[] | undefined>(undefined);
+  // Skills the user added in the composer "+" menu before this chat exists. On
+  // send they ride into the new conversation's extra.sessionSkills.
+  const [stagedSessionSkills, setStagedSessionSkills] = useState<string[]>([]);
 
   useEffect(() => {
     ipcBridge.fs.listBuiltinAutoSkills
@@ -146,6 +162,18 @@ const GuidPage: React.FC = () => {
     () => filterVisibleAgents(agentSelection.availableAgents, hiddenSet, agentSelection.selectedAgentKey),
     [agentSelection.availableAgents, agentSelection.selectedAgentKey, hiddenSet]
   );
+
+  // Pre-warm each toolbar agent's curated model catalog as soon as the agents
+  // are known, so the FIRST open of any agent's model picker shows the real
+  // list instantly instead of flashing the Flux-only placeholder while its
+  // (sometimes CLI-spawning, e.g. `codex debug models`) enumeration resolves.
+  // Best-effort + deduped/cached in useModelRegistry; safe to call repeatedly.
+  useEffect(() => {
+    if (!Array.isArray(visibleAgents)) return;
+    for (const agent of visibleAgents) {
+      if (agent?.backend) warmCuratedForAgent(agent.backend);
+    }
+  }, [visibleAgents]);
 
   // Cold-boot launchpad gate (cross-audit smoke HIGH).
   //
@@ -222,6 +250,7 @@ const GuidPage: React.FC = () => {
     resolveEnabledSkills: agentSelection.resolveEnabledSkills,
     resolveDisabledBuiltinSkills: agentSelection.resolveDisabledBuiltinSkills,
     guidDisabledBuiltinSkills,
+    stagedSessionSkills,
     currentEffectiveAgentInfo: agentSelection.currentEffectiveAgentInfo,
     isGoogleAuth: modelSelection.isGoogleAuth,
 
@@ -239,6 +268,7 @@ const GuidPage: React.FC = () => {
 
     // Project scoping (undefined on the normal new-chat surface)
     projectId,
+    projectWorkspace,
   });
 
   const recordTelemetry = useUsageTelemetry();
@@ -535,7 +565,7 @@ const GuidPage: React.FC = () => {
       } else {
         // Extension-bundle assistants follow the same Rory rule. When no user
         // backend pill is active, presetAgentType is left undefined and
-        // selectPresetAssistant defaults to gemini (Phase 1 fallback).
+        // selectPresetAssistant defaults to wcore (Wayland Core, the native engine).
         agentSelection.selectPresetAssistant({
           id: prompt.targetAssistantId,
           presetAgentType: userBackend,
@@ -730,7 +760,7 @@ const GuidPage: React.FC = () => {
     return () => observer.disconnect();
   }, [agentSelection.isPresetAgent, selectedAssistantDescription]);
 
-  const currentPresetAgentType = selectedAssistantRecord?.presetAgentType || 'gemini';
+  const currentPresetAgentType = selectedAssistantRecord?.presetAgentType || 'wcore';
   const agentSwitcherItems = useMemo(() => {
     if (!agentSelection.availableAgents) return [];
     // Build from detected execution engines, excluding preset assistants and remote agents
@@ -792,15 +822,31 @@ const GuidPage: React.FC = () => {
   );
 
   // Resolve the effective agent type once - covers both direct selection and preset assistants
-  const effectiveAgentType = agentSelection.isPresetAgent
+  const effectiveAgentTypeRaw = agentSelection.isPresetAgent
     ? agentSelection.currentEffectiveAgentInfo.agentType
     : agentSelection.selectedAgent;
+
+  // `agent-profile` (vendored specialist assistants) and the literal
+  // `wayland-core` both run on the WCore engine, NOT an ACP CLI - the send path
+  // already collapses them to `wcore` (getConversationTypeForBackend in
+  // buildAgentConversationParams). The model picker must use the SAME mapping or
+  // it queries `curatedForAgent('agent-profile')`, gets an empty catalog, and
+  // shows a dead Flux-only / "no models" picker that can never hold a pick
+  // (#380, assistant model picker + persistence). Map at the picker boundary so
+  // assistants surface the Wayland Core catalog and default to a WCore model.
+  const WCORE_ALIAS_TYPES = new Set(['agent-profile', 'wayland-core']);
+  const effectiveAgentType = WCORE_ALIAS_TYPES.has(effectiveAgentTypeRaw) ? 'wcore' : effectiveAgentTypeRaw;
 
   // Agents that use configured model providers instead of ACP probe-based models
   const PROVIDER_BASED_AGENTS = new Set(['gemini', 'wcore']);
   const isGeminiMode =
     PROVIDER_BASED_AGENTS.has(effectiveAgentType) &&
-    (!agentSelection.isPresetAgent || agentSelection.currentEffectiveAgentInfo.isAvailable);
+    // WCore-alias presets always resolve to the always-present bundled engine, so
+    // the per-agent `isAvailable` probe (keyed on the raw preset type, which is
+    // never a detected backend) must not gate them out of the provider picker.
+    (!agentSelection.isPresetAgent ||
+      agentSelection.currentEffectiveAgentInfo.isAvailable ||
+      WCORE_ALIAS_TYPES.has(effectiveAgentTypeRaw));
 
   // Build the mention dropdown node
   const mentionDropdownNode = (
@@ -860,9 +906,12 @@ const GuidPage: React.FC = () => {
       builtinAutoSkills={builtinAutoSkills}
       disabledBuiltinSkills={guidDisabledBuiltinSkills ?? []}
       onToggleBuiltinSkill={handleToggleBuiltinSkill}
+      draftText={guidInput.input}
+      onStagedSkillsChange={setStagedSessionSkills}
       hidePresetTag
       loading={guidInput.loading}
       isButtonDisabled={send.isButtonDisabled}
+      noModelConfigured={send.noModelConfigured}
       speechInputNode={
         <SpeechInputButton variant='prominent' locale={i18n.language} onTranscript={handleSpeechTranscript} />
       }
@@ -1074,6 +1123,16 @@ const GuidPage: React.FC = () => {
 
           {!showPresetHero ? <Greeting displayName={greetingDisplayName} /> : null}
 
+          {/* #52: persistent inline CTA when no usable model is configured
+              (fresh install, or a cloud install where onboarding was skipped).
+              Sits below the greeting and above the composer. The same predicate
+              drives the disabled Send button so they never diverge. On the
+              headless web server the Models page is read-only, so the copy
+              points at Flux / server-side config (isWebServer branch). */}
+          {send.noModelConfigured ? (
+            <NoModelCtaCard isRemote={isWebServer} onSetup={() => navigate('/settings/models')} />
+          ) : null}
+
           <GuidInputCard
             input={guidInput.input}
             onInputChange={handleInputChange}
@@ -1154,6 +1213,8 @@ const GuidPage: React.FC = () => {
             onRegisterOpenDetails={(openDetails) => {
               openAssistantDetailsRef.current = openDetails;
             }}
+            excludeKickoffId={kickoff.currentKickoffId}
+            showKickoffGrid={showPresetHero}
             hideInlineGrid
           />
         </div>

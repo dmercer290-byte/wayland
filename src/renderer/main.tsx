@@ -27,6 +27,18 @@ if (__sentryDsn && (window as { electronAPI?: unknown }).electronAPI) {
     .catch((err) => console.warn('[Sentry] renderer import skipped:', (err as Error)?.message ?? err));
 }
 
+// Apply Reduce Motion before first paint so the UI is calm/fast from frame one.
+// Defaults ON unless the user has explicitly turned it off (mirrors the Settings
+// default in DisplayModalContent). Module scripts run after HTML parse, so
+// document.body is available.
+try {
+  if (typeof document !== 'undefined' && document.body && localStorage.getItem('wayland:reduce-motion') !== 'false') {
+    document.body.classList.add('reduce-motion');
+  }
+} catch {
+  /* localStorage unavailable - ignore */
+}
+
 // Runtime patches must be imported early
 import './utils/ui/runtimePatches';
 
@@ -74,6 +86,8 @@ import Sider from './components/layout/Sider';
 import { useAuth } from './hooks/context/AuthContext';
 import { ConversationHistoryProvider } from './hooks/context/ConversationHistoryContext';
 import HOC from './utils/ui/HOC';
+import { canonicalizeWebUiRoute } from './utils/canonicalizeRoute';
+import { installShadowCopyHandler } from './utils/shadowSelection';
 
 // Patch Korean locale with missing properties from English locale
 const koKRComplete = {
@@ -145,7 +159,26 @@ const App = HOC.Wrapper(Config)(Main);
 
 void registerPwa();
 
+// Enable Ctrl+C / context-menu Copy of agent messages, which render inside an
+// open shadow root where the native copy path reads an empty selection (#523).
+installShadowCopyHandler();
+
+// Reconcile a mixed path/hash URL (e.g. `/assistants#/guid`) before the
+// HashRouter mounts, so the rendered route matches the visible path (#151).
+canonicalizeWebUiRoute();
+
 const root = createRoot(document.getElementById('root')!);
 root.render(
   React.createElement(ErrorBoundary, null, React.createElement(AppProviders, null, React.createElement(App)))
 );
+
+// Re-arm the web-only blank-root recovery guard (index.html) once the app has
+// actually mounted, so a later blank in the same session can recover again.
+// Clearing only after a confirmed mount keeps the one-shot loop guard intact.
+requestAnimationFrame(() => {
+  try {
+    sessionStorage.removeItem('__wayland_blankRootRecovered');
+  } catch {
+    /* sessionStorage unavailable (private mode / SSR) - non-fatal */
+  }
+});

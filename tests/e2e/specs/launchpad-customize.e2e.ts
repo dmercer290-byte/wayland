@@ -44,9 +44,9 @@ async function ensureColdStartGuid(page: import('@playwright/test').Page) {
 }
 
 test.describe('Launchpad customisation - add / remove / persist', () => {
-  test('shows the + chip and the 6 default cards on cold-start', async ({ page }) => {
+  test('shows the + chip and the 7 default cards on cold-start', async ({ page }) => {
     await ensureColdStartGuid(page);
-    await expect(page.locator(CARD)).toHaveCount(6);
+    await expect(page.locator(CARD)).toHaveCount(7);
     await expect(page.locator(ADD_CHIP)).toBeVisible();
   });
 
@@ -69,13 +69,13 @@ test.describe('Launchpad customisation - add / remove / persist', () => {
     await removeBtn.waitFor({ state: 'visible', timeout: 5_000 });
     await removeBtn.click({ force: true });
 
-    await expect(page.locator(CARD)).toHaveCount(5);
+    await expect(page.locator(CARD)).toHaveCount(6);
     await expect(page.locator(`${CARD}[data-quicklaunch-id="ext-quiet-money"]`)).toHaveCount(0);
 
-    // Persistence: reload the page and verify the bar still has 5 cards.
+    // Persistence: reload the page and verify the bar still has 6 cards.
     await page.reload();
     await page.locator(CARD).first().waitFor({ state: 'visible', timeout: 30_000 });
-    await expect(page.locator(CARD)).toHaveCount(5);
+    await expect(page.locator(CARD)).toHaveCount(6);
     await expect(page.locator(`${CARD}[data-quicklaunch-id="ext-quiet-money"]`)).toHaveCount(0);
 
     // And the value is persisted under the canonical key.
@@ -98,7 +98,7 @@ test.describe('Launchpad customisation - add / remove / persist', () => {
     const unpinnedCount = await unpinnedCards.count();
     test.skip(
       unpinnedCount === 0,
-      'no unpinned assistants in the picker - install lacks extensions beyond the default 6'
+      'no unpinned assistants in the picker - install lacks extensions beyond the default 7'
     );
 
     const firstUnpinned = unpinnedCards.first();

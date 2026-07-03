@@ -31,6 +31,21 @@ export interface UpdateCheckResult {
   currentVersion: string;
   updateAvailable: boolean;
   latest?: UpdateReleaseInfo;
+  ijfw?: IjfwUpdateStatus;
+}
+
+export interface IjfwUpdateStatus {
+  installed: boolean;
+  currentVersion?: string;
+  latestVersion?: string | null;
+  updateAvailable: boolean;
+  offline?: boolean;
+  detectedVia: 'directory' | 'symlink' | 'cli' | 'none';
+  cliOnPath?: boolean;
+  mcpServerPath?: string;
+  commandPath?: string;
+  pathHealthy: boolean;
+  error?: string;
 }
 
 export interface UpdateCheckRequest {
@@ -82,7 +97,14 @@ export type AutoUpdateStatusType =
   | 'downloading'
   | 'downloaded'
   | 'error'
+  // An update was downloaded + install attempted but never applied (silent
+  // Squirrel/ShipIt no-op), or the app can't update in place (macOS app running
+  // outside /Applications). Surfaced instead of silently re-offering (#286).
+  | 'install-failed'
   | 'cancelled';
+
+/** Why an update could not be applied, carried on an 'install-failed' status. */
+export type AutoUpdateInstallFailedReason = 'silent-noop' | 'not-in-applications';
 
 export interface AutoUpdateProgress {
   bytesPerSecond: number;
@@ -98,4 +120,6 @@ export interface AutoUpdateStatus {
   releaseNotes?: string;
   progress?: AutoUpdateProgress;
   error?: string;
+  /** Set when status === 'install-failed'. */
+  reason?: AutoUpdateInstallFailedReason;
 }

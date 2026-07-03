@@ -136,7 +136,14 @@ function makeTeam(overrides: Partial<TTeam> = {}): TTeam {
   };
 }
 
-function makeRitualCron(overrides: { lastRunAtMs?: number; lastStatus?: 'ok' | 'error' | 'skipped' | 'missed'; createdBy?: 'user' | 'agent'; kind?: 'ritual' | undefined } = {}): CronJob {
+function makeRitualCron(
+  overrides: {
+    lastRunAtMs?: number;
+    lastStatus?: 'ok' | 'error' | 'skipped' | 'missed';
+    createdBy?: 'user' | 'agent';
+    kind?: 'ritual' | undefined;
+  } = {}
+): CronJob {
   return {
     id: 'cron-r1',
     name: 'helm ritual',
@@ -152,7 +159,8 @@ function makeRitualCron(overrides: { lastRunAtMs?: number; lastStatus?: 'ok' | '
       agentConfig: {
         backend: 'claude',
         name: 'helm',
-        configOptions: overrides.kind === undefined && 'kind' in overrides ? undefined : { kind: overrides.kind ?? 'ritual' },
+        configOptions:
+          overrides.kind === undefined && 'kind' in overrides ? undefined : { kind: overrides.kind ?? 'ritual' },
       },
     },
     state: {
@@ -209,7 +217,11 @@ describe('SignalCollector.collect - collectRecentConversations', () => {
       getMessages: vi.fn().mockImplementation(async (cid: string) => {
         if (cid === 'c-newest') {
           return {
-            data: [makeMessage({ id: 'a', createdAt: 100 }), makeMessage({ id: 'b', createdAt: 100 + 2 * 60 * 1000 }), makeMessage({ id: 'c', createdAt: 100 + 5 * 60 * 1000 })],
+            data: [
+              makeMessage({ id: 'a', createdAt: 100 }),
+              makeMessage({ id: 'b', createdAt: 100 + 2 * 60 * 1000 }),
+              makeMessage({ id: 'c', createdAt: 100 + 5 * 60 * 1000 }),
+            ],
             total: 3,
             hasMore: false,
           } as PaginatedResult<TMessage>;
@@ -536,7 +548,10 @@ describe('SignalCollector.collect - detectRecentRitualOutput', () => {
 describe('findAssistantInRegistry', () => {
   it('returns the single matching record', () => {
     getInstanceMock.mockReturnValue({
-      getAssistants: () => [{ id: 'helm', name: 'Coach' }, { id: 'sales', name: 'Sales' }],
+      getAssistants: () => [
+        { id: 'helm', name: 'Coach' },
+        { id: 'sales', name: 'Sales' },
+      ],
     });
     const result = findAssistantInRegistry('helm');
     expect(result).toEqual({ id: 'helm', name: 'Coach' });
@@ -554,7 +569,10 @@ describe('findAssistantInRegistry', () => {
     getInstanceMock.mockReturnValue({
       getAssistants: () => [{ id: 'other' }],
     });
-    expect(findAssistantInRegistry('helm')).toBeNull();
+    // Must be absent from BOTH the (mocked) ExtensionRegistry AND the real
+    // built-in catalog the function falls back to (#375). `helm` now ships in
+    // the catalog, so use a sentinel id guaranteed not to exist anywhere.
+    expect(findAssistantInRegistry('__no-such-assistant__')).toBeNull();
   });
 
   it('returns null + warns on ambiguous match (>1 hit)', () => {
@@ -576,5 +594,22 @@ describe('findAssistantInRegistry', () => {
       throw new Error('not ready');
     });
     expect(findAssistantInRegistry('helm')).toBeNull();
+  });
+
+  // #375 follow-up - ASSISTANT_PRESETS (concierge, cowork, ...) are seeded into
+  // config.assistants, NOT contributed to ExtensionRegistry and NOT in the
+  // builtin catalog. Without the preset fallback, suggestN returned
+  // 'unknown-assistant' and the Concierge/Cowork detail views opened with no
+  // suggested-prompt cards.
+  it('resolves an ASSISTANT_PRESETS id (builtin-concierge) and carries promptsI18n for the grid', () => {
+    getInstanceMock.mockReturnValue({ getAssistants: () => [] });
+    const result = findAssistantInRegistry('builtin-concierge');
+    expect(result?.id).toBe('concierge');
+    expect((result?.promptsI18n as Record<string, string[]> | undefined)?.['en-US']?.length).toBeGreaterThan(0);
+  });
+
+  it('resolves the cowork preset by bare id too', () => {
+    getInstanceMock.mockReturnValue({ getAssistants: () => [] });
+    expect(findAssistantInRegistry('cowork')?.id).toBe('cowork');
   });
 });

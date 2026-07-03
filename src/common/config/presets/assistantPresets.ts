@@ -37,6 +37,74 @@ export type AssistantPreset = {
 
 export const ASSISTANT_PRESETS: AssistantPreset[] = [
   {
+    id: 'concierge',
+    avatar: 'lucide:Sparkles',
+    // Runs on the native Wayland Core engine so self-knowledge works without an
+    // external CLI; the user can still switch its backend from the home picker.
+    presetAgentType: 'wcore',
+    category: 'general',
+    resourceDir: 'src/process/resources/assistant/concierge',
+    ruleFiles: {
+      'en-US': 'concierge.md',
+      'zh-CN': 'concierge.zh-CN.md',
+    },
+    // The bundled how-to skill (productivity/concierge) - rides BM25 retrieval.
+    defaultEnabledSkills: ['concierge'],
+    nameI18n: {
+      'en-US': 'Concierge',
+      'zh-CN': '礼宾助手',
+    },
+    descriptionI18n: {
+      'en-US':
+        "Your in-app guide. Ask what Wayland can do, how to do anything, or why something isn't working - I'll walk you through it or set it up for you.",
+      'zh-CN':
+        '你的应用内向导。问我 Wayland 能做什么、如何操作，或为什么某项功能不工作——我会一步步带你完成，或直接帮你设置好。',
+    },
+    promptsI18n: {
+      'en-US': [
+        'What can Wayland do?',
+        'How do I connect Claude?',
+        'Set up a daily digest of my work every morning',
+        'Find me the right skill for a task',
+        "Why didn't my scheduled task run?",
+      ],
+      'zh-CN': [
+        'Wayland 能做什么？',
+        '如何连接 Claude？',
+        '每天早上为我生成一份工作摘要',
+        '帮我找到适合某个任务的技能',
+        '我的定时任务为什么没有运行？',
+      ],
+    },
+  },
+  {
+    id: 'ignition',
+    avatar: 'lucide:Rocket',
+    // Runs on the native Wayland Core engine so a total beginner can start
+    // building with zero external CLI connected; switchable from the picker.
+    presetAgentType: 'wcore',
+    category: 'build',
+    resourceDir: 'src/process/resources/assistant/ignition',
+    ruleFiles: {
+      'en-US': 'ignition.md',
+    },
+    nameI18n: {
+      'en-US': 'Ignition',
+    },
+    descriptionI18n: {
+      'en-US':
+        "Your income-asset builder. Answer a few easy questions and I'll pick the single best money-making asset for you, plan it, then build and launch it live this week - you just approve at two points.",
+    },
+    promptsI18n: {
+      'en-US': [
+        "Build me a real income asset this week - I don't know where to start",
+        'What could I sell that people already pay for?',
+        'I have a skill but no idea how to make money from it',
+        'Set me up something that earns while I work my day job',
+      ],
+    },
+  },
+  {
     id: 'word-creator',
     avatar: 'lucide:FileText',
     presetAgentType: 'gemini',

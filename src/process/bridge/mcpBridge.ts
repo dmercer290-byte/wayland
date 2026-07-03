@@ -5,10 +5,51 @@
  */
 
 import { ipcBridge } from '@/common';
-import { ConfigStorage } from '@/common/config/storage';
 import type { IMcpServer } from '@/common/config/storage';
 import { mcpService } from '@process/services/mcpServices/McpService';
 import { mcpOAuthService } from '@process/services/mcpServices/McpOAuthService';
+
+/**
+ * Persist user-supplied BYO OAuth client credentials onto an MCP server record.
+ *
+ * SINGLE owner of the find -> setByoCredentials -> persist sequence: both the
+ * desktop `setMcpByoOAuthCredentials` IPC handler AND the remote
+ * `/api/mcp/set-byo-oauth-credentials` route call this, so the storage logic
+ * lives in exactly one place.
+ *
+ * Write-only by construction: it returns STATUS ONLY ({ ok }). The clientSecret
+ * is never read back, never echoed - the remote caller can plant a credential
+ * but can never exfiltrate one (§0).
+ */
+export async function persistMcpByoOAuthCredentials(input: {
+  serverId: string;
+  clientId: string;
+  clientSecret?: string;
+}): Promise<{ ok: boolean; msg?: string }> {
+  const { serverId, clientId, clientSecret } = input;
+  if (!clientId || typeof clientId !== 'string' || !clientId.trim()) {
+    return { ok: false, msg: 'clientId is required' };
+  }
+  // ConfigStorage exposes the same backing file as the renderer's
+  // useMcpServers hook (mcp.config key on agent.config storage).
+  // #283: read/write the persisted MCP config through the MAIN-process config
+  // accessor (ProcessConfig = the same `configFile` used by initStorage and the
+  // ACP session builder). The renderer-facing `ConfigStorage` is a bridge API
+  // whose get/set route over the IPC wire; calling them from the main process
+  // has no responder and hangs forever, which left "Save & sign in" spinning
+  // for every BYO-OAuth MCP (GitHub, Slack, ...).
+  const { ProcessConfig } = await import('@process/utils/initStorage');
+  const servers: IMcpServer[] = (await ProcessConfig.get('mcp.config').catch(() => [] as IMcpServer[])) ?? [];
+  const idx = servers.findIndex((s) => s.id === serverId);
+  if (idx < 0) {
+    return { ok: false, msg: `MCP server not found: ${serverId}` };
+  }
+  const updated = mcpOAuthService.setByoCredentials(servers[idx], clientId, clientSecret);
+  const nextServers = [...servers];
+  nextServers[idx] = { ...updated, updatedAt: Date.now() };
+  await ProcessConfig.set('mcp.config', nextServers);
+  return { ok: true };
+}
 
 export function initMcpBridge(): void {
   // MCP service IPC handlers
@@ -85,6 +126,18 @@ export function initMcpBridge(): void {
     }
   });
 
+  ipcBridge.mcpService.cancelMcpOAuth.provider(async (serverName) => {
+    try {
+      mcpOAuthService.cancel(serverName);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        msg: error instanceof Error ? error.message : 'Unknown error cancelling OAuth login',
+      };
+    }
+  });
+
   ipcBridge.mcpService.logoutMcpOAuth.provider(async (serverName) => {
     try {
       await mcpOAuthService.logout(serverName);
@@ -111,21 +164,18 @@ export function initMcpBridge(): void {
 
   ipcBridge.mcpService.setMcpByoOAuthCredentials.provider(async ({ serverId, clientId, clientSecret }) => {
     try {
-      if (!clientId || typeof clientId !== 'string' || !clientId.trim()) {
-        return { success: false, msg: 'clientId is required' };
+      const result = await persistMcpByoOAuthCredentials({ serverId, clientId, clientSecret });
+      if (!result.ok) {
+        return { success: false, msg: result.msg ?? 'Failed to save BYO OAuth credentials' };
       }
-      // ConfigStorage exposes the same backing file as the renderer's
-      // useMcpServers hook (mcp.config key on agent.config storage).
-      const servers: IMcpServer[] = (await ConfigStorage.get('mcp.config').catch(() => [] as IMcpServer[])) ?? [];
-      const idx = servers.findIndex((s) => s.id === serverId);
-      if (idx < 0) {
-        return { success: false, msg: `MCP server not found: ${serverId}` };
-      }
-      const updated = mcpOAuthService.setByoCredentials(servers[idx], clientId, clientSecret);
-      const nextServers = [...servers];
-      nextServers[idx] = { ...updated, updatedAt: Date.now() };
-      await ConfigStorage.set('mcp.config', nextServers);
-      return { success: true, data: { server: nextServers[idx] } };
+      // The desktop renderer reads back the updated record to refresh its local
+      // useMcpServers cache; re-read it from storage (the helper persisted it).
+      // #283: main-process read MUST use ProcessConfig, not the renderer-bridge
+      // ConfigStorage (which hangs when called from main).
+      const { ProcessConfig } = await import('@process/utils/initStorage');
+      const servers: IMcpServer[] = (await ProcessConfig.get('mcp.config').catch(() => [] as IMcpServer[])) ?? [];
+      const server = servers.find((s) => s.id === serverId);
+      return { success: true, data: { server } };
     } catch (error) {
       return {
         success: false,

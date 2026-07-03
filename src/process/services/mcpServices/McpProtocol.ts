@@ -200,9 +200,25 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
     retryCount: number = 0
   ): Promise<McpConnectionTestResult> {
     let mcpClient: Client | null = null;
+    // Hoisted so the catch block can report the resolved spawn argv and the
+    // child's stderr even when connect() throws.
+    let command = '';
+    let args: string[] = [];
+    let childStderr = '';
 
     try {
       // app imported statically
+
+      const rawArgs = transport.args ?? [];
+      // Bundled @wayland MCPs are stored as { command: 'node', args: ['builtin-mcp-<name>.mjs'] }.
+      // End-user Macs frequently have no system `node` on PATH, so spawning the
+      // bare command dies on launch and surfaces only as -32000 "Connection
+      // closed". Run our own builtins through the app's Electron binary as Node
+      // (ELECTRON_RUN_AS_NODE=1) — always present, correct arch, no system Node
+      // required — mirroring the IJFW stdio client. The bare filename is also
+      // rewritten to an absolute path under out/main (dev) or
+      // app.asar.unpacked/out/main (packaged).
+      const isBuiltinWaylandMcp = transport.command === 'node' && isBuiltinWaylandMcpArg(rawArgs[0]);
 
       // Use enhanced env (includes shell PATH) instead of bare process.env
       // so CLI tools installed via nvm/fnm/volta are discoverable in packaged mode
@@ -210,20 +226,20 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
         ...getEnhancedEnv(transport.env),
         TERM: 'dumb',
         NO_COLOR: '1',
+        ...(isBuiltinWaylandMcp ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
       };
-      const command = transport.command === 'npx' ? resolveNpxPath(enhancedEnv) : transport.command;
-      // Bundled @wayland MCPs are stored as { command: 'node', args: ['builtin-mcp-<name>.mjs'] }.
-      // Rewrite the bare filename to an absolute path under out/main (dev) or
-      // app.asar.unpacked/out/main (packaged) so `node` can execute it.
-      const rawArgs = transport.args ?? [];
-      const resolvedBuiltinArgs =
-        transport.command === 'node' && isBuiltinWaylandMcpArg(rawArgs[0])
-          ? [getMcpScriptPath(rawArgs[0]), ...rawArgs.slice(1)]
-          : null;
-      const args =
-        transport.command === 'npx'
+
+      command = isBuiltinWaylandMcp
+        ? process.execPath
+        : transport.command === 'npx'
+          ? resolveNpxPath(enhancedEnv)
+          : transport.command;
+
+      args = isBuiltinWaylandMcp
+        ? [getMcpScriptPath(rawArgs[0]), ...rawArgs.slice(1)]
+        : transport.command === 'npx'
           ? ['x', '--bun', ...normalizeNpxArgsForBundledBun(rawArgs)]
-          : (resolvedBuiltinArgs ?? rawArgs);
+          : rawArgs;
 
       const stdioTransport = new StdioClientTransport({
         command,
@@ -234,6 +250,18 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
         // spawned MCP server (e.g. npx) writes to stderr while Electron
         // runs under terminal job control.
         stderr: 'pipe',
+      });
+
+      // Capture the child's stderr. When a local stdio MCP server dies on
+      // launch (bad arch, missing `node`/`bun` binary, dyld/dependency error)
+      // the SDK only surfaces a generic -32000 "Connection closed" — the real
+      // OS-level reason is on the child's stderr. With stderr:'pipe' the SDK
+      // exposes a PassThrough immediately (before start), so attaching here
+      // loses no early output. Bounded so a chatty server can't grow unbounded.
+      stdioTransport.stderr?.on('data', (chunk: Buffer) => {
+        if (childStderr.length < 4096) {
+          childStderr += chunk.toString('utf8');
+        }
       });
 
       // Create MCP client
@@ -262,6 +290,17 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorCode = (error as NodeJS.ErrnoException)?.code;
 
+      // Surface the real launch failure. A bare -32000 "Connection closed"
+      // means the child exited before the handshake; the captured stderr (and
+      // the exact spawn argv) is the only place the real reason lives.
+      const stderrTail = childStderr.trim().split('\n').slice(-6).join('\n').trim();
+      console.error(
+        `[McpStdio] connect failed: spawn=${JSON.stringify([command, ...args])} code=${errorCode ?? 'n/a'} message=${errorMessage}` +
+          (stderrTail ? `\n[McpStdio] server stderr:\n${stderrTail}` : '\n[McpStdio] server stderr: <empty>')
+      );
+      // Compact suffix appended to user-facing errors so the cause isn't lost.
+      const stderrSuffix = stderrTail ? ` Server output: ${stderrTail.replace(/\s+/g, ' ').slice(0, 300)}` : '';
+
       // Detect missing command (npx/node not installed)
       if (
         errorCode === 'ENOENT' ||
@@ -274,13 +313,12 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
         if (isNpx) {
           return {
             success: false,
-            error:
-              'Bundled bun runtime is unavailable. Please reinstall Wayland or use a direct stdio command instead of npx.',
+            error: `Bundled bun runtime is unavailable. Please reinstall Wayland or use a direct stdio command instead of npx.${stderrSuffix}`,
           };
         }
         return {
           success: false,
-          error: `Command "${cmd}" not found. Please ensure it is installed and available in your PATH.`,
+          error: `Command "${cmd}" not found. Please ensure it is installed and available in your PATH.${stderrSuffix}`,
         };
       }
 
@@ -302,7 +340,7 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
 
       return {
         success: false,
-        error: errorMessage,
+        error: `${errorMessage}${stderrSuffix}`,
       };
     } finally {
       // Clean up connection
@@ -344,6 +382,22 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
             needsAuth: true,
             authMethod: wwwAuthenticate.toLowerCase().includes('bearer') ? 'oauth' : 'basic',
             wwwAuthenticate: wwwAuthenticate,
+            error: 'Authentication required',
+          };
+        }
+      }
+
+      // #283 / #306: a non-2xx probe without a 401 challenge (GitHub returns 400
+      // "missing required Authorization header", Google Workspace similarly) is
+      // an auth requirement only when OAuth is discoverable on the endpoint.
+      // Gating on discovery keeps a transient 5xx a connection error.
+      if (!authCheckResponse.ok) {
+        const { isOAuthProtectedEndpoint } = await import('@process/services/mcpServices/McpOAuthService');
+        if (await isOAuthProtectedEndpoint(transport.url)) {
+          return {
+            success: false,
+            needsAuth: true,
+            authMethod: 'oauth',
             error: 'Authentication required',
           };
         }
@@ -441,6 +495,8 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
         }),
       });
 
+      // Fast path: an RFC 6750 challenge (401 + WWW-Authenticate) is an
+      // unambiguous OAuth requirement.
       if (probeResponse.status === 401) {
         const wwwAuthenticate = probeResponse.headers.get('WWW-Authenticate');
         if (wwwAuthenticate) {
@@ -452,13 +508,26 @@ export abstract class AbstractMcpAgent implements IMcpProtocol {
             error: 'Authentication required',
           };
         }
-        return {
-          success: false,
-          error: `HTTP ${probeResponse.status}: ${probeResponse.statusText}`,
-        };
       }
 
       if (!probeResponse.ok) {
+        // #283 / #306: GitHub/Google remote MCP reject an unauthenticated probe
+        // with 400 "missing required Authorization header" (not 401 +
+        // WWW-Authenticate), so the challenge fast path never fires. Treat a
+        // non-2xx probe as an auth requirement ONLY when OAuth discovery
+        // succeeds on the endpoint; a transient 5xx with no discoverable OAuth
+        // stays a plain connection error rather than a spurious sign-in prompt.
+        // Lazy import: only the (rare) non-2xx path needs the OAuth module, so
+        // every other McpProtocol importer stays free of its load-time cost.
+        const { isOAuthProtectedEndpoint } = await import('@process/services/mcpServices/McpOAuthService');
+        if (await isOAuthProtectedEndpoint(transport.url)) {
+          return {
+            success: false,
+            needsAuth: true,
+            authMethod: 'oauth',
+            error: 'Authentication required',
+          };
+        }
         return {
           success: false,
           error: `HTTP ${probeResponse.status}: ${probeResponse.statusText}`,

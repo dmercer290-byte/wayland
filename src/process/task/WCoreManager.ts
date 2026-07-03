@@ -7,16 +7,26 @@
 import { ipcBridge } from '@/common';
 import type { IMessageToolGroup, TMessage } from '@/common/chat/chatLib';
 import { transformMessage } from '@/common/chat/chatLib';
+import { buildResumeSeedTranscript } from '@process/task/resumeSeed';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import { channelEventBus } from '@process/channels/agent/ChannelEventBus';
 import { teamEventBus } from '@process/team/teamEventBus';
-import type { TProviderWithModel } from '@/common/config/storage';
+import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
+import { buildWCoreUserStdioMcpServers } from '@process/agent/acp/mcpSessionConfig';
+import { readWCoreConfigMcpServerNames } from '@process/agent/wcore/configMcpServers';
+import { type OutputBudget, resolveFixedBudget } from '@/common/config/outputBudget';
 import { ProcessConfig } from '@process/utils/initStorage';
 import { BaseApprovalStore, type IApprovalKey } from '@/common/chat/approval';
 import { ToolConfirmationOutcome } from '../agent/gemini/cli/tools/tools';
 import { WCoreAgent, type StdioMcpOption } from '@process/agent/wcore';
 import type { WCoreCapabilities } from '@process/agent/wcore/protocol';
-import { buildSystemInstructionsWithSkillsIndex } from './agentUtils';
+import {
+  buildSystemInstructionsWithSkillsIndex,
+  buildTurnSkillContext,
+  consumePendingSessionSkills,
+  mergeLoadedSkillsExtra,
+  resolveCapabilitiesManifest,
+} from './agentUtils';
 import { getDatabase } from '@process/services/database';
 import { ProviderRepository } from '@process/providers/storage/ProviderRepository';
 import { isProviderKeyAuthFailure } from '@process/providers/detection/authFailure';
@@ -26,12 +36,15 @@ import BaseAgentManager from './BaseAgentManager';
 import { IpcAgentEventEmitter } from './IpcAgentEventEmitter';
 import { mainError, mainLog, mainWarn } from '@process/utils/mainLogger';
 import { hasCronCommands } from './CronCommandDetector';
+import { hasConciergeProposals } from './ConciergeProposeDetector';
 import { processCronInMessage } from './MessageMiddleware';
 import { extractAndStripThinkTags } from './ThinkTagDetector';
 import { ConversationTurnCompletionService } from './ConversationTurnCompletionService';
 import { cronBusyGuard } from '@process/services/cron/CronBusyGuard';
 import { skillSuggestWatcher } from '@process/services/cron/SkillSuggestWatcher';
 import { getCostRecorder } from '@process/services/cost/CostRecorder';
+import { getBudgetController } from '@process/services/cost/BudgetController';
+import { RunawayMonitor } from '@process/services/runaway/RunawayMonitor';
 
 // ---------------------------------------------------------------------------
 // Truncation-heuristic constants (HC-4 - see audit at
@@ -105,6 +118,14 @@ type WCoreManagerData = {
   sessionMode?: string;
   sessionId?: string;
   resume?: string;
+  /** Per-conversation reasoning effort (sent to the engine via set_config). Absent => engine default. */
+  effort?: 'low' | 'medium' | 'high';
+  /**
+   * Per-conversation MCP scoping (#348): the user-server ids active for this
+   * chat. `undefined` => all enabled servers; `[]` => no user servers. Forwarded
+   * to the same `isServerActiveForSession` predicate the ACP/Gemini paths use.
+   */
+  activeMcpServers?: string[];
   teamMcpStdioConfig?: {
     name: string;
     command: string;
@@ -113,18 +134,59 @@ type WCoreManagerData = {
   };
 };
 
+/**
+ * Net-new tail of a streamed reasoning chunk, given what has already accumulated.
+ *
+ * The wcore engine streams `thought` reasoning events as CUMULATIVE restates (the
+ * full thought-so-far on each chunk), not incremental deltas. Appending them
+ * verbatim doubled the text ("The userThe user wants…"). Both the persisted
+ * thinking content and the renderer's live append consume this delta, so they
+ * stay in sync. Cases, in order:
+ * The engine streams a thought as incremental deltas, then re-emits the WHOLE
+ * thought as one cumulative restate — and that restate can DIVERGE slightly from
+ * the incrementally-built text (e.g. "what make money" -> "what to make money"),
+ * so an exact prefix check misses it and the thought doubles. Cases, in order:
+ *  - `incoming` extends `prev` exactly (prefix)  -> the part past `prev`
+ *  - `incoming` already contained in `prev`      -> '' (stale/shorter restate)
+ *  - `incoming` shares a long head with `prev`   -> a (possibly divergent) restate:
+ *      append only the positional tail past what we already have, never the whole
+ *      thing, so the thought can't double
+ *  - otherwise (a genuine incremental delta)     -> `incoming` unchanged
+ *
+ * A real incremental delta is a short continuation that shares ~no common prefix
+ * with `prev`, so it falls through to the last case and is appended whole.
+ */
+export function dedupeThinkingDelta(prev: string, incoming: string): string {
+  if (!incoming) return '';
+  if (incoming.startsWith(prev)) return incoming.slice(prev.length);
+  if (prev.includes(incoming)) return '';
+  let common = 0;
+  const max = Math.min(prev.length, incoming.length);
+  while (common < max && prev[common] === incoming[common]) common++;
+  const isRestate = common >= 10 || (prev.length > 0 && common >= prev.length * 0.5);
+  if (isRestate) return incoming.length > prev.length ? incoming.slice(prev.length) : '';
+  return incoming;
+}
+
 export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   workspace: string;
   model: TProviderWithModel;
   readonly approvalStore = new WCoreApprovalStore();
   private agent: WCoreAgent | null = null;
   private agentReady: Promise<void>;
+  /** Captured failure from `start()`, so a failed bootstrap surfaces an honest
+   * error+finish on the next `sendMessage` instead of silently hanging the turn. */
+  private startError: unknown = null;
   private currentMode: string = 'default';
   private _capabilities: WCoreCapabilities | null = null;
   private _configSentAt: number | null = null;
   private _messageSentAt: number | null = null;
   private currentMsgId: string | null = null;
   private currentMsgContent: string = '';
+  // #252 - the most recent turn's msg_id, retained past stream finish so the
+  // end-of-session `session_cost` event (which fires after currentMsgId is
+  // cleared) can be stamped onto the correct turn's activity card.
+  private _lastTurnMsgId: string | null = null;
 
   // Heartbeat state
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
@@ -137,8 +199,19 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   private thinkingMsgId: string | null = null;
   private thinkingStartTime: number | null = null;
   private thinkingContent: string = '';
+  /** How much of `thinkingContent` has already been flushed to the DB. The DB sync
+   *  is 'accumulate' (append), so each flush must send only the unflushed tail —
+   *  sending the full content every tick re-appended it and doubled the stored
+   *  thought ("LetLet me think…"). */
+  private lastFlushedThinkingLen = 0;
+  /** Per-turn reasoning subject (a short gerund phrase from the engine, #318).
+   *  Emitted once per reasoning turn; first one wins. Absent for non-reasoning turns. */
+  private thinkingSubject: string | undefined = undefined;
   private thinkingDbFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly streamDbFlushIntervalMs: number = 120;
+
+  /** Runaway-loop detector (circuit-breaker Phase 2). Reset each turn. */
+  private readonly runawayMonitor = new RunawayMonitor();
 
   // Stream text DB write buffer
   private readonly bufferedStreamTexts = new Map<
@@ -156,8 +229,14 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     // enableFork=false skips auto-init in ForkTask, so init manually
     this.init();
 
-    // Start the agent bootstrap - store promise so sendMessage can await it
-    this.agentReady = this.start().catch(() => {});
+    // Start the agent bootstrap - store promise so sendMessage can await it.
+    // Capture (don't swallow) a failed start: agentReady still resolves so the
+    // sendMessage path is reached, where startError is surfaced as a real
+    // error+finish instead of hanging the turn with no reply (S2).
+    this.agentReady = this.start().catch((error) => {
+      this.startError = error;
+      mainError('[WCoreManager]', 'agent bootstrap (start) failed', error);
+    });
   }
 
   /**
@@ -193,16 +272,57 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
 
     // Raw-engine (power-user) mode: when `wcore.rawEngineMode` is
     // true, the embedded engine runs on its OWN config.toml exactly like the
-    // standalone CLI - so we SKIP both (a) the Desktop model override (applied
-    // in buildSpawnConfig via the `rawEngineMode` flag passed below) and (b) the
-    // Constitution/skills/specialist prompt overlay built here. The renderer
-    // (RuntimePane) only persists the preference; this seam enacts it. A storage
-    // read failure falls back to the normal (overridden) path - never raw.
+    // standalone CLI - so we SKIP (a) the Desktop model override (applied in
+    // buildSpawnConfig via the `rawEngineMode` flag passed below), (b) the
+    // Constitution/skills/specialist prompt overlay built below, and (c) the
+    // Desktop MCP-connector injection below (raw mode uses only the engine's own
+    // [mcp.servers] table, like the CLI). The renderer (RuntimePane) only
+    // persists the preference; this seam enacts it. A storage read failure falls
+    // back to the normal (overridden) path - never raw.
     // Use ProcessConfig (main-process store) NOT ConfigStorage (renderer-bridged):
     // ConfigStorage.get round-trips to the renderer and HANGS when WCore is
     // spawned from a channel (a pure main-process path with no renderer in the
     // loop), wedging every channel-triggered turn. `.catch` cannot save a hang.
     const rawEngineMode = (await ProcessConfig.get('wcore.rawEngineMode').catch(() => false)) === true;
+
+    // Inject the user's enabled stdio MCP connectors (mcp.config) so an
+    // app-enabled connector reaches the engine WITHOUT a separate settings
+    // toggle - mirroring the ACP session-injection path. wcore otherwise depends
+    // entirely on the [mcp.servers] table written by WCoreMcpAgent (settings-time
+    // only), which left every connector invisible in a fresh wcore chat. Uses the
+    // shared predicate + per-conversation scoping (#348); builtins and hosted
+    // (http/sse) connectors are handled elsewhere (see buildWCoreUserStdioMcpServers).
+    // #478 dedup: skip any connector already in the active config.toml
+    // [mcp.servers] table (WCoreMcpAgent settings-time write) - the engine loads
+    // those at startup, so re-adding at runtime would register the server twice.
+    // Skipped entirely in raw-engine mode (above). Best-effort: a config read
+    // failure must never block the spawn.
+    if (!rawEngineMode) {
+      try {
+        const mcpConfig = await ProcessConfig.get('mcp.config');
+        const alreadyInConfig = await readWCoreConfigMcpServerNames();
+        const userServers = buildWCoreUserStdioMcpServers(
+          mcpConfig as IMcpServer[] | undefined,
+          mergedData.activeMcpServers,
+          alreadyInConfig
+        );
+        for (const server of userServers) {
+          stdioMcpServers.push({ name: server.name, command: server.command, args: server.args, env: server.env });
+        }
+      } catch (err) {
+        mainWarn('[WCoreManager]', 'failed to load user MCP connectors for injection', err);
+      }
+    }
+
+    // #468: Output-budget override. When the user picked a Fixed budget, pass it
+    // as the per-call `--max-tokens` (via buildSpawnConfig); Auto (default/unset)
+    // leaves it unset so the engine sizes per-model (#456). A `fixed` entry with
+    // no positive value falls back to Auto. An explicit per-conversation
+    // `maxTokens` still wins. Same main-process store rationale as rawEngineMode
+    // (ProcessConfig, not the renderer-bridged ConfigStorage which hangs here).
+    const outputBudget = await ProcessConfig.get('wcore.outputBudget').catch((): OutputBudget | undefined => undefined);
+    // Resolve a Fixed budget (clamped to MIN_FIXED_BUDGET); Auto / no value -> undefined.
+    const fixedMaxTokens = resolveFixedBudget(outputBudget);
 
     // Prepend Wayland Constitution + specialist overlay AND inject the
     // builtin-skills index + `wayland_search_skills` MCP advert into the
@@ -221,6 +341,10 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
           enableTeamGuide: mergedData.enableTeamGuide,
           backend: 'wcore',
           presetAssistantId: mergedData.presetAssistantId,
+          capabilitiesManifest: await resolveCapabilitiesManifest({
+            presetAssistantId: mergedData.presetAssistantId,
+            agentKey: 'wcore',
+          }),
         });
     const effectivePresetRules = rawEngineMode ? undefined : (systemInstructions ?? mergedData.presetRules);
 
@@ -231,7 +355,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       yoloMode: mergedData.yoloMode,
       presetRules: effectivePresetRules,
       rawEngineMode,
-      maxTokens: mergedData.maxTokens,
+      maxTokens: mergedData.maxTokens ?? fixedMaxTokens,
       maxTurns: mergedData.maxTurns,
       sessionId: mergedData.sessionId,
       resume: mergedData.resume,
@@ -244,6 +368,33 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     await agent.start();
     this.agent = agent;
     this._capabilities = agent.capabilities ?? null;
+
+    // Per-conversation reasoning effort: forward to the engine via set_config on
+    // spawn so the first (and every subsequent) turn runs at the selected effort.
+    // Omitted => the engine keeps its own default.
+    if (mergedData.effort) {
+      agent.setConfig({ effort: mergedData.effort });
+    }
+
+    // #50: On resume, seed recent persisted history so the rebuilt engine keeps
+    // prior context. The engine's --resume does not reliably restore history
+    // (and falls back to a fresh session on failure), so mirror the proven
+    // Gemini precedent and replay the last messages over the existing
+    // init_history channel. New sessions have nothing to replay. The current
+    // user turn is not persisted yet at start(), so it is not double-injected.
+    if (sessionArgs.resume) {
+      try {
+        const historyDb = await getDatabase();
+        const history = historyDb.getConversationMessages(this.conversation_id, 0, 10000);
+        // #457: retain tool/file-edit history (not just text) so a rebuilt
+        // session keeps the in-progress work instead of restarting from scratch.
+        const text = buildResumeSeedTranscript((history.data ?? []) as TMessage[]);
+        if (text) await agent.injectConversationHistory(text);
+      } catch {
+        // Best-effort: resume still proceeds without seeded history.
+      }
+    }
+
     // Mirror the resolved CLI budget (which may be the reasoning-model default
     // from envBuilder) into manager data so detectTruncation can compare
     // output_tokens against the real budget. Only fill the gap - never
@@ -301,6 +452,28 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
   }
 
   async sendMessage(data: { content: string; msg_id: string; files?: string[] }) {
+    // Runaway circuit-breaker Phase 1: pre-turn budget pause gate. If a 'pause'
+    // budget for this model/backend is already over its limit, hold the turn
+    // before anything is persisted or dispatched (no tokens spent) and surface a
+    // resumable card carrying the held message. Default (no pause budget) allows.
+    const gate = getBudgetController()?.canStartTurn({ modelId: this.model?.useModel, backend: 'wcore' });
+    if (gate && !gate.allowed && gate.budget) {
+      ipcBridge.cost.budgetGateBlocked.emit({
+        conversationId: this.conversation_id,
+        content: data.content,
+        files: data.files,
+        budgetId: gate.budget.id,
+        scope: gate.budget.scope,
+        scopeKey: gate.budget.scopeKey,
+        limitUsd: gate.budget.limitUsd,
+        spentUsd: gate.spentUsd ?? gate.budget.limitUsd,
+        period: gate.budget.period,
+      });
+      return;
+    }
+    // Fresh turn: clear the runaway-loop counters so detection is per-turn.
+    this.runawayMonitor.resetTurn();
+
     const message: TMessage = {
       id: data.msg_id,
       type: 'text',
@@ -319,10 +492,47 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     this._lastActivityAt = Date.now();
     // Wait for agent bootstrap to complete before sending
     await this.agentReady;
+
+    // S2: if bootstrap failed, the turn would otherwise hang forever (this.agent
+    // is null -> the send below is skipped, no reply/error/finish ever emitted).
+    // Surface an honest error + finish so the UI shows a real failure instead of
+    // an infinite spinner. Triggers on missing/old wcore binary, auth failure,
+    // or bad model config.
+    if (this.startError || !this.agent) {
+      this.emitStartFailure(data.msg_id, this.startError);
+      return;
+    }
+
     this._messageSentAt = Date.now();
     mainLog('[WCoreManager]', `message sent: msg_id=${data.msg_id}`);
+
+    // Per-turn skill context, unified with the ACP backend so WCore chats also
+    // get (a) skills the user added to this conversation from the composer
+    // (injected once) and (b) the smart per-turn match advert + clear-winner
+    // auto-load. This - not the always-on index - is how the lean default
+    // surfaces the right skill on demand without bulk-injecting the library.
+    let contentToSend = data.content;
+    try {
+      const pending = await consumePendingSessionSkills(this.conversation_id);
+      if (pending) {
+        contentToSend = `${pending}\n\n${contentToSend}`;
+      }
+      const turnSkill = await buildTurnSkillContext(data.content, {
+        assistantId: this.data.data.presetAssistantId,
+        agentKey: 'wcore',
+      });
+      if (turnSkill.advert) {
+        contentToSend = `${turnSkill.advert}\n\n${contentToSend}`;
+      }
+      if (turnSkill.autoLoaded.length > 0) {
+        await mergeLoadedSkillsExtra(this.conversation_id, turnSkill.autoLoaded);
+      }
+    } catch (error) {
+      mainWarn('[WCoreManager]', 'per-turn skill context failed', error);
+    }
+
     if (this.agent) {
-      await this.agent.send(data.content, data.msg_id, data.files);
+      await this.agent.send(contentToSend, data.msg_id, data.files);
     }
   }
 
@@ -333,10 +543,22 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     const type = content.confirmationDetails?.type;
 
     if (this.currentMode === 'yolo') {
-      this.agent?.approveTool(content.callId, 'once');
+      // #504: a question needs an answer, not a bare approval - approving an
+      // AskUserQuestion with no answer makes the engine run its loud-defensive
+      // execute() fallback and error. In full-auto, pick the first choice so
+      // the turn proceeds instead of wedging.
+      if (type === 'question') {
+        const first =
+          content.confirmationDetails?.type === 'question' ? content.confirmationDetails.choices[0] : undefined;
+        this.agent?.approveTool(content.callId, 'once', first?.label);
+      } else {
+        this.agent?.approveTool(content.callId, 'once');
+      }
       return true;
     }
     if (this.currentMode === 'auto_edit') {
+      // Never auto-answer a question - it requires a real user choice, so it
+      // falls through to the confirmation dialog.
       if (type === 'edit' || type === 'info') {
         this.agent?.approveTool(content.callId, 'once');
         return true;
@@ -362,18 +584,32 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
         continue;
       }
 
-      // Show confirmation dialog to user
-      const options = [
-        { label: 'messages.confirmation.yesAllowOnce', value: ToolConfirmationOutcome.ProceedOnce },
-        { label: 'messages.confirmation.yesAllowAlways', value: ToolConfirmationOutcome.ProceedAlways },
-        { label: 'messages.confirmation.no', value: ToolConfirmationOutcome.Cancel },
-      ];
+      // Show confirmation dialog to user. #504: an AskUserQuestion renders its
+      // choices as the options (each carries its `answer` label back to the
+      // engine), instead of the generic allow/deny buttons.
+      const details = content.confirmationDetails;
+      const options =
+        details?.type === 'question'
+          ? [
+              ...details.choices.map((choice) => ({
+                label: choice.label,
+                value: ToolConfirmationOutcome.ProceedOnce,
+                answer: choice.label,
+                ...(choice.description ? { description: choice.description } : {}),
+              })),
+              { label: 'messages.confirmation.no', value: ToolConfirmationOutcome.Cancel },
+            ]
+          : [
+              { label: 'messages.confirmation.yesAllowOnce', value: ToolConfirmationOutcome.ProceedOnce },
+              { label: 'messages.confirmation.yesAllowAlways', value: ToolConfirmationOutcome.ProceedAlways },
+              { label: 'messages.confirmation.no', value: ToolConfirmationOutcome.Cancel },
+            ];
 
       this.addConfirmation({
-        title: content.confirmationDetails?.title || content.name || '',
+        title: (details?.type === 'question' ? details.question : details?.title) || content.name || '',
         id: content.callId,
         action,
-        description: content.description || '',
+        description: (details?.type === 'question' ? details.header : content.description) || '',
         callId: content.callId,
         options,
         commandType,
@@ -398,15 +634,29 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     });
   }
 
-  private emitThinkingMessage(content: string, status: 'thinking' | 'done' = 'thinking'): void {
+  private emitThinkingMessage(content: string, status: 'thinking' | 'done' = 'thinking', subject?: string): void {
     if (!this.thinkingMsgId) {
       this.thinkingMsgId = uuid();
       this.thinkingStartTime = Date.now();
       this.thinkingContent = '';
+      this.lastFlushedThinkingLen = 0;
+      this.thinkingSubject = undefined;
     }
 
-    if (status === 'thinking') {
-      this.thinkingContent += content;
+    // Latest subject wins (#318 v2): Flux emits a generic header (Frame A) then a
+    // request-specific refinement (Frame B) within the same turn; replace in place
+    // so the refined subject upgrades the placeholder. Reset per turn (above).
+    if (subject) {
+      this.thinkingSubject = subject;
+    }
+
+    // The engine re-streams reasoning as cumulative restates, so emit/persist only
+    // the net-new tail — otherwise both the DB content and the renderer's append
+    // double it ("The userThe user wants…").
+    let delta = content;
+    if (status === 'thinking' && content) {
+      delta = dedupeThinkingDelta(this.thinkingContent, content);
+      this.thinkingContent += delta;
     }
 
     const duration = status === 'done' && this.thinkingStartTime ? Date.now() - this.thinkingStartTime : undefined;
@@ -416,7 +666,8 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       conversation_id: this.conversation_id,
       msg_id: this.thinkingMsgId,
       data: {
-        content,
+        content: delta,
+        subject: this.thinkingSubject,
         duration,
         status,
       },
@@ -437,6 +688,9 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       this.thinkingDbFlushTimer = null;
     }
     if (!this.thinkingMsgId) return;
+    // 'accumulate' appends, so send only the tail written since the last flush.
+    const tail = this.thinkingContent.slice(this.lastFlushedThinkingLen);
+    this.lastFlushedThinkingLen = this.thinkingContent.length;
     const tMessage: TMessage = {
       id: this.thinkingMsgId,
       msg_id: this.thinkingMsgId,
@@ -444,7 +698,8 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       position: 'left',
       conversation_id: this.conversation_id,
       content: {
-        content: this.thinkingContent,
+        content: tail,
+        subject: this.thinkingSubject,
         duration,
         status,
       },
@@ -457,6 +712,8 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     this.thinkingMsgId = null;
     this.thinkingStartTime = null;
     this.thinkingContent = '';
+    this.lastFlushedThinkingLen = 0;
+    this.thinkingSubject = undefined;
   }
 
   private queueBufferedStreamText(message: Extract<TMessage, { type: 'text' }>): void {
@@ -517,7 +774,11 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
    * budget. Two detection paths:
    *
    *   1. Explicit: wayland-core ≥0.2 (Task F engine-side fix) emits
-   *      `finish_reason: 'length'` in stream_end. Definitive.
+   *      `finish_reason: 'length'` in stream_end. Definitive. #457: also treat
+   *      a distinct `'max_turns'` value (once Core emits it; engine currently
+   *      maps MaxTurns->length) as truncated/continuable - a turn-cap stop is
+   *      NOT empty/near-budget, so only this explicit path can catch it; without
+   *      it the Continue banner would never show on a max-turns stop.
    *   2. Heuristic: wayland-core ≤0.1.21 doesn't emit finish_reason, so we infer
    *      truncation when `output_tokens` is at or above 95% of the configured
    *      `maxTokens` AND the visible content is empty/very short. This catches
@@ -528,7 +789,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     if (!data || typeof data !== 'object') return false;
     const d = data as { finish_reason?: string; output_tokens?: number };
 
-    if (d.finish_reason === 'length') return true;
+    if (d.finish_reason === 'length' || d.finish_reason === 'max_turns') return true;
 
     const maxTokens = this.data.data.maxTokens;
     if (!maxTokens || typeof d.output_tokens !== 'number') return false;
@@ -536,6 +797,20 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     const contentEmpty = content.trim().length < EMPTY_CONTENT_THRESHOLD_CHARS;
     return nearBudget && contentEmpty;
   }
+
+  // TODO(#422 follow-up): auto-retry an empty-content truncation once with a
+  // genuinely raised budget. Deferred: there is no clean per-turn budget
+  // override today. The wcore budget is a spawn-time CLI arg (`--max-tokens`)
+  // and the live protocol's `set_config` has no `max_tokens` field, so raising
+  // it requires kill + re-spawn, and a re-spawn uses `--resume` so the failed
+  // empty `finish_reason: length` turn is already in engine session history
+  // (re-sending appends a NEW turn rather than re-running the same one). The
+  // engine already sizes the budget per-model at spawn (#456: it grants
+  // flux-auto/flux-reasoning the 32768 reasoning ceiling itself via
+  // `size_output_cap`/`UNKNOWN_REASONING_CAP`), so an auto-retry at the same
+  // budget would just re-truncate — a real fix needs an engine-side per-turn
+  // budget control. Manual recovery ships now via the truncation banner's
+  // "Continue with more headroom" action (CHAT_RETRY_EVENT).
 
   /**
    * Attach `truncatedDueToBudget: true` to the in-flight assistant message.
@@ -614,6 +889,40 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     });
   }
 
+  /**
+   * Feed completed tool results to the runaway detector (circuit-breaker P2).
+   * On a trip (same content re-read N times, or a command failing N times in a
+   * row), gracefully stop the looping turn - agent.stop() sends a 'stop' command
+   * so the session stays alive and the user can continue - and tell the renderer
+   * why, so the user is not silently burning tokens in a loop.
+   */
+  private checkRunaway(message: IMessageToolGroup): void {
+    const items = Array.isArray(message.content) ? message.content : [];
+    for (const item of items) {
+      if (item.status !== 'Success' && item.status !== 'Error') continue;
+      const rd = item.resultDisplay;
+      const outputText = typeof rd === 'string' ? rd : ((rd as { fileDiff?: string } | undefined)?.fileDiff ?? '');
+      const trip = this.runawayMonitor.observe({
+        name: item.name ?? '',
+        success: item.status === 'Success',
+        outputText,
+      });
+      if (trip) {
+        mainWarn(
+          '[WCoreManager]',
+          `runaway detected (${trip.kind} x${trip.count}); halting turn for ${this.conversation_id}`
+        );
+        void this.stop();
+        ipcBridge.conversation.runawayHalted.emit({
+          conversationId: this.conversation_id,
+          kind: trip.kind,
+          count: trip.count,
+        });
+        return;
+      }
+    }
+  }
+
   private handleProcessExit(code: number | null, activeMsgId: string): void {
     mainError('[WCoreManager]', `wcore process exited unexpectedly (code=${code}) during active turn ${activeMsgId}`);
 
@@ -625,6 +934,37 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       conversation_id: this.conversation_id,
       msg_id: activeMsgId,
       data: `Agent process exited unexpectedly (code ${code})`,
+    };
+    ipcBridge.conversation.responseStream.emit(errorMessage);
+    this.emitToEventBuses(errorMessage);
+
+    const finishMessage: IResponseMessage = {
+      type: 'finish',
+      conversation_id: this.conversation_id,
+      msg_id: uuid(),
+      data: null,
+    };
+    ipcBridge.conversation.responseStream.emit(finishMessage);
+    this.emitToEventBuses(finishMessage);
+  }
+
+  /**
+   * S2: Surface a failed agent bootstrap as a real error + finish for the held
+   * turn, so the UI shows a failure instead of hanging on an infinite spinner.
+   * Mirrors handleProcessExit's emit pattern.
+   */
+  private emitStartFailure(activeMsgId: string, error: unknown): void {
+    mainError('[WCoreManager]', `agent bootstrap failed; turn ${activeMsgId} cannot start`, error);
+
+    this.status = 'finished';
+    cronBusyGuard.setProcessing(this.conversation_id, false);
+
+    const detail = error instanceof Error ? error.message : String(error ?? 'unknown error');
+    const errorMessage: IResponseMessage = {
+      type: 'error',
+      conversation_id: this.conversation_id,
+      msg_id: activeMsgId,
+      data: `Agent failed to start: ${detail}`,
     };
     ipcBridge.conversation.responseStream.emit(errorMessage);
     this.emitToEventBuses(errorMessage);
@@ -704,7 +1044,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
 
     if (this.heartbeatMissedCount >= this.heartbeatMaxMissed) {
       mainError('[WCoreManager]', `wcore process unresponsive after ${this.heartbeatMaxMissed} missed pongs, killing`);
-      this.agent?.kill();
+      void this.agent?.kill();
       return;
     }
 
@@ -749,6 +1089,69 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
         return;
       }
 
+      // W7 S4 HITL: the engine suspended the turn waiting on `approval_required`
+      // (resume_token based — distinct from tool_group confirmations). The engine
+      // self-resolves this under --auto-approve, but that path can fail on some
+      // provider routes (notably Anthropic-format `toolu_` tool ids routed via
+      // Flux), leaving the turn wedged forever with no host response. There is no
+      // renderer UI for this HITL path yet, so in an auto mode (Autopilot/Auto
+      // Edit) — and for informational (`reason:'info'`, e.g. the internal todo
+      // tool) approvals in any mode — send an explicit, idempotent
+      // `approval_resume` so the turn can never hang. (A stale/duplicate token is
+      // safely ignored engine-side.)
+      if (data.type === 'approval_required') {
+        const appr = (data.data ?? {}) as { resumeToken?: string; reason?: string };
+        const autoMode = this.currentMode === 'yolo' || this.currentMode === 'auto_edit';
+        if (appr.resumeToken && (autoMode || appr.reason === 'info')) {
+          this.agent?.resumeApproval(appr.resumeToken, true);
+        } else if (appr.reason && appr.reason !== 'info') {
+          // A non-info approval we did not auto-resume. Whether that is a problem
+          // depends on the mode:
+          //
+          // - Interactive (non-auto) mode: EXPECTED. The renderer tool-confirmation
+          //   gate (the `Confirming` tool_group path above) prompts the user and
+          //   drives the resume; this `approval_required` is the engine's parallel
+          //   signal, not a dropped approval. A normal exec/mcp approval legitimately
+          //   carries no resume token here, so the old error (and a resume-token
+          //   check) fired on every exec approval and falsely read as a failure
+          //   (#390). Keep only a quiet trace for diagnosability.
+          //
+          // - Auto mode (Autopilot/Auto Edit): the engine was supposed to
+          //   self-resolve but we could not (no resume token, or a non-info reason
+          //   the auto path can't satisfy) and there is no HITL UI to fall back on,
+          //   so the turn can genuinely wedge (#264). That is the real error.
+          if (autoMode) {
+            mainError(
+              '[WCoreManager]',
+              `approval_required reason='${appr.reason}' in auto mode could not self-resume and has no HITL UI; turn may wedge`,
+              data.data
+            );
+          } else {
+            mainLog(
+              '[WCoreManager]',
+              `approval_required reason='${appr.reason}': renderer confirmation gate owns this approval`
+            );
+          }
+        }
+        return;
+      }
+
+      // #252 - session_cost is end-of-session metadata that fires AFTER the
+      // turn's stream finishes, so its msg_id is already empty/cleared and the
+      // empty-msg_id guard below would drop it. Force-forward it stamped with
+      // the last turn's msg_id so the renderer attaches the per-turn cost rows
+      // to that turn's activity card (mirrors the sub_agent_event pass-through).
+      if (data.type === 'session_cost') {
+        const turnMsgId = data.msg_id || this._lastTurnMsgId || '';
+        ipcBridge.conversation.responseStream.emit({
+          type: 'session_cost',
+          conversation_id: this.conversation_id,
+          msg_id: turnMsgId,
+          data: data.data,
+        });
+        return;
+      }
+
       // When the inference provider rejects the key (401 / invalid x-api-key),
       // flip that provider off "connected" so the UI stops showing it healthy
       // and the next spawn does not reuse the dead key. Side-effect only: the
@@ -757,9 +1160,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       // Wayland Core has no subscription/OAuth fallback, so a dead key is fatal
       // for the turn and the provider must be marked unhealthy.
       if (data.type === 'error') {
-        this.maybeInvalidateProviderKeyOnAuthError(
-          typeof data.data === 'string' ? data.data : String(data.data ?? '')
-        );
+        this.maybeInvalidateProviderKeyOnAuthError(typeof data.data === 'string' ? data.data : String(data.data ?? ''));
       }
 
       // System-level events (empty msg_id) are not part of a conversation turn.
@@ -782,6 +1183,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
         this.heartbeatActive = true;
         this.heartbeatMissedCount = 0;
         this.currentMsgId = data.msg_id ?? null;
+        this._lastTurnMsgId = data.msg_id ?? this._lastTurnMsgId;
         this.currentMsgContent = '';
 
         // Reset thinking state on new turn
@@ -806,12 +1208,16 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
         return;
       }
 
-      // Handle thought events - convert to thinking messages
+      // Handle thought events - convert to thinking messages.
+      // The engine emits an optional per-turn reasoning `subject` (a short gerund
+      // phrase) once, immediately before the first reasoning text. Thread it through
+      // so the live "Thinking" block header shows the model's own summary (#318).
       if (data.type === 'thought') {
         data.conversation_id = this.conversation_id;
         const content = typeof data.data === 'string' ? data.data : '';
-        if (content) {
-          this.emitThinkingMessage(content, 'thinking');
+        const subject = typeof data.subject === 'string' ? data.subject : undefined;
+        if (content || subject) {
+          this.emitThinkingMessage(content, 'thinking', subject);
         }
         return;
       }
@@ -844,6 +1250,12 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
       if (processedData.type === 'finish') {
         const total = this._messageSentAt ? `${Date.now() - this._messageSentAt}ms` : 'n/a';
         mainLog('[WCoreManager]', `stream_end: msg_id=${processedData.msg_id}, total=${total}`, processedData.data);
+        // Mark the turn terminal. `this.status` is otherwise only set to 'finished'
+        // on a content/tool_group frame, so an error-only turn (provider rejects the
+        // request, 0 content) was left 'running' forever — `conversation.get` returns
+        // `task.status` (conversationBridge), so the renderer's mount/resume hydration
+        // kept restoring a stuck "Processing" spinner that blocked further sends.
+        this.status = 'finished';
         this._messageSentAt = null;
         this.heartbeatActive = false;
         this.heartbeatMissedCount = 0;
@@ -893,6 +1305,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
 
           if (tMessage.type === 'tool_group') {
             this.handleConformationMessage(tMessage);
+            this.checkRunaway(tMessage);
           }
         }
       }
@@ -935,7 +1348,10 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     // Check for SKILL_SUGGEST.md updates (registered by cron executor)
     skillSuggestWatcher.onFinish(this.conversation_id);
 
-    if (!content || !hasCronCommands(content)) {
+    // Route the completed turn through the middleware when it contains EITHER a
+    // cron command OR a Concierge config proposal ([CONCIERGE_PROPOSE]). Without
+    // the concierge check the proposal block is never detected and leaks raw.
+    if (!content || (!hasCronCommands(content) && !hasConciergeProposals(content))) {
       return;
     }
 
@@ -1014,7 +1430,7 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     }
   }
 
-  confirm(id: string, callId: string, data: string) {
+  confirm(id: string, callId: string, data: string, answer?: string) {
     // Store "always allow" in approval store
     if (data === ToolConfirmationOutcome.ProceedAlways) {
       const confirmation = this.confirmations.find((c) => c.callId === callId);
@@ -1031,21 +1447,25 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
         this.agent.denyTool(callId, 'User cancelled');
       } else {
         const scope = data === ToolConfirmationOutcome.ProceedAlways ? 'always' : 'once';
-        this.agent.approveTool(callId, scope);
+        // #504: `answer` carries the picked AskUserQuestion choice back to the
+        // engine (undefined for a plain approval).
+        this.agent.approveTool(callId, scope, answer);
       }
     }
   }
 
-  override kill(): Promise<void> {
+  override async kill(): Promise<void> {
     if (this.agent) {
       try {
-        this.agent.kill();
+        // Await the engine tree-kill (taskkill /T on Windows) before tearing
+        // down the worker, so WorkerTaskManager.clear() on quit doesn't return
+        // before wayland-core's child tree is actually gone (#139).
+        await this.agent.kill();
       } catch {
         // best-effort
       }
     }
-    // super.kill() is async (ForkTask M18); return its promise so callers
-    // (WorkerTaskManager.clear) can await child exit.
-    return Promise.resolve(super.kill());
+    // super.kill() is async (ForkTask M18); await child exit.
+    await super.kill();
   }
 }

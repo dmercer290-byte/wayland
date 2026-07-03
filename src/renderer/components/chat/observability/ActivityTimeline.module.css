@@ -1,0 +1,232 @@
+/* #252 observability rework - collapsible activity timeline. Reproduces the
+   mockup's .step / .step-head / .glyph / spinner / .tl timeline feel with
+   Wayland semantic tokens (NO hardcoded hex). */
+
+@keyframes timelineSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes timelineHeartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+}
+
+@keyframes timelineFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.container {
+  width: 100%;
+  animation: timelineFadeIn 0.25s ease-in;
+}
+
+/* ---- header (running pulse / calm summary) ---- */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-secondary);
+  padding: 6px 4px;
+  border-radius: 8px;
+}
+
+.header:hover {
+  color: var(--text-primary);
+}
+
+.heartbeat {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--brand);
+  animation: timelineHeartbeat 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.headerText {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+
+.summaryText {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* At-a-glance "what I did": names the real steps under the collapsed summary. */
+.summaryDetail {
+  margin: 2px 0 0 21px;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ---- the vertical timeline list ---- */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px 7px;
+  padding-left: 14px;
+  border-left: 2px solid var(--border-light);
+}
+
+/* ---- a step row ---- */
+.step {
+  border-radius: 10px;
+  transition: background 0.15s;
+}
+
+.step:hover {
+  background: var(--bg-hover, rgba(127, 127, 127, 0.06));
+}
+
+.stepHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+}
+
+.glyph {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--border-light);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: timelineSpin 0.8s linear infinite;
+}
+
+.glyphDone {
+  color: var(--success);
+}
+
+.glyphFailed {
+  color: var(--danger);
+}
+
+.glyphWaiting {
+  color: var(--text-muted);
+}
+
+.label {
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.labelActive {
+  color: var(--text-primary);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.agentTag {
+  font-size: 11px;
+}
+
+.sourceChip {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--brand);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.dur {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.chev {
+  color: var(--text-muted);
+  transition: transform 0.18s;
+  display: inline-flex;
+}
+
+.chevOpen {
+  transform: rotate(90deg);
+}
+
+/* ---- per-row detail sub-rail (the .tl look) ---- */
+.detailRail {
+  margin: 2px 0 8px 18px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border-light);
+  animation: timelineFadeIn 0.2s ease-out;
+}
+
+.detailText {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* ---- nested sub-agent timeline ---- */
+.childRail {
+  margin: 4px 0 6px 14px;
+  animation: timelineFadeIn 0.2s ease-out;
+}
+
+/* ---- screen-reader only ---- */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -1,8 +1,10 @@
 {
-  "truncation.budgetExhausted.body": "回應已被截斷 - 模型在完成之前已耗盡 token 預算。請嘗試使用具有更高推理預算的模型，或簡化您的提示。",
+  "truncation.budgetExhausted.body": "這則回應在完成前就提前結束了。點擊「繼續」從中斷處接著進行——模型會保留它已經完成的工作。",
+  "truncation.budgetExhausted.action": "繼續",
   "fileChanges": "檔案變更",
   "fileChangesCount": "{{count}} 個檔案變更",
   "conversationInProgress": "目前正在進行對話...",
+  "working": "Working...",
   "confirm": "確認",
   "canceledExecution": "已取消執行",
   "openLinkFailed": "無法開啟連結",
@@ -67,5 +69,12 @@
     "yesAlwaysAllowTool": "是，始終允許來自伺服器 \"{{serverName}}\" 的工具 \"{{toolName}}\"",
     "yesAlwaysAllowServer": "是，始終允許來自伺服器 \"{{serverName}}\" 的所有工具",
     "no": "否 (esc)"
+  },
+  "slash.customBadge": "Custom",
+  "runaway": {
+    "title": "Stopped a runaway loop",
+    "repeatedReadBody": "This turn kept re-reading the same content ({{count}} times) without making progress, so it was stopped to avoid burning tokens. You can send a new message to continue.",
+    "failingCommandBody": "A command failed {{count}} times in a row, so this turn was stopped to avoid burning tokens retrying it. You can send a new message to continue.",
+    "dismiss": "Got it"
   }
 }

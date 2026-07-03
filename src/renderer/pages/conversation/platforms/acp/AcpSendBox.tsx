@@ -99,6 +99,7 @@ const AcpSendBox: React.FC<{
   workspacePath?: string;
   teamId?: string;
   agentSlotId?: string;
+  onRunningChange?: (running: boolean) => void;
 }> = ({
   conversation_id,
   backend,
@@ -108,6 +109,7 @@ const AcpSendBox: React.FC<{
   workspacePath,
   teamId,
   agentSlotId,
+  onRunningChange,
 }) => {
   const {
     running,
@@ -135,6 +137,7 @@ const AcpSendBox: React.FC<{
   // Use useLatestRef to keep latest setters to avoid re-registering handler
   const setContentRef = useLatestRef(setContent);
   const atPathRef = useLatestRef(atPath);
+  const routingRef = useLatestRef(routing);
 
   const addOrUpdateMessage = useAddOrUpdateMessage(); // Move this here so it's available in useEffect
   const addOrUpdateMessageRef = useLatestRef(addOrUpdateMessage);
@@ -147,6 +150,13 @@ const AcpSendBox: React.FC<{
     setUploadFile,
   });
   const isBusy = running || aiProcessing;
+
+  // Report busy state up so the shared inline orbit (MessageList footer) animates
+  // on the ACP path too, matching the wcore/Flux path. Without this the orbit
+  // renders but never gets the processing signal, so it sits static.
+  useEffect(() => {
+    onRunningChange?.(isBusy);
+  }, [isBusy, onRunningChange]);
 
   // Register handler for adding text from preview panel to sendbox
   useEffect(() => {
@@ -215,7 +225,13 @@ const AcpSendBox: React.FC<{
           // The CLI could not authenticate. Surface the remedy card (route
           // through Flux, add a provider key, or run the CLI login command)
           // instead of the raw auth tip.
-          emitter.emit('acp.auth.failed.card', { conversation_id, backend });
+          emitter.emit('acp.auth.failed.card', {
+            conversation_id,
+            backend,
+            pendingInput: input,
+            pendingFiles: files,
+            fluxAlreadyRouted: routingRef.current === 'flux',
+          });
           setAiProcessing(false);
           throw error;
         }
@@ -325,6 +341,18 @@ Please check your local CLI tool authentication status`,
       setAtPath(merged as Array<string | FileOrFolderItem>);
     }
   });
+
+  // Flux failover replay: AcpChat re-routes the dead chat through Flux, then asks
+  // the send box to re-run the turn that triggered the auth-failure card. The
+  // send path awaits the re-spawned agent's init, so the turn cannot be dropped.
+  useAddEventListener(
+    'acp.flux.replay',
+    (p) => {
+      if (p.conversation_id !== conversation_id) return;
+      void executeCommand({ input: p.input, files: p.files });
+    },
+    [conversation_id, executeCommand]
+  );
 
   // Stop conversation handler
   const handleStop = async (): Promise<void> => {

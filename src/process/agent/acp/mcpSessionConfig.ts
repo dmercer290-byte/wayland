@@ -6,6 +6,8 @@
 
 import type { IMcpServer } from '@/common/config/storage';
 import type { AcpMcpCapabilities } from '@/common/types/acpTypes';
+import { BUILTIN_CONCIERGE_DIAG_ID } from '@process/resources/builtinMcp/constants';
+import { sanitizeMcpServerName } from '@process/services/mcpServices/validateMcpServer';
 
 export interface AcpSessionMcpNameValue {
   name: string;
@@ -37,78 +39,159 @@ function toNameValueEntries(source?: Record<string, string>): AcpSessionMcpNameV
   return entries.length > 0 ? entries : undefined;
 }
 
-function shouldInjectBuiltinServer(server: IMcpServer): boolean {
-  if (server.builtin !== true || !server.enabled) {
+/**
+ * Whether an MCP server should be injected into an agent session, shared by
+ * every backend: the fork Gemini runtime (@office-ai/aioncli-core via
+ * GeminiAgentManager) and the ACP backends (Claude, Codex, Wayland Core).
+ *
+ * Builtin servers (image generation, skill search) are seeded into mcp.config
+ * with `status: undefined` and are never connection-tested, so they must be
+ * accepted on `undefined`; otherwise a backend silently drops them.
+ *
+ * User-added (non-builtin) servers are accepted on `undefined` OR `connected`,
+ * and only excluded on an explicit failure status (`disconnected`/`error`). An
+ * enabled connector the user has not yet connection-probed (`status: undefined`)
+ * must still reach the session - the live ACP path (McpConfig.fromStorageConfig,
+ * used by AcpAgentV2/AcpRuntime for Claude/Codex) already accepts `undefined`,
+ * so requiring `connected` here meant Gemini (and the wcore injector that shares
+ * this predicate) silently dropped connectors that Claude/Codex kept - the exact
+ * cross-backend divergence this predicate exists to prevent.
+ *
+ * Every backend must agree: previously the ACP path injected builtin servers
+ * only, so a user's custom MCP server reached Gemini chats but never Codex or
+ * Claude chats (GitHub #56). Using one predicate keeps them in lockstep.
+ */
+export function shouldInjectSessionMcpServer(server: IMcpServer): boolean {
+  if (!server.enabled) {
     return false;
   }
-
+  // Both builtin and user servers: accept not-yet-probed (undefined) or
+  // connected; a known-broken (disconnected/error) server is not surfaced.
   return server.status === undefined || server.status === 'connected';
 }
 
 /**
- * Whether an MCP server should be injected into the fork Gemini runtime
- * (@office-ai/aioncli-core via GeminiAgentManager).
- *
- * Builtin servers (image generation, skill search) are seeded into mcp.config
- * with `status: undefined` and are never connection-tested, so they must be
- * accepted on `undefined` exactly like the ACP session path
- * (`shouldInjectBuiltinServer`); otherwise the fork Gemini backend silently
- * drops them while ACP backends (Claude, Codex, Wayland Core) inject them.
- * User-added servers still require an active `connected` status.
+ * Per-conversation MCP scoping (#348): is this server active for the chat?
+ * Builtins (image-gen, skill-search) always inject — they're infrastructure,
+ * not user-scopable. A user server passes when the chat has no selection
+ * (`activeServerIds === undefined` ⇒ all enabled servers) or the selection
+ * includes it. `[]` scopes out every user server. The user's per-server
+ * `allowedTools` still trims tools within whatever servers stay active.
  */
-export function shouldInjectGeminiMcpServer(server: IMcpServer): boolean {
-  if (!server.enabled) {
-    return false;
-  }
-  if (server.builtin === true) {
-    return server.status === undefined || server.status === 'connected';
-  }
-  return server.status === 'connected';
+export function isServerActiveForSession(server: IMcpServer, activeServerIds?: readonly string[]): boolean {
+  if (server.builtin === true) return true;
+  if (activeServerIds === undefined) return true;
+  return activeServerIds.includes(server.id);
 }
 
-export function buildBuiltinAcpSessionMcpServers(
+export function buildAcpSessionMcpServers(
   mcpServers: IMcpServer[] | undefined | null,
-  capabilities: AcpMcpCapabilities
+  capabilities: AcpMcpCapabilities,
+  activeServerIds?: readonly string[],
+  allowConciergeDiag: boolean = false
 ): AcpSessionMcpServer[] {
   if (!Array.isArray(mcpServers) || mcpServers.length === 0) {
     return [];
   }
 
+  return (
+    mcpServers
+      .filter(shouldInjectSessionMcpServer)
+      .filter((server) => isServerActiveForSession(server, activeServerIds))
+      // The read-only concierge diagnostics server is a builtin (so it bypasses
+      // user scoping) and is Concierge-only: exposing it to every assistant would
+      // bloat unrelated tool lists and surface a diagnostics tool where it doesn't
+      // belong. Gate it to the Concierge assistant (allowConciergeDiag); all other
+      // servers pass through unchanged. Fail-closed by default. Mirrors the Gemini
+      // path in GeminiAgentManager.getMcpServers.
+      .filter((server) => server.id !== BUILTIN_CONCIERGE_DIAG_ID || allowConciergeDiag)
+      .map((server): AcpSessionMcpServer | null => {
+        switch (server.transport.type) {
+          case 'stdio':
+            if (!capabilities.stdio) return null;
+            return {
+              type: 'stdio',
+              name: server.name,
+              command: server.transport.command,
+              args: server.transport.args || [],
+              env: toNameValueEntries(server.transport.env) ?? [],
+            };
+          case 'http':
+          case 'streamable_http':
+            if (!capabilities.http) return null;
+            return {
+              type: 'http',
+              name: server.name,
+              url: server.transport.url,
+              headers: toNameValueEntries(server.transport.headers),
+            };
+          case 'sse':
+            if (!capabilities.sse) return null;
+            return {
+              type: 'sse',
+              name: server.name,
+              url: server.transport.url,
+              headers: toNameValueEntries(server.transport.headers),
+            };
+          default:
+            return null;
+        }
+      })
+      .filter((server): server is AcpSessionMcpServer => server !== null)
+  );
+}
+
+/**
+ * Build the stdio MCP servers for a Wayland Core spawn from the user's
+ * `mcp.config` connector list. wcore receives MCP servers at spawn via the
+ * engine's `add_mcp_server` runtime command (stdio only), so this mirrors the
+ * ACP session-injection path: same `shouldInjectSessionMcpServer` predicate and
+ * `isServerActiveForSession` per-conversation scoping (#348). Builtins
+ * (image-gen, skill-search, concierge-diag) are excluded - wcore surfaces those
+ * through its own mechanisms (system-prompt skills index / team guide), and
+ * injecting them here would double them up or leak the Concierge-only diag
+ * server. Non-stdio (hosted http/sse) connectors are skipped because the engine
+ * runtime command only adds stdio servers; those still reach wcore via the
+ * [mcp.servers] table written by WCoreMcpAgent.
+ *
+ * `excludeNames` (#478): names already present in the active config.toml
+ * [mcp.servers] table. The engine loads those at startup, so re-injecting the
+ * same name via the runtime `add_mcp_server` command would register it twice.
+ * Callers pass the config.toml server names so those are skipped here - the
+ * engine keeps the config.toml copy, this path only adds what config.toml lacks.
+ *
+ * Names are sanitized with `sanitizeMcpServerName` (the SAME transform
+ * `McpService.syncMcpToAgents` applies before `WCoreMcpAgent` writes the
+ * config.toml key), so both the emitted `add_mcp_server` name AND the exclude
+ * comparison key the server identically to its config.toml copy. Without this a
+ * connector whose raw name needs sanitizing (e.g. `com.slack/slack-mcp`) would
+ * be injected under the raw name while config.toml holds `com.slack-slack-mcp` -
+ * the dedup would miss and the engine would register it twice (#478).
+ */
+export function buildWCoreUserStdioMcpServers(
+  mcpServers: IMcpServer[] | undefined | null,
+  activeServerIds?: readonly string[],
+  excludeNames?: ReadonlySet<string>
+): AcpSessionMcpServerStdio[] {
+  if (!Array.isArray(mcpServers) || mcpServers.length === 0) {
+    return [];
+  }
   return mcpServers
-    .filter(shouldInjectBuiltinServer)
-    .map((server): AcpSessionMcpServer | null => {
-      switch (server.transport.type) {
-        case 'stdio':
-          if (!capabilities.stdio) return null;
-          return {
-            type: 'stdio',
-            name: server.name,
-            command: server.transport.command,
-            args: server.transport.args || [],
-            env: toNameValueEntries(server.transport.env) ?? [],
-          };
-        case 'http':
-        case 'streamable_http':
-          if (!capabilities.http) return null;
-          return {
-            type: 'http',
-            name: server.name,
-            url: server.transport.url,
-            headers: toNameValueEntries(server.transport.headers),
-          };
-        case 'sse':
-          if (!capabilities.sse) return null;
-          return {
-            type: 'sse',
-            name: server.name,
-            url: server.transport.url,
-            headers: toNameValueEntries(server.transport.headers),
-          };
-        default:
-          return null;
-      }
+    .filter(shouldInjectSessionMcpServer)
+    .filter((server) => server.builtin !== true)
+    .filter((server) => isServerActiveForSession(server, activeServerIds))
+    .filter((server) => server.transport.type === 'stdio')
+    .map((server): AcpSessionMcpServerStdio => {
+      const transport = server.transport as Extract<IMcpServer['transport'], { type: 'stdio' }>;
+      return {
+        type: 'stdio',
+        name: sanitizeMcpServerName(server.name),
+        command: transport.command,
+        args: transport.args || [],
+        env: toNameValueEntries(transport.env) ?? [],
+      };
     })
-    .filter((server): server is AcpSessionMcpServer => server !== null);
+    .filter((server) => !excludeNames?.has(server.name));
 }
 
 /** Config shape passed from TeamSessionService to AgentManagers */

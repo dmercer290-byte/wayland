@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMcpServer } from '../../src/common/config/storage';
-import { buildBuiltinAcpSessionMcpServers } from '../../src/process/agent/acp/mcpSessionConfig';
+import { buildAcpSessionMcpServers } from '../../src/process/agent/acp/mcpSessionConfig';
 import { parseAgentCapabilities } from '../../src/common/types/acpTypes';
 
 describe('ACP built-in MCP session config - wayland_search_skills (C1)', () => {
@@ -34,7 +34,7 @@ describe('ACP built-in MCP session config - wayland_search_skills (C1)', () => {
       },
     ];
 
-    const result = buildBuiltinAcpSessionMcpServers(servers, { stdio: true, http: false, sse: false });
+    const result = buildAcpSessionMcpServers(servers, { stdio: true, http: false, sse: false });
 
     expect(result).toEqual([
       {
@@ -66,7 +66,7 @@ describe('ACP built-in MCP session config - wayland_search_skills (C1)', () => {
       },
     ];
 
-    const result = buildBuiltinAcpSessionMcpServers(servers, { stdio: false, http: false, sse: false });
+    const result = buildAcpSessionMcpServers(servers, { stdio: false, http: false, sse: false });
     expect(result).toEqual([]);
   });
 });
@@ -123,9 +123,14 @@ describe('ACP built-in MCP session config', () => {
         originalJson: '{}',
       },
       {
+        // A known-broken (disconnected) non-builtin: excluded under the uniform
+        // predicate. (An enabled non-builtin with `status: undefined` is now
+        // INJECTED - covered by wcoreUserMcpInjection.test.ts - so this fixture
+        // uses a failure status to stay a negative case here.)
         id: 'external-server',
         name: 'chrome-devtools',
         enabled: true,
+        status: 'disconnected',
         transport: {
           type: 'stdio',
           command: 'npx',
@@ -151,7 +156,7 @@ describe('ACP built-in MCP session config', () => {
       },
     ];
 
-    const result = buildBuiltinAcpSessionMcpServers(servers, { stdio: true, http: true, sse: false });
+    const result = buildAcpSessionMcpServers(servers, { stdio: true, http: true, sse: false });
 
     expect(result).toEqual([
       {
@@ -193,6 +198,83 @@ describe('ACP built-in MCP session config', () => {
       http: false, // omitted = false
       sse: false, // omitted = false
     });
+  });
+});
+
+describe('ACP custom MCP session config (#56)', () => {
+  it('injects an enabled, connected custom (non-builtin) server so Codex/Claude get it too', () => {
+    // GitHub #56: custom MCP servers reached Gemini chats but never ACP backends
+    // (Codex, Claude, Wayland Core) because the ACP path injected builtin only.
+    const servers: IMcpServer[] = [
+      {
+        id: 'custom-connected',
+        name: 'chrome-devtools',
+        enabled: true,
+        status: 'connected',
+        transport: {
+          type: 'stdio',
+          command: 'npx',
+          args: ['-y', 'chrome-devtools-mcp@latest'],
+        },
+        createdAt: 1,
+        updatedAt: 1,
+        originalJson: '{}',
+      },
+    ];
+
+    const result = buildAcpSessionMcpServers(servers, { stdio: true, http: false, sse: false });
+
+    expect(result).toEqual([
+      {
+        type: 'stdio',
+        name: 'chrome-devtools',
+        command: 'npx',
+        args: ['-y', 'chrome-devtools-mcp@latest'],
+        env: [],
+      },
+    ]);
+  });
+
+  it('injects an enabled un-probed custom server but excludes known-broken/disabled (uniform with the live ACP path)', () => {
+    const servers: IMcpServer[] = [
+      {
+        // Enabled but not yet connection-tested: NOW injected (matches
+        // McpConfig.fromStorageConfig, the live Claude/Codex path) so an enabled
+        // connector reaches every backend without a connection probe first.
+        id: 'custom-untested',
+        name: 'unconnected-tool',
+        enabled: true,
+        status: undefined,
+        transport: { type: 'stdio', command: 'node' },
+        createdAt: 1,
+        updatedAt: 1,
+        originalJson: '{}',
+      },
+      {
+        id: 'custom-error',
+        name: 'broken-tool',
+        enabled: true,
+        status: 'error',
+        transport: { type: 'stdio', command: 'node' },
+        createdAt: 1,
+        updatedAt: 1,
+        originalJson: '{}',
+      },
+      {
+        id: 'custom-disabled',
+        name: 'disabled-tool',
+        enabled: false,
+        status: 'connected',
+        transport: { type: 'stdio', command: 'node' },
+        createdAt: 1,
+        updatedAt: 1,
+        originalJson: '{}',
+      },
+    ];
+
+    expect(buildAcpSessionMcpServers(servers, { stdio: true, http: true, sse: true })).toEqual([
+      { type: 'stdio', name: 'unconnected-tool', command: 'node', args: [], env: [] },
+    ]);
   });
 });
 

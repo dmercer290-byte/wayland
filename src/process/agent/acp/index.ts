@@ -38,7 +38,7 @@ import { AcpConnection } from './AcpConnection';
 import { AcpApprovalStore, createAcpApprovalKey } from './ApprovalStore';
 import { CLAUDE_YOLO_SESSION_MODE, CODEBUDDY_YOLO_SESSION_MODE, QWEN_YOLO_SESSION_MODE } from './constants';
 import { buildAcpModelInfo } from './modelInfo';
-import { buildBuiltinAcpSessionMcpServers, buildTeamMcpServer, type AcpSessionMcpServer } from './mcpSessionConfig';
+import { buildAcpSessionMcpServers, buildTeamMcpServer, type AcpSessionMcpServer } from './mcpSessionConfig';
 import { getClaudeModelSlot } from './utils';
 import { getTeamGuideStdioConfig } from '@process/team/mcp/guide/teamGuideSingleton';
 import { shouldInjectTeamGuideMcp } from '@process/team/prompts/teamGuideCapability.ts';
@@ -98,6 +98,8 @@ export interface AcpAgentConfig {
     teamMcpStdioConfig?: { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> };
     /** Pending config option selections from Guid page (applied after session creation) */
     pendingConfigOptions?: Record<string, string>;
+    /** True when this session may receive the Concierge-only diagnostics MCP server. */
+    allowConciergeDiag?: boolean;
   };
   onStreamEvent: (data: IResponseMessage) => void;
   onSignalEvent?: (data: IResponseMessage) => void; // New: emit signal only, does not update UI
@@ -134,6 +136,10 @@ export class AcpAgent {
     teamMcpStdioConfig?: { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> };
     /** Pending config option selections from Guid page (applied after session creation) */
     pendingConfigOptions?: Record<string, string>;
+    /** Per-conversation active MCP server ids (#348): undefined = all enabled, [] = none. */
+    activeMcpServers?: string[];
+    /** True when this session may receive the Concierge-only diagnostics MCP server. */
+    allowConciergeDiag?: boolean;
   };
   private connection: AcpConnection;
   private adapter: AcpAdapter;
@@ -659,6 +665,33 @@ export class AcpAgent {
     });
   }
 
+  /**
+   * S5: Classify a failed auto-reconnect, preserving the actionable startup
+   * error (CLI-not-found / install hint, auth, timeout) carried in the message
+   * from buildStartupErrorMessage, rather than collapsing everything into a
+   * generic CONNECTION_NOT_READY that hides the install hint. Mirrors the
+   * first-spawn classification block so both paths are equally honest.
+   */
+  private classifyReconnectError(errorMsg: string): ReturnType<typeof createAcpError> {
+    // CLI not found / not installed: keep the original "install it" message and
+    // mark it non-retryable (retrying without installing the CLI cannot succeed).
+    if (/CLI not found|not recognized|not found|No such file|command not found|ENOENT/i.test(errorMsg)) {
+      return createAcpError(AcpErrorType.CONNECTION_NOT_READY, errorMsg, false);
+    }
+    if (/authentication|认证失败|\[ACP-AUTH-|unauthor/i.test(errorMsg)) {
+      return createAcpError(AcpErrorType.AUTHENTICATION_FAILED, errorMsg, false);
+    }
+    if (/timeout|timed out/i.test(errorMsg)) {
+      return createAcpError(AcpErrorType.TIMEOUT, errorMsg, true);
+    }
+    if (/error loading config|config file error/i.test(errorMsg)) {
+      return createAcpError(AcpErrorType.CONNECTION_NOT_READY, errorMsg, false);
+    }
+    // Unclassified reconnect failure: retain prior behaviour (retryable
+    // CONNECTION_NOT_READY) but still surface the original message.
+    return createAcpError(AcpErrorType.CONNECTION_NOT_READY, `Failed to reconnect: ${errorMsg}`, true);
+  }
+
   // Send a message to the ACP server
   async sendMessage(data: { content: string; files?: string[]; msg_id?: string }): Promise<AcpResult> {
     const sendStart = Date.now();
@@ -666,8 +699,13 @@ export class AcpAgent {
       this.turnHasThought = false;
       this.turnHasContent = false;
 
-      // Auto-reconnect if connection is lost (e.g., after unexpected process exit)
-      if (!this.connection.isConnected || !this.connection.hasActiveSession) {
+      // Auto-reconnect if the session is not actually ready (S4). `isConnected`
+      // is presence-only (child alive), so a spawned-but-dead/hung CLI would
+      // otherwise read "ready" and we'd silently wait on a session that can
+      // never reply. `isSessionReady` adds the cheap liveness signals we already
+      // track (live child + established session + completed handshake) so a dead
+      // session triggers a reconnect / honest error instead of hanging.
+      if (!this.connection.isSessionReady) {
         const reconnectStart = Date.now();
         try {
           await this.start();
@@ -675,9 +713,14 @@ export class AcpAgent {
         } catch (reconnectError) {
           console.log(`[ACP-PERF] send: auto-reconnect failed ${Date.now() - reconnectStart}ms`);
           const errorMsg = reconnectError instanceof Error ? reconnectError.message : String(reconnectError);
+          // S5: preserve the classified startup error (e.g. the
+          // "CLI not found. Please install it..." hint from
+          // buildStartupErrorMessage) instead of collapsing every reconnect
+          // failure into a generic CONNECTION_NOT_READY. Mirrors the honest
+          // first-spawn path so the reconnect path is equally actionable.
           return {
             success: false,
-            error: createAcpError(AcpErrorType.CONNECTION_NOT_READY, `Failed to reconnect: ${errorMsg}`, true),
+            error: this.classifyReconnectError(errorMsg),
           };
         }
       }
@@ -1649,7 +1692,16 @@ export class AcpAgent {
       if (Array.isArray(mcpConfig) && mcpConfig.length > 0) {
         const mcpCaps = this.connection.getAgentCapabilities()?.mcpCapabilities;
         if (mcpCaps) {
-          servers.push(...buildBuiltinAcpSessionMcpServers(mcpConfig as IMcpServer[], mcpCaps));
+          // Per-conversation scoping (#348): only inject the MCP servers active
+          // for this chat (undefined ⇒ all). Builtins always pass.
+          servers.push(
+            ...buildAcpSessionMcpServers(
+              mcpConfig as IMcpServer[],
+              mcpCaps,
+              this.extra.activeMcpServers,
+              this.extra.allowConciergeDiag === true
+            )
+          );
         }
       }
 

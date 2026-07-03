@@ -7,6 +7,7 @@
 import BetterSqlite3 from 'better-sqlite3';
 import type Database from 'better-sqlite3';
 import type { AcpModelInfo } from '@/common/types/acpTypes';
+import { claudeSlotForModelId } from '@process/agent/acp/utils';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -203,6 +204,76 @@ export function readClaudeModelInfoFromCcSwitch(paths?: Partial<CcSwitchPaths>):
   } finally {
     db?.close();
   }
+}
+
+/** Friendly labels for the native Claude model slots (no cc-switch DB to read). */
+const CLAUDE_SLOT_LABELS: Record<ClaudeModelSlotId, string> = {
+  opus: 'Opus',
+  default: 'Sonnet',
+  haiku: 'Haiku',
+};
+
+/** Native slot order for the picker (Opus first - the product default). */
+const CLAUDE_NATIVE_SLOT_ORDER: readonly ClaudeModelSlotId[] = ['opus', 'default', 'haiku'];
+
+/**
+ * Build Claude model info from a plain `~/.claude/settings.json` (Claude Code CLI
+ * set up WITHOUT cc-switch). This is the fallback for `readClaudeModelInfoFromCcSwitch`
+ * (which returns null with no cc-switch DB): a native Claude login still surfaces its
+ * switchable slots (Opus / Sonnet / Haiku) in the picker eagerly, before the first
+ * message, with the current slot taken from settings.model (e.g. "opus[1m]" -> opus).
+ * Returns null when the Claude Code CLI isn't set up.
+ */
+export function readClaudeModelInfoFromSettings(homeDir = os.homedir()): AcpModelInfo | null {
+  const { claudeSettingsPath } = getCcSwitchPaths(homeDir);
+  if (!fs.existsSync(claudeSettingsPath)) return null;
+  let settings: ClaudeSettings | null;
+  try {
+    settings = parseJsonObject<ClaudeSettings>(fs.readFileSync(claudeSettingsPath, 'utf-8'));
+  } catch {
+    return null; // permissions / TOCTOU race — honor the documented "not set up" null contract
+  }
+  const currentModelId = claudeSlotForModelId(settings?.model) ?? 'opus';
+  const availableModels = CLAUDE_NATIVE_SLOT_ORDER.map((id) => ({ id, label: CLAUDE_SLOT_LABELS[id] }));
+  const currentModelLabel = availableModels.find((m) => m.id === currentModelId)?.label ?? CLAUDE_SLOT_LABELS.opus;
+  return {
+    currentModelId,
+    currentModelLabel,
+    availableModels,
+    canSwitch: true,
+    source: 'models',
+    sourceDetail: 'claude-slots',
+  };
+}
+
+/**
+ * The native Claude default model SLOT for a brand-new Claude Code chat, or null
+ * when there is no native Claude login to default to (so the caller keeps its
+ * Flux/other default). A native login is present when cc-switch holds a Claude
+ * provider config OR the user has a `~/.claude/settings.json` (the Claude Code
+ * CLI is set up). Honors the user's configured slot (e.g. settings.model
+ * `"opus[1m]"` -> `"opus"`), falling back to the cc-switch current slot, then
+ * Opus (the "Claude Opus 4.8" product default — a real slot id so
+ * `ANTHROPIC_MODEL=opus` is set at spawn instead of the CLI's own Sonnet
+ * fallback).
+ *
+ * Used so a Claude Code chat defaults to the subscription (native, e.g. Opus 4.8)
+ * instead of flux-auto when "Route all agents through Flux" is globally on. A
+ * native Claude login must not be silently routed through Flux: defaulting to a
+ * native slot id makes `resolveFluxRouting`'s explicit-native-pick rule keep the
+ * chat native, with no flux<->native respawn (which is what crashed the in-chat
+ * model switch).
+ */
+export function getClaudeNativeDefaultModelId(homeDir = os.homedir()): string | null {
+  const paths = getCcSwitchPaths(homeDir);
+  const ccSwitchInfo = readClaudeModelInfoFromCcSwitch(paths);
+  const hasClaudeSettings = fs.existsSync(paths.claudeSettingsPath);
+  if (!ccSwitchInfo && !hasClaudeSettings) return null;
+
+  const settings = hasClaudeSettings
+    ? parseJsonObject<ClaudeSettings>(fs.readFileSync(paths.claudeSettingsPath, 'utf-8'))
+    : null;
+  return claudeSlotForModelId(settings?.model) ?? ccSwitchInfo?.currentModelId ?? 'opus';
 }
 
 export function readClaudeProviderEnvFromCcSwitch(paths?: Partial<CcSwitchPaths>): ClaudeProviderEnv {

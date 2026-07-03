@@ -125,6 +125,22 @@ describe('buildEngineSpawnEnv - SEC-1 allowlist', () => {
     expect(env.HOME).toBe(process.env.HOME);
   });
 
+  it('forwards WAYLAND_BASH_SHELL so the GUI-spawned engine inherits the shell selection (#197)', () => {
+    process.env.WAYLAND_BASH_SHELL = '/opt/homebrew/bin/fish';
+
+    const env = buildEngineSpawnEnv({ providerEnv: {} });
+
+    expect(env.WAYLAND_BASH_SHELL).toBe('/opt/homebrew/bin/fish');
+  });
+
+  it('forwards LD_LIBRARY_PATH so the engine resolves OpenSSL 1.1 on ARM64 Ubuntu 24.04 (#233)', () => {
+    process.env.LD_LIBRARY_PATH = '/opt/openssl-1.1/lib:/usr/lib/aarch64-linux-gnu';
+
+    const env = buildEngineSpawnEnv({ providerEnv: {} });
+
+    expect(env.LD_LIBRARY_PATH).toBe('/opt/openssl-1.1/lib:/usr/lib/aarch64-linux-gnu');
+  });
+
   it('always preserves the provider auth env even though it is a secret name', () => {
     const env = buildEngineSpawnEnv({ providerEnv: { ANTHROPIC_API_KEY: 'sk-ant-123' } });
     expect(env.ANTHROPIC_API_KEY).toBe('sk-ant-123');
@@ -139,6 +155,15 @@ describe('buildEngineSpawnEnv - SEC-1 allowlist', () => {
     const env = buildEngineSpawnEnv({ providerEnv: {} });
     expect(env.BRAVE_SEARCH_API_KEY).toBeUndefined();
     expect(env.TAVILY_API_KEY).toBeUndefined();
+  });
+
+  it('opts the bundled engine into honoring a wire set_mode (WAYLAND_ALLOW_WIRE_FORCE, #495/GHSA-8r7g)', () => {
+    // Engine >=0.12.19 ignores a permission-loosening wire `set_mode` unless
+    // launched with this env. The desktop is the engine's trusted local
+    // operator, so the bundled spawn always opts in - otherwise the composer's
+    // Autopilot/Force selector would silently no-op after the bundle bump.
+    const env = buildEngineSpawnEnv({ providerEnv: {} });
+    expect(env.WAYLAND_ALLOW_WIRE_FORCE).toBe('1');
   });
 });
 

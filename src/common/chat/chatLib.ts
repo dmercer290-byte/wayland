@@ -5,6 +5,7 @@
  */
 
 import type { CodexPermissionRequest } from '@/common/types/codex/types';
+import type { IConciergeConfigContent } from '@/common/chat/conciergeConfig';
 import type {
   ExecCommandBeginData,
   ExecCommandEndData,
@@ -26,6 +27,9 @@ import type {
 } from '@/common/types/acpTypes';
 import type { IResponseMessage } from '../adapter/ipcBridge';
 import { uuid } from '../utils';
+import { addOrUpdateNode, emptyActivityContent, mergeActivityContent, mergeNodeList } from './activityTree';
+import { parseInnerEvent } from './innerEvent';
+import type { TurnCost } from '@/process/agent/wcore/protocol';
 
 /**
  * Safe path join function, compatible with Windows and Mac.
@@ -87,7 +91,9 @@ type TMessageType =
   | 'skill_suggest'
   | 'cron_trigger'
   | 'cron_propose'
-  | 'sub_agent';
+  | 'concierge_propose'
+  | 'sub_agent'
+  | 'activity';
 
 interface IMessage<T extends TMessageType, Content extends Record<string, any>> {
   /**
@@ -219,6 +225,19 @@ export type IMessageToolGroup = IMessage<
             toolName: string;
             toolDisplayName: string;
             serverName: string;
+          }
+        >
+      // #504: AskUserQuestion-class prompt. The engine sends these as an `info`
+      // category tool named `AskUserQuestion` (there is no `question` engine
+      // ToolCategory), with the prompt buried in args - so wcore/index.ts
+      // detects them by name and lifts `question`/`header`/`choices` out of the
+      // args here, and the renderer shows the choices as selectable answers.
+      | IMessageToolGroupConfirmationDetailsBase<
+          'question',
+          {
+            question: string;
+            header?: string;
+            choices: Array<{ label: string; description?: string }>;
           }
         >;
   }>
@@ -402,6 +421,17 @@ export type IMessageCronPropose = IMessage<
 >;
 
 /**
+ * Concierge Phase 2b - inline confirmation card for a conversational config
+ * change (connect a provider, set a default model, add an MCP server, edit an
+ * assistant's rules). The agent emits a [CONCIERGE_PROPOSE] block; the user
+ * picks Accept/Edit/Cancel; the action routes through
+ * ipcBridge.conciergeConfig.confirmProposal which applies the change in MAIN
+ * (where secrets live) only on Accept. Content carries NO secret - the API key
+ * for provider_connect is entered in the card and sent over the confirm IPC.
+ */
+export type IMessageConciergeConfig = IMessage<'concierge_propose', IConciergeConfigContent>;
+
+/**
  * v0.9.4 - inline activity card for a spawned sub-agent.
  * Keyed by parentCallId (e.g. "spawn:{idx}:{name}"). Multiple sub-agents
  * produce distinct cards, one per unique parentCallId. Status tracks the
@@ -417,10 +447,85 @@ export type IMessageSubAgent = IMessage<
     agentName: string;
     /** Lifecycle status. */
     status: 'running' | 'done' | 'failed';
-    /** Accumulated streamed output text from the sub-agent. */
+    /** Accumulated streamed output text from the sub-agent (legacy flat body / fallback). */
     body: string;
+    /**
+     * #252 Phase 2 - the sub-agent's real activity subtree, parsed from the
+     * inner serialized WCoreEvent stream (its own tool calls, thinking spans and
+     * nested sub-agents). Optional + additive: when absent (malformed/opaque
+     * inner) the card falls back to the flat `body`. Child nodes merge by their
+     * own callId; nested sub-agents recurse via `ActivityNode.children`.
+     */
+    nodes?: ActivityNode[];
   }
 >;
+
+/**
+ * #252 - one per-turn cost row, mirrors `TurnCost` in
+ * src/process/agent/wcore/protocol.ts. Duplicated here (rather than imported)
+ * because chatLib.ts is common-layer and must not pull in process-only
+ * protocol modules; the shape is small and engine-stable.
+ */
+export type ActivityTurnCost = {
+  turn: number;
+  model: string;
+  provider: string;
+  costUsd: number;
+};
+
+/**
+ * #252 - one node in the live activity tree. Tools, thinking spans and
+ * sub-agents are all nodes; `children` lets a sub-agent carry its own nested
+ * tools/thinking (Phase 2). `detail` accumulates streamed tool stdout
+ * (tool_chunk) or thinking text so a node can be drilled into.
+ */
+export type ActivityNode = {
+  /** Stable merge key. For tools this is the callId; otherwise a synthetic id. */
+  id: string;
+  kind: 'tool' | 'thinking' | 'sub_agent' | 'cost' | 'circuit' | 'browser' | 'cua';
+  /** Tool/sub-agent call id when applicable (same as `id` for tools). */
+  callId?: string;
+  /** Display name (tool name, agent name, etc.). */
+  name: string;
+  status: 'running' | 'done' | 'failed';
+  startTime?: number;
+  endTime?: number;
+  /** Accumulated streamed detail (tool_chunk stdout / thinking text / op trail). */
+  detail?: string;
+  children?: ActivityNode[];
+  /** Parsed search result sources (web_search tool only). */
+  sources?: import('./activity/sources').Source[];
+};
+
+/**
+ * #252 - composite "activity tree" card for one turn. Streaming node updates
+ * merge into one card by msg_id, exactly like the sub_agent card merges by
+ * parentCallId. The merge key is `activity:${turnId}` (NOT the bare turnId):
+ * the activity events are stamped by wcore with the turn's stream msg_id, the
+ * SAME id the assistant text message carries. Sharing it would make the
+ * activity card collide with the text bubble in the shared msgIdIndex and
+ * fragment the streamed prose into duplicate bubbles. The real turnId lives in
+ * `content.turnId`. Additive: never replaces the existing tool_group /
+ * thinking / plan rendering, it surfaces the currently-dropped observability
+ * stream (tool_chunk, session_cost, etc.).
+ */
+export type IMessageActivity = IMessage<
+  'activity',
+  {
+    /** Turn id - the real wcore stream id this card belongs to. */
+    turnId: string;
+    nodes: ActivityNode[];
+    perTurnCost?: ActivityTurnCost[];
+    status: 'running' | 'done' | 'failed';
+  }
+>;
+
+/**
+ * #252 - the activity card's merge key. Namespaced off the turn's stream
+ * msg_id so it never collides with the assistant text message that shares that
+ * same id (which would fragment streamed text into duplicate bubbles).
+ */
+export const activityMsgId = (turnId: string): string => `activity:${turnId}`;
 
 // eslint-disable-next-line max-len
 export type TMessage =
@@ -439,7 +544,9 @@ export type TMessage =
   | IMessageSkillSuggest
   | IMessageCronTrigger
   | IMessageCronPropose
-  | IMessageSubAgent;
+  | IMessageConciergeConfig
+  | IMessageSubAgent
+  | IMessageActivity;
 
 // Unified type for all user-interaction confirmation prompts
 export interface IConfirmation<Option extends any = any> {
@@ -452,6 +559,14 @@ export interface IConfirmation<Option extends any = any> {
     label: string;
     value: Option;
     params?: Record<string, string>; // Translation interpolation parameters
+    /**
+     * #504: for an AskUserQuestion prompt, the chosen option's answer text sent
+     * back to the engine via the approval channel (tool_approve.answer). Absent
+     * for ordinary approve/deny options.
+     */
+    answer?: string;
+    /** #504: optional secondary line shown under a choice (its description). */
+    description?: string;
   }>;
   /**
    * Command type for exec confirmations (e.g., 'curl', 'npm', 'git')
@@ -649,27 +764,44 @@ export const transformMessage = (message: IResponseMessage): TMessage => {
         content: proposeData,
       };
     }
+    case 'concierge_propose': {
+      // Concierge Phase 2b - inline config-change confirmation card. Data is
+      // broadcast from MessageMiddleware after the agent emits a
+      // [CONCIERGE_PROPOSE] block (and re-broadcast by conciergeConfigBridge on
+      // accept/cancel); renderer maps to IMessageConciergeConfig for
+      // ConciergeConfigCard to render Accept/Edit/Cancel UI.
+      const configData = message.data as IMessageConciergeConfig['content'];
+      return {
+        id: uuid(),
+        type: 'concierge_propose',
+        msg_id: message.msg_id,
+        conversation_id: message.conversation_id,
+        position: 'left',
+        content: configData,
+      };
+    }
     case 'sub_agent_event': {
       // v0.9.4 sub-agent activity card. The `data` field carries:
       //   { parentCallId: string; agentName: string; inner: unknown }
-      // `inner` is the raw WCoreEvent from the child agent - we only read its
-      // `type` field to advance the lifecycle and `text` for text_delta chunks.
+      // #252 Phase 2: `inner` is a serialized child WCoreEvent. We recursively
+      // parse it (parseInnerEvent) to surface the sub-agent's REAL tool calls,
+      // thinking spans and nested sub-agents as an activity subtree - instead of
+      // the old lossy flatten that read only inner.type + inner.text. The legacy
+      // `body` text is still accumulated so a malformed/opaque inner falls back
+      // to the flat render with no regression.
       const saData = message.data as {
         parentCallId: string;
         agentName: string;
         inner: unknown;
       };
-      const inner = saData.inner as { type?: string; text?: string } | null | undefined;
-      const innerType = inner?.type ?? '';
+      const parsed = parseInnerEvent(saData.inner);
 
       let status: IMessageSubAgent['content']['status'] = 'running';
-      if (innerType === 'info') {
+      if (parsed.lifecycle === 'done') {
         status = 'done';
-      } else if (innerType === 'error') {
+      } else if (parsed.lifecycle === 'failed') {
         status = 'failed';
       }
-
-      const body = innerType === 'text_delta' ? (inner?.text ?? '') : '';
 
       return {
         id: uuid(),
@@ -683,8 +815,95 @@ export const transformMessage = (message: IResponseMessage): TMessage => {
           parentCallId: saData.parentCallId,
           agentName: saData.agentName,
           status,
-          body,
+          body: parsed.text,
+          ...(parsed.nodes.length ? { nodes: parsed.nodes } : {}),
         },
+      };
+    }
+    // ── #252 observability → live activity tree ──────────────────────
+    // These raw events are already forwarded by wcore/index.ts +
+    // WCoreManager but previously hit the default warn arm (tool_chunk was
+    // silently dropped). Each builds a single-delta activity card keyed by
+    // activityMsgId(turnId) (NOT the bare turnId, which the assistant text
+    // message also uses); composeMessage merges deltas into one card.
+    case 'tool_chunk': {
+      const d = message.data as { callId: string; toolName?: string; chunk: string };
+      const turnId = message.msg_id ?? '';
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: 'tool_chunk',
+        callId: d.callId,
+        name: d.toolName,
+        chunk: d.chunk,
+        ts: Date.now(),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: activityMsgId(turnId),
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
+      };
+    }
+    case 'session_cost': {
+      const d = message.data as { perTurn?: TurnCost[] };
+      const turnId = message.msg_id ?? '';
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: 'cost',
+        perTurn: (d.perTurn ?? []).map((p) => ({
+          turn: p.turn,
+          model: p.model,
+          provider: p.provider,
+          costUsd: p.cost_usd,
+        })),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: activityMsgId(turnId),
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
+      };
+    }
+    case 'provider_circuit_event': {
+      const d = message.data as { primary: string; fallback?: string; state: string; error?: string };
+      const turnId = message.msg_id ?? '';
+      const detail = `${d.state}${d.fallback ? ` → ${d.fallback}` : ''}${d.error ? `: ${d.error}` : ''}`;
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: 'circuit',
+        id: d.primary,
+        name: d.primary,
+        detail,
+        ts: Date.now(),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: activityMsgId(turnId),
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
+      };
+    }
+    case 'browser_event':
+    case 'cua_event': {
+      const d = message.data as { callId: string; op: string; url?: string; summary: string };
+      const turnId = message.msg_id ?? '';
+      const content = addOrUpdateNode(emptyActivityContent(turnId), {
+        kind: message.type === 'browser_event' ? 'browser' : 'cua',
+        callId: d.callId,
+        name: d.op,
+        detail: d.summary + (d.url ? ` (${d.url})` : ''),
+        ts: Date.now(),
+      });
+      return {
+        id: uuid(),
+        type: 'activity',
+        msg_id: activityMsgId(turnId),
+        position: 'left',
+        conversation_id: message.conversation_id,
+        content,
       };
     }
     case 'start':
@@ -866,12 +1085,50 @@ export const composeMessage = (
         const prevContent = msg.content;
         const nextContent = message.content;
         const mergedStatus =
-          nextContent.status === 'done' || nextContent.status === 'failed'
-            ? nextContent.status
-            : prevContent.status;
+          nextContent.status === 'done' || nextContent.status === 'failed' ? nextContent.status : prevContent.status;
         const mergedBody = prevContent.body + nextContent.body;
-        const merged = { ...prevContent, status: mergedStatus, body: mergedBody } as typeof prevContent;
+        // #252 Phase 2: fold the sub-agent's streamed child subtree (its tools /
+        // thinking / nested sub-agents) by node id; recurses for nested agents.
+        const mergedNodes = mergeNodeList(prevContent.nodes, nextContent.nodes);
+        const merged = {
+          ...prevContent,
+          status: mergedStatus,
+          body: mergedBody,
+          ...(mergedNodes.length ? { nodes: mergedNodes } : {}),
+        } as typeof prevContent;
         return updateMessage(i, { ...msg, content: merged });
+      }
+    }
+    return pushMessage(message);
+  }
+
+  // #252 activity card: merge by msg_id (= activity:${turnId}). Each incoming
+  // message is a single-event delta; fold its nodes/cost into the existing
+  // card. Mirrors the sub_agent branch above.
+  if (message.type === 'activity' && message.msg_id) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const msg = list[i];
+      if (msg.type === 'activity' && msg.msg_id === message.msg_id) {
+        const merged = mergeActivityContent(msg.content, message.content);
+        return updateMessage(i, { ...msg, content: merged });
+      }
+    }
+    return pushMessage(message);
+  }
+
+  // text deltas: append to the existing text bubble for this msg_id even when
+  // it is not `last` — an activity card / tool_group / sub_agent card emitted
+  // mid-turn can sit between two text deltas of the SAME turn (model emits
+  // prose, runs a streaming tool, emits more prose). Searching back (instead of
+  // only checking `last`) keeps the turn's prose in ONE bubble instead of
+  // fragmenting it. Mirrors composeMessageWithIndex's msgIdIndex text lookup.
+  if (message.type === 'text' && message.msg_id) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const msg = list[i];
+      if (msg.msg_id === message.msg_id && msg.type === 'text') {
+        const merged = Object.assign({}, msg, message);
+        merged.content = { ...message.content, content: msg.content.content + message.content.content };
+        return updateMessage(i, merged);
       }
     }
     return pushMessage(message);
@@ -879,9 +1136,6 @@ export const composeMessage = (
 
   if (last.msg_id !== message.msg_id || last.type !== message.type) {
     return pushMessage(message);
-  }
-  if (message.type === 'text' && last.type === 'text') {
-    message.content.content = last.content.content + message.content.content;
   }
   return updateMessage(list.length - 1, Object.assign({}, last, message));
 };

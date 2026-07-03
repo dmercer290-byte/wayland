@@ -7,6 +7,8 @@ import type { ConnectError, ProviderId } from '@process/providers/types';
 import { providerMeta, recognizeKey } from '../providerCatalog';
 import { getPendingDeepLinkSeed } from '../index';
 import DetectedStrip from './DetectedStrip';
+import XGrokButton from './XGrokButton';
+import ChatGptButton from './ChatGptButton';
 import styles from '../ModelsSettings.module.css';
 
 type Props = {
@@ -50,6 +52,9 @@ const ERROR_KEY: Record<PanelErrorCode, string> = {
   cloud: 'errorCloud',
   ambiguous: 'errorAmbiguous',
   'no-models': 'errorNoModels',
+  'https-required': 'errorHttpsRequired',
+  'csrf-invalid': 'errorCsrfInvalid',
+  'auth-required': 'errorAuthRequired',
   unknown: 'errorUnknown',
 };
 
@@ -75,6 +80,13 @@ const ConnectPanel: React.FC<Props> = ({
   const [usingDetected, setUsingDetected] = useState<string | null>(null);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [errorProvider, setErrorProvider] = useState<string | null>(null);
+  // #524: server-provided fallback text for an otherwise-unclassified failure,
+  // shown verbatim so the user still sees *why* rather than a bare "unknown".
+  const [errorRaw, setErrorRaw] = useState<string | null>(null);
+  // #100: soft (non-error) advisory shown when a key connects but has no usable
+  // credit yet - the provider is added connected-but-switched-off.
+  const [noticeKey, setNoticeKey] = useState<string | null>(null);
+  const [noticeProvider, setNoticeProvider] = useState<string | null>(null);
   // Ship-gate Fix C3 - show a subtle "from deep link" hint on the input when
   // the key was pre-filled by a `wayland://add-provider?apiKey=…` URL.
   const [seededFromDeepLink, setSeededFromDeepLink] = useState(false);
@@ -130,13 +142,19 @@ const ConnectPanel: React.FC<Props> = ({
     setKeyValue(value);
     setErrorKey(null);
     setErrorProvider(null);
+    setErrorRaw(null);
+    setNoticeKey(null);
+    setNoticeProvider(null);
     // Once the user edits the field the deep-link badge no longer makes sense.
     setSeededFromDeepLink(false);
   }, []);
 
-  const showError = useCallback((code: PanelErrorCode, providerName?: string) => {
+  const showError = useCallback((code: PanelErrorCode, providerName?: string, rawMessage?: string) => {
     setErrorKey(ERROR_KEY[code]);
     setErrorProvider(providerName ?? null);
+    // Only surface raw server text for the unclassified fallback - a mapped code
+    // always has a localized message that reads better.
+    setErrorRaw(code === 'unknown' && rawMessage ? rawMessage : null);
   }, []);
 
   const handleConnect = useCallback(async () => {
@@ -164,13 +182,23 @@ const ConnectPanel: React.FC<Props> = ({
     setConnecting(true);
     setErrorKey(null);
     setErrorProvider(null);
+    setErrorRaw(null);
+    setNoticeKey(null);
+    setNoticeProvider(null);
     const providerName = providerMeta(recognition.provider).displayName;
     try {
       const res = await onConnectKey(recognition.provider, key);
       if (res.ok) {
         setKeyValue('');
+        // #100: connected, but the key has no usable credit yet - surface a soft
+        // notice (not an error) so the user knows it was added switched-off and
+        // to add credit, then turn it on.
+        if (res.warning === 'no-credit') {
+          setNoticeKey('noticeNoCredit');
+          setNoticeProvider(providerName);
+        }
       } else {
-        showError(res.error ?? 'unknown', providerName);
+        showError(res.error ?? 'unknown', providerName, res.errorMessage);
       }
     } catch {
       showError('unknown', providerName);
@@ -196,9 +224,17 @@ const ConnectPanel: React.FC<Props> = ({
     [onUseDetected, showError]
   );
 
-  const errorText = errorKey
-    ? t(`settings.modelsPage.connect.${errorKey}`, {
-        provider: errorProvider ?? t('settings.modelsPage.connect.thatProvider'),
+  const errorText =
+    errorRaw ??
+    (errorKey
+      ? t(`settings.modelsPage.connect.${errorKey}`, {
+          provider: errorProvider ?? t('settings.modelsPage.connect.thatProvider'),
+        })
+      : null);
+
+  const noticeText = noticeKey
+    ? t(`settings.modelsPage.connect.${noticeKey}`, {
+        provider: noticeProvider ?? t('settings.modelsPage.connect.thatProvider'),
       })
     : null;
 
@@ -249,6 +285,23 @@ const ConnectPanel: React.FC<Props> = ({
           <span>{errorText}</span>
         </div>
       )}
+
+      {noticeText && (
+        <div className={styles.connectNotice} role='status'>
+          <AlertTriangle size={14} aria-hidden='true' />
+          <span>{noticeText}</span>
+        </div>
+      )}
+
+      <div className={styles.orDivider}>
+        <span>{t('settings.modelsPage.connect.or')}</span>
+      </div>
+      <div className={styles.googleBtn}>
+        <XGrokButton />
+      </div>
+      <div className={styles.googleBtn}>
+        <ChatGptButton />
+      </div>
 
       <div className={styles.browseLink}>
         <Button type='text' size='small' onClick={() => onBrowse()}>

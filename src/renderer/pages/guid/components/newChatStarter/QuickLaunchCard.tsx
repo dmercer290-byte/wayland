@@ -5,15 +5,7 @@
  */
 
 import React from 'react';
-import {
-  Zap,
-  PenLine,
-  Handshake,
-  Rocket,
-  BarChart3,
-  Landmark,
-  type LucideIcon,
-} from 'lucide-react';
+import { Sparkles, Zap, PenLine, Handshake, Rocket, BarChart3, Landmark, type LucideIcon } from 'lucide-react';
 import type { QuickLaunchAnchorId } from '@/renderer/pages/guid/quickLaunchAnchors';
 import AssistantIconTile, { type PaletteKey } from '@/renderer/pages/guid/components/AssistantIconTile';
 import styles from './QuickLaunchCard.module.css';
@@ -29,20 +21,24 @@ import styles from './QuickLaunchCard.module.css';
  */
 
 const ICON_MAP: Record<string, LucideIcon> = {
-  'zap': Zap,
+  sparkles: Sparkles,
+  zap: Zap,
   'pen-line': PenLine,
-  'handshake': Handshake,
-  'rocket': Rocket,
+  handshake: Handshake,
+  rocket: Rocket,
   'bar-chart-3': BarChart3,
-  'landmark': Landmark,
+  landmark: Landmark,
 };
 
 const ANCHOR_PALETTE: Record<QuickLaunchAnchorId, PaletteKey> = {
-  'cowork': 'cowork',
+  // Concierge is the front door - give it a distinct tile so it doesn't read as
+  // a second Cowork card.
+  concierge: 'research',
+  cowork: 'cowork',
   'write-copy': 'write',
   'close-deal': 'sales',
   'launch-it': 'launch',
-  'numbers': 'finance',
+  numbers: 'finance',
   'quiet-money': 'finance',
 };
 
@@ -54,13 +50,7 @@ export type QuickLaunchCardProps = {
   onSelect: (id: QuickLaunchAnchorId) => void;
 };
 
-const QuickLaunchCard: React.FC<QuickLaunchCardProps> = ({
-  id,
-  label,
-  sub,
-  lucideIcon,
-  onSelect,
-}) => {
+const QuickLaunchCard: React.FC<QuickLaunchCardProps> = ({ id, label, sub, lucideIcon, onSelect }) => {
   const IconComponent = ICON_MAP[lucideIcon] ?? Zap;
   const isCowork = id === 'cowork';
   return (

@@ -1,8 +1,10 @@
 {
-  "truncation.budgetExhausted.body": "Response was truncated - the model ran out of token budget before finishing. Try a model with more reasoning headroom or simplify your prompt.",
+  "truncation.budgetExhausted.body": "This reply stopped early before finishing. Continue to pick up exactly where it left off — the model keeps the work it already did.",
+  "truncation.budgetExhausted.action": "Continue",
   "fileChanges": "File Changes",
   "fileChangesCount": "{{count}} File Changes",
   "conversationInProgress": "A conversation is currently in progress...",
+  "working": "Working...",
   "confirm": "Confirm",
   "canceledExecution": "Execution canceled",
   "openLinkFailed": "Failed to open link",
@@ -49,6 +51,9 @@
   "export.prepareFailed": "Failed to prepare conversation export",
   "export.unavailable": "Conversation export is unavailable",
   "unknownMessageType": "Unknown message type: {{type}}",
+  "timeMarker.gapMinutes": "+{{minutes}}m",
+  "timeMarker.gapHours": "+{{hours}}h",
+  "timeMarker.gapHoursMinutes": "+{{hours}}h {{minutes}}m",
   "permissionRequest": "Permission Request",
   "agentRequestingPermission": "The agent is requesting permission.",
   "command": "Command:",
@@ -66,6 +71,14 @@
     "yesAllowAlways": "Yes, allow always",
     "yesAlwaysAllowTool": "Yes, always allow tool \"{{toolName}}\" from server \"{{serverName}}\"",
     "yesAlwaysAllowServer": "Yes, always allow all tools from server \"{{serverName}}\"",
-    "no": "No (esc)"
+    "no": "No (esc)",
+    "recommended": "Recommended"
+  },
+  "slash.customBadge": "Custom",
+  "runaway": {
+    "title": "Stopped a runaway loop",
+    "repeatedReadBody": "This turn kept re-reading the same content ({{count}} times) without making progress, so it was stopped to avoid burning tokens. You can send a new message to continue.",
+    "failingCommandBody": "A command failed {{count}} times in a row, so this turn was stopped to avoid burning tokens retrying it. You can send a new message to continue.",
+    "dismiss": "Got it"
   }
 }
