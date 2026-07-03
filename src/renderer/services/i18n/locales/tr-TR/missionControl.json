@@ -114,7 +114,8 @@
       "less": "Az",
       "more": "Çok",
       "cellTokens": "{{tokens}} tokens · {{cost}}",
-      "unattributed": "(atanmamış)"
+      "unattributed": "(atanmamış)",
+      "cellSplit": "girdi {{input}} · çıktı {{output}}{{cache}}"
     }
   }
 }

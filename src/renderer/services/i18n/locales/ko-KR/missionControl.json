@@ -114,7 +114,8 @@
       "less": "적음",
       "more": "많음",
       "cellTokens": "{{tokens}} 토큰 · {{cost}}",
-      "unattributed": "(미분류)"
+      "unattributed": "(미분류)",
+      "cellSplit": "입력 {{input}} · 출력 {{output}}{{cache}}"
     }
   }
 }

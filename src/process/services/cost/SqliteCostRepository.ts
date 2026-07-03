@@ -139,6 +139,9 @@ export class SqliteCostRepository implements ICostRepository {
           COALESCE(model_id, '') AS model_id,
           COALESCE(SUM(cost_usd), 0) AS cost_usd,
           COALESCE(SUM(tokens_total), 0) AS tokens_total,
+          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+          COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
           COUNT(*) AS events
         FROM cost_events
         WHERE created_at >= ? AND created_at < ?
@@ -150,6 +153,9 @@ export class SqliteCostRepository implements ICostRepository {
       model_id: string;
       cost_usd: number;
       tokens_total: number;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
       events: number;
     }>;
     return rows.map((r) => ({
@@ -157,6 +163,9 @@ export class SqliteCostRepository implements ICostRepository {
       modelId: r.model_id,
       costUsd: r.cost_usd,
       tokensTotal: r.tokens_total,
+      inputTokens: r.input_tokens,
+      outputTokens: r.output_tokens,
+      cacheReadTokens: r.cache_read_tokens,
       events: r.events,
     }));
   }

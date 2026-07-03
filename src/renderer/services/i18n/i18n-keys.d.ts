@@ -1382,6 +1382,7 @@ export type I18nKey =
   | 'missionControl.cost.byModel'
   | 'missionControl.cost.byTeam'
   | 'missionControl.cost.calendar.allModels'
+  | 'missionControl.cost.calendar.cellSplit'
   | 'missionControl.cost.calendar.cellTokens'
   | 'missionControl.cost.calendar.day'
   | 'missionControl.cost.calendar.hour'

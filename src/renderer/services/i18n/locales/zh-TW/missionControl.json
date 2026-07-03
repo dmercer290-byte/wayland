@@ -114,7 +114,8 @@
       "less": "少",
       "more": "多",
       "cellTokens": "{{tokens}} token · {{cost}}",
-      "unattributed": "（未歸屬）"
+      "unattributed": "（未歸屬）",
+      "cellSplit": "輸入 {{input}} · 輸出 {{output}}{{cache}}"
     }
   }
 }

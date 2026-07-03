@@ -114,7 +114,8 @@
       "less": "少",
       "more": "多",
       "cellTokens": "{{tokens}} トークン · {{cost}}",
-      "unattributed": "（未分類）"
+      "unattributed": "（未分類）",
+      "cellSplit": "入力 {{input}} · 出力 {{output}}{{cache}}"
     }
   }
 }

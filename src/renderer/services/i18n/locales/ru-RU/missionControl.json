@@ -114,7 +114,8 @@
       "less": "Меньше",
       "more": "Больше",
       "cellTokens": "{{tokens}} токенов · {{cost}}",
-      "unattributed": "(без модели)"
+      "unattributed": "(без модели)",
+      "cellSplit": "ввод {{input}} · вывод {{output}}{{cache}}"
     }
   }
 }

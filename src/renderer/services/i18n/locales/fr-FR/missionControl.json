@@ -114,7 +114,8 @@
       "less": "Moins",
       "more": "Plus",
       "cellTokens": "{{tokens}} tokens · {{cost}}",
-      "unattributed": "(non attribué)"
+      "unattributed": "(non attribué)",
+      "cellSplit": "entrée {{input}} · sortie {{output}}{{cache}}"
     }
   }
 }

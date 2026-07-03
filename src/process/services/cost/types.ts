@@ -77,6 +77,10 @@ export type CostModelSeriesPoint = {
   modelId: string;
   costUsd: number;
   tokensTotal: number;
+  /** Input/output/cache-read splits (0 when the backend reported no split). */
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
   events: number;
 };
 

@@ -38,8 +38,11 @@ type Cell = {
   startMs: number;
   label: string;
   tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
   costUsd: number;
-  byModel: Array<{ modelId: string; tokens: number }>;
+  byModel: Array<{ modelId: string; tokens: number; inputTokens: number; outputTokens: number }>;
 };
 
 const formatTokens = (n: number): string => {
@@ -122,14 +125,36 @@ const UsageCalendar: React.FC = () => {
       const { start, label } = bucketOf(p.bucketStart);
       let cell = byBucket.get(start);
       if (!cell) {
-        cell = { startMs: start, label, tokens: 0, costUsd: 0, byModel: [] };
+        cell = {
+          startMs: start,
+          label,
+          tokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          costUsd: 0,
+          byModel: [],
+        };
         byBucket.set(start, cell);
       }
       cell.tokens += p.tokensTotal;
+      cell.inputTokens += p.inputTokens;
+      cell.outputTokens += p.outputTokens;
+      cell.cacheReadTokens += p.cacheReadTokens;
       cell.costUsd += p.costUsd;
       const entry = cell.byModel.find((m) => m.modelId === p.modelId);
-      if (entry) entry.tokens += p.tokensTotal;
-      else cell.byModel.push({ modelId: p.modelId, tokens: p.tokensTotal });
+      if (entry) {
+        entry.tokens += p.tokensTotal;
+        entry.inputTokens += p.inputTokens;
+        entry.outputTokens += p.outputTokens;
+      } else {
+        cell.byModel.push({
+          modelId: p.modelId,
+          tokens: p.tokensTotal,
+          inputTokens: p.inputTokens,
+          outputTokens: p.outputTokens,
+        });
+      }
     }
 
     // Fill empty buckets so the calendar shape is continuous.
@@ -139,7 +164,18 @@ const UsageCalendar: React.FC = () => {
       let cursor = start;
       for (let i = 0; i < count && cursor <= now; i++) {
         const existing = byBucket.get(cursor);
-        out.push(existing ?? { startMs: cursor, label: bucketOf(cursor).label, tokens: 0, costUsd: 0, byModel: [] });
+        out.push(
+          existing ?? {
+            startMs: cursor,
+            label: bucketOf(cursor).label,
+            tokens: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            costUsd: 0,
+            byModel: [],
+          }
+        );
         cursor = step(cursor);
       }
     };
@@ -183,6 +219,16 @@ const UsageCalendar: React.FC = () => {
           cost: cell.costUsd >= 0.01 ? `$${cell.costUsd.toFixed(2)}` : `$${cell.costUsd.toFixed(4)}`,
         })}
       </span>
+      {(cell.inputTokens > 0 || cell.outputTokens > 0) && (
+        <span>
+          {t('missionControl.cost.calendar.cellSplit', {
+            defaultValue: 'in {{input}} · out {{output}}{{cache}}',
+            input: formatTokens(cell.inputTokens),
+            output: formatTokens(cell.outputTokens),
+            cache: cell.cacheReadTokens > 0 ? ` · cache ${formatTokens(cell.cacheReadTokens)}` : '',
+          })}
+        </span>
+      )}
       {modelFilter === ALL_MODELS &&
         cell.byModel
           .toSorted((a, b) => b.tokens - a.tokens)
@@ -190,6 +236,8 @@ const UsageCalendar: React.FC = () => {
           .map((m) => (
             <span key={m.modelId}>
               {m.modelId || unattributed}: {formatTokens(m.tokens)}
+              {(m.inputTokens > 0 || m.outputTokens > 0) &&
+                ` (${formatTokens(m.inputTokens)}↓ ${formatTokens(m.outputTokens)}↑)`}
             </span>
           ))}
     </div>
