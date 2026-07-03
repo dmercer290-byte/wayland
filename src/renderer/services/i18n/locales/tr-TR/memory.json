@@ -98,7 +98,9 @@
     "panel_title": "IJFW Memory (Ferrox Labs)",
     "skip_label": "IJFW otomatik kurulumu atla",
     "skip_description": "Etkin olduğunda Wayland, IJFW'yi yüklemez veya yükseltmez. Daha sonra Bellek sayfası üzerinden elle yükleyebilirsiniz.",
-    "manual_install_hint": "Elle yüklemek için bir terminalde `npx -y @ijfw/install@latest` komutunu çalıştırın",
+    "transcript_label": "Konuşma dökümlerini belleğe kaydet",
+    "transcript_description": "Sohbetleri, araç çağrılarını ve düşünceleri her çalışma alanının bellek dökümüne yansıtır. Eski girişler otomatik sıkıştırılır; gizli bilgiler yazılmadan önce gizlenir.",
+    "manual_install_hint": "Elle yüklemek için bir terminalde `npx -y --package @ijfw/install@latest ijfw-install` komutunu çalıştırın",
     "about_title": "IJFW Memory",
     "about_body": "Ferrox Labs tarafından geliştirilen açık kaynaklı kalıcı bellek motoru."
   },

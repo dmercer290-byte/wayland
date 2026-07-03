@@ -235,3 +235,6 @@ design-mockups/
 .cursor/
 .codex/
 .windsurfrules
+
+# IJFW generated local state (project memory in .ijfw/memory/ stays trackable)
+.ijfw/wiki-state/

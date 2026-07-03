@@ -27,6 +27,47 @@ const IjfwSettingsPanel: React.FC = () => {
   const { t } = useTranslation();
   const [skipEnabled, setSkipEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [transcriptEnabled, setTranscriptEnabled] = useState(true);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+
+  // Read the transcript-logging toggle (absent config = enabled).
+  useEffect(() => {
+    let disposed = false;
+    void ipcBridge.memory.getTranscriptLogging
+      .invoke()
+      .then((payload) => {
+        if (disposed || !payload) return;
+        setTranscriptEnabled(payload.enabled);
+      })
+      .catch((err) => {
+        console.error('[IjfwSettingsPanel] getTranscriptLogging failed:', err);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const handleTranscriptToggle = useCallback(
+    async (next: boolean) => {
+      if (transcriptLoading) return;
+      const previous = transcriptEnabled;
+      setTranscriptEnabled(next);
+      setTranscriptLoading(true);
+      try {
+        await ipcBridge.memory.setTranscriptLogging.invoke({ enabled: next });
+      } catch (err) {
+        setTranscriptEnabled(previous);
+        Message.error(
+          err instanceof Error
+            ? err.message
+            : t('memory.error.unknown', { defaultValue: 'Something went wrong. Try again.' })
+        );
+      } finally {
+        setTranscriptLoading(false);
+      }
+    },
+    [transcriptLoading, transcriptEnabled, t]
+  );
 
   // Read initial opt-out state from the lifecycle snapshot. Wave 2 sets
   // `status: 'not_installed', reason: 'opt_out'` whenever the Skip flag is on.
@@ -118,24 +159,44 @@ const IjfwSettingsPanel: React.FC = () => {
           </Typography.Text>
         </div>
 
+        <div className='flex flex-col gap-12px p-16px rd-12px bg-aou-1'>
+          <div className='flex items-center justify-between gap-16px'>
+            <Typography.Text className='text-14px font-medium'>
+              {t('memory.settings.transcript_label', { defaultValue: 'Log conversation transcripts to memory' })}
+            </Typography.Text>
+            <Switch
+              checked={transcriptEnabled}
+              loading={transcriptLoading}
+              onChange={(value: boolean) => {
+                void handleTranscriptToggle(value);
+              }}
+              data-testid='ijfw-settings-transcript-switch'
+            />
+          </div>
+          <Typography.Text type='secondary' className='text-12px'>
+            {t('memory.settings.transcript_description', {
+              defaultValue:
+                'Mirrors chats, tool calls, and thinking into each workspace’s memory transcript. Older entries are auto-compressed so the file stays small; secrets are redacted before writing.',
+            })}
+          </Typography.Text>
+        </div>
+
         <div className='flex flex-col gap-6px'>
           <Typography.Text type='secondary' className='text-12px'>
             {t('memory.settings.manual_install_hint', {
-              defaultValue: 'To install manually: run `npx -y @ijfw/install@latest` in a terminal',
+              defaultValue:
+                'To install manually: run `npx -y --package @ijfw/install@latest ijfw-install` in a terminal',
             })}
           </Typography.Text>
           <code
             data-testid='ijfw-settings-manual-install-code'
             className='inline-block self-start px-8px py-4px rd-6px bg-fill-2 text-12px text-t-primary font-mono'
           >
-            npx -y @ijfw/install@latest
+            npx -y --package @ijfw/install@latest ijfw-install
           </code>
         </div>
 
-        <div
-          className='flex flex-col gap-6px p-16px rd-12px bg-aou-1'
-          data-testid='ijfw-settings-about'
-        >
+        <div className='flex flex-col gap-6px p-16px rd-12px bg-aou-1' data-testid='ijfw-settings-about'>
           <Typography.Text className='text-14px font-semibold'>
             {t('memory.settings.about_title', { defaultValue: 'IJFW Memory' })}
           </Typography.Text>

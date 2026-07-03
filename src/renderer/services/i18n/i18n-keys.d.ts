@@ -1203,6 +1203,8 @@ export type I18nKey =
   | 'memory.settings.panel_title'
   | 'memory.settings.skip_description'
   | 'memory.settings.skip_label'
+  | 'memory.settings.transcript_description'
+  | 'memory.settings.transcript_label'
   | 'memory.upgrading.pending_message'
   | 'memory.upgrading.restart_now'
   | 'memory.upgrading.subtitle'

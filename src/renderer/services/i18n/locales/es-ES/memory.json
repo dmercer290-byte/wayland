@@ -98,7 +98,9 @@
     "panel_title": "IJFW Memory (Ferrox Labs)",
     "skip_label": "Omitir la configuración automática de IJFW",
     "skip_description": "Cuando está activado, Wayland no instalará ni actualizará IJFW. Puedes instalarlo manualmente más tarde desde la página de Memoria.",
-    "manual_install_hint": "Para instalar manualmente: ejecuta `npx -y @ijfw/install@latest` en un terminal",
+    "transcript_label": "Registrar transcripciones de conversaciones en la memoria",
+    "transcript_description": "Refleja chats, llamadas a herramientas y razonamientos en la transcripción de memoria de cada espacio de trabajo. Las entradas antiguas se comprimen automáticamente; los secretos se ocultan antes de escribir.",
+    "manual_install_hint": "Para instalar manualmente: ejecuta `npx -y --package @ijfw/install@latest ijfw-install` en un terminal",
     "about_title": "IJFW Memory",
     "about_body": "Un motor de memoria persistente de código abierto de Ferrox Labs."
   },

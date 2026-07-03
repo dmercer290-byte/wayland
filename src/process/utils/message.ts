@@ -8,6 +8,7 @@ import type { TMessage } from '@/common/chat/chatLib';
 import { composeMessage } from '@/common/chat/chatLib';
 import type { AgentBackend } from '@/common/types/acpTypes';
 import { getDatabase } from '../services/database/export';
+import { recordTranscriptMessage } from '../services/memory/transcriptLogger';
 import { ProcessChat } from './initStorage';
 
 const Cache = new Map<string, ConversationManageWithDB>();
@@ -47,6 +48,9 @@ class ConversationManageWithDB {
     this.stack = [];
   }
   sync(type: 'insert' | 'accumulate', message: TMessage) {
+    // Mirror chats, tool calls, and thinking into the IJFW memory transcript
+    // (fire-and-forget; debounced internally so streams land once, settled).
+    recordTranscriptMessage(this.conversation_id, message);
     this.stack.push([type, message]);
     clearTimeout(this.timer);
     if (type === 'insert') {
