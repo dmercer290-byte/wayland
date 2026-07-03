@@ -198,6 +198,30 @@ export class TeamSessionService {
     } as TProviderWithModel;
   }
 
+  /**
+   * #555: pick the provider that actually serves `modelName`. A team agent
+   * persists only the model-name string, so the provider has to be recovered
+   * from the configured provider list. When several enabled providers list
+   * the same name, a specific (non-aggregator) provider wins over OpenRouter —
+   * the aggregator can serve almost any model and would otherwise shadow the
+   * subscription/direct provider the user selected the model on.
+   */
+  private async resolveProviderForModelName(
+    modelName: string,
+    fallback: TProviderWithModel
+  ): Promise<TProviderWithModel> {
+    const configured = await ProcessConfig.get('model.config');
+    const providers = Array.isArray(configured) ? configured.filter((p) => p.enabled !== false) : [];
+    const serving = providers.filter(
+      (p) => Array.isArray(p.model) && p.model.includes(modelName) && p.modelEnabled?.[modelName] !== false
+    );
+    const preferred = serving.find((p) => p.platform !== 'openrouter') ?? serving[0];
+    if (preferred) {
+      return { ...preferred, useModel: modelName } as TProviderWithModel;
+    }
+    return { ...fallback, useModel: modelName } as TProviderWithModel;
+  }
+
   private async resolveConversationModel(params: {
     backend: string;
     isPreset: boolean;
@@ -397,11 +421,16 @@ export class TeamSessionService {
       presetAgentType: isPreset ? backend : undefined,
     });
 
-    // Override useModel for Gemini/Aionrs when agent has an explicit model
+    // Override useModel for Gemini/Aionrs when agent has an explicit model.
+    // #555: `agent.model` is only a model-name string, so grafting it onto the
+    // DEFAULT provider (providers[0]) silently reroutes the turn through
+    // whichever provider happens to be listed first (e.g. OpenRouter credits
+    // instead of the ChatGPT subscription the user picked). Resolve a provider
+    // that actually advertises the model before falling back to the default.
     if (agent.model) {
       const type = getConversationTypeForBackend(backend);
       if (type === 'gemini' || type === 'wcore') {
-        model = { ...model, useModel: agent.model };
+        model = await this.resolveProviderForModelName(agent.model, model);
       }
     }
 

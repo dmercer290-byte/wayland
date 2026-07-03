@@ -60,6 +60,12 @@ export type WorkflowSurfaceProps = {
   onRunAgain?: () => void;
   /** Fired when the user clicks a suggested-next card. */
   onLaunchNext?: (slug: string) => void;
+  /**
+   * Optional node rendered under the WorkflowHeader (issue #587): the standard
+   * ChatLayout header is hidden in workflow mode, so callers pass the model
+   * selector here to keep mid-workflow model switching available.
+   */
+  headerExtra?: React.ReactNode;
 };
 
 const isFreshLaunch = (session: WorkflowSession): boolean => {
@@ -89,6 +95,7 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
   suggestedNext,
   onRunAgain,
   onLaunchNext,
+  headerExtra,
 }) => {
   const session = useWorkflowSession(sessionId, initialSession);
   const [launched, setLaunched] = useState(false);
@@ -289,6 +296,11 @@ export const WorkflowSurface: React.FC<WorkflowSurfaceProps> = ({
               onEnd={handleEnd}
               onDelete={handleDelete}
             />
+            {headerExtra && (
+              <div className='flex items-center mt-8px' data-testid='workflow-surface-header-extra'>
+                {headerExtra}
+              </div>
+            )}
           </div>
           {pendingAsks.length > 0 && (
             <div className={styles.asks} data-testid='workflow-surface-asks'>
