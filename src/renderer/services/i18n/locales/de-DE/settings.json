@@ -2429,5 +2429,11 @@
     "loaded": "{{model}} geladen",
     "loadedSwapped": "{{model}} geladen (VRAM freigegeben: {{unloaded}})",
     "loadFailed": "Laden fehlgeschlagen: {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "Ausweichmodell bei Ratenlimit",
+    "subtitle": "Erreicht eine geplante Aufgabe ein Wochenlimit, wechselt sie zu diesem Modell (z. B. OpenRouter oder ZenMux) und versucht es erneut. Kurzzeitlimits werden beim Reset automatisch erneut versucht.",
+    "none": "Kein Ausweichmodell",
+    "pickModel": "Modell wählen"
   }
 }

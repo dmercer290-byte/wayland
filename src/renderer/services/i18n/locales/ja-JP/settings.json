@@ -2430,5 +2430,11 @@
     "loaded": "{{model}} を読み込みました",
     "loadedSwapped": "{{model}} を読み込みました（解放した VRAM: {{unloaded}}）",
     "loadFailed": "読み込み失敗: {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "レート制限時の代替モデル",
+    "subtitle": "スケジュールされたタスクが週間制限に達すると、このモデル（OpenRouter や ZenMux など）に切り替えて再試行します。短期の制限はリセット時に自動再試行されます。",
+    "none": "代替なし",
+    "pickModel": "モデルを選択"
   }
 }

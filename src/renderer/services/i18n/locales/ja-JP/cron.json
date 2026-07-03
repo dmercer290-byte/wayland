@@ -187,5 +187,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "チャットからの定期実行: {{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "週間レート制限に到達 — 代替モデル {{model}} で再試行します",
+    "weeklyNoFallback": "週間レート制限に到達しました。設定 → 一般で代替モデルを設定してください。",
+    "windowRetry": "レート制限に到達 — {{time}} に自動再試行します"
   }
 }

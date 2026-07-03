@@ -2428,5 +2428,11 @@
     "loaded": "{{model}} yüklendi",
     "loadedSwapped": "{{model}} yüklendi (boşaltılan VRAM: {{unloaded}})",
     "loadFailed": "Yükleme başarısız: {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "Limit için yedek model",
+    "subtitle": "Zamanlanmış bir görev haftalık limite ulaştığında bu modele (ör. OpenRouter veya ZenMux) geçer ve yeniden dener. Kısa süreli limitler sıfırlanınca otomatik yeniden denenir.",
+    "none": "Yedek yok",
+    "pickModel": "Model seçin"
   }
 }

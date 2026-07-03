@@ -2430,5 +2430,11 @@
     "loaded": "{{model}} 로드됨",
     "loadedSwapped": "{{model}} 로드됨 (해제된 VRAM: {{unloaded}})",
     "loadFailed": "로드 실패: {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "한도 초과 시 대체 모델",
+    "subtitle": "예약된 작업이 주간 한도에 도달하면 이 모델(예: OpenRouter 또는 ZenMux)로 전환하여 재시도합니다. 단기 한도는 초기화 시 자동 재시도됩니다.",
+    "none": "대체 없음",
+    "pickModel": "모델 선택"
   }
 }

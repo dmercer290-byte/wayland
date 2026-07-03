@@ -174,5 +174,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "Exécution récurrente depuis le chat : {{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "Limite hebdomadaire atteinte – nouvel essai avec le modèle de secours {{model}}",
+    "weeklyNoFallback": "Limite hebdomadaire atteinte. Configurez un modèle de secours dans Réglages → Général.",
+    "windowRetry": "Limite atteinte – nouvel essai automatique à {{time}}"
   }
 }

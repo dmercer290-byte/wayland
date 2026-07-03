@@ -175,5 +175,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "채팅의 반복 실행: {{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "주간 한도 도달 — 대체 모델 {{model}}(으)로 재시도",
+    "weeklyNoFallback": "주간 한도에 도달했습니다. 설정 → 일반에서 대체 모델을 구성하세요.",
+    "windowRetry": "한도 도달 — {{time}}에 자동 재시도"
   }
 }

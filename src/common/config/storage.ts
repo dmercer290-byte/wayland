@@ -192,6 +192,12 @@ export interface IConfigStorageRefer {
   'wcore.compactMode'?: 'economy' | 'light' | 'max';
   /** Model Hub: registered local/remote model servers (Ollama or OpenAI-compatible). */
   'modelHub.servers'?: Array<{ id: string; name: string; url: string; kind: 'ollama' | 'openai' }>;
+  /**
+   * Fallback model for weekly rate-limit failover on scheduled tasks: when a
+   * run hits a weekly cap, the job's conversation is switched to this model
+   * (e.g. an OpenRouter or ZenMux model) and retried once.
+   */
+  'rateLimit.fallbackModel'?: { providerId: string; useModel: string };
   /** Persisted app-wide UI zoom factor for Display settings */
   'ui.zoomFactor'?: number;
   /** Auto-enable WebUI in desktop mode */

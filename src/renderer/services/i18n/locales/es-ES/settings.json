@@ -2429,5 +2429,11 @@
     "loaded": "{{model}} cargado",
     "loadedSwapped": "{{model}} cargado (VRAM liberada: {{unloaded}})",
     "loadFailed": "Error al cargar: {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "Modelo alternativo ante límites",
+    "subtitle": "Si una tarea programada alcanza el límite semanal, cambia a este modelo (p. ej., OpenRouter o ZenMux) y reintenta. Los límites cortos se reintentan automáticamente al reiniciarse.",
+    "none": "Sin alternativa",
+    "pickModel": "Elige un modelo"
   }
 }

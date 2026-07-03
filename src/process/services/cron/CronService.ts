@@ -6,7 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import type { CronMessageMeta, TMessage } from '@/common/chat/chatLib';
-import type { TChatConversation } from '@/common/config/storage';
+import type { TChatConversation, TProviderWithModel } from '@/common/config/storage';
 import { uuid } from '@/common/utils';
 import { addMessage } from '@process/utils/message';
 import { getPlatformServices } from '@/common/platform';
@@ -19,6 +19,7 @@ import type { ICronRepository } from './ICronRepository';
 import type { ICronEventEmitter } from './ICronEventEmitter';
 import type { ICronJobExecutor } from './ICronJobExecutor';
 import { deleteCronSkillFile } from './cronSkillFile';
+import { classifyRunError } from './rateLimitClassifier';
 
 /**
  * Parameters for creating a new cron job
@@ -56,6 +57,8 @@ export class CronService {
   private timers: Map<string, Cron | NodeJS.Timeout> = new Map();
   private retryTimers: Map<string, NodeJS.Timeout> = new Map();
   private retryCounts: Map<string, number> = new Map();
+  /** Job ids that already failed over to the fallback model this run cycle. */
+  private fallbackAttempted: Set<string> = new Set();
   private initialized = false;
   private powerSaveBlockerId: number | null = null;
 
@@ -660,6 +663,42 @@ export class CronService {
       lastStatus = 'error';
       lastError = error instanceof Error ? error.message : String(error);
       console.error(`[CronService] Job ${job.id} failed:`, error);
+
+      // Rate-limit aware recovery: a short-window hit (Claude/Gemini reset
+      // every ~5h) schedules an automatic retry at reset; a weekly cap fails
+      // over to the user's configured fallback model (OpenRouter/ZenMux/...).
+      const limit = classifyRunError(lastError, Date.now());
+      if (limit.kind === 'rate_limit') {
+        if (limit.scope === 'weekly' && !this.fallbackAttempted.has(job.id)) {
+          const switched = await this.trySwitchToFallbackModel(job);
+          if (switched) {
+            this.fallbackAttempted.add(job.id);
+            lastError = i18n.t('cron:rateLimit.weeklyFallback', {
+              defaultValue: 'Weekly rate limit hit — retrying on fallback model {{model}}',
+              model: switched,
+            });
+            // Persist the failure context, then re-run once on the fallback.
+            setTimeout(() => {
+              void this.executeJob(job);
+            }, 2000);
+          } else {
+            lastError = i18n.t('cron:rateLimit.weeklyNoFallback', {
+              defaultValue: 'Weekly rate limit hit. Configure a fallback model in Settings → General to auto-switch.',
+            });
+          }
+        } else if (limit.scope === 'window') {
+          this.scheduleRateLimitRetry(job, limit.retryAtMs);
+          lastError = i18n.t('cron:rateLimit.windowRetry', {
+            defaultValue: 'Rate limit hit — will retry automatically at {{time}}',
+            time: new Date(limit.retryAtMs).toLocaleTimeString(),
+          });
+        }
+      } else {
+        this.fallbackAttempted.delete(job.id);
+      }
+    }
+    if (lastStatus === 'ok') {
+      this.fallbackAttempted.delete(job.id);
     }
 
     // Update next run time
@@ -680,6 +719,52 @@ export class CronService {
       this.emitter.emitJobUpdated(updatedJob);
     }
     this.emitter.emitJobExecuted(job.id, lastStatus, lastError);
+  }
+
+  /**
+   * Window-scope rate limit: schedule a one-off retry when the provider's
+   * rolling window resets (parsed from the error, else +5h). In-process timer
+   * only - if the app restarts, the job's regular schedule is the backstop.
+   */
+  private scheduleRateLimitRetry(job: CronJob, retryAtMs: number): void {
+    const existing = this.retryTimers.get(job.id);
+    if (existing) clearTimeout(existing);
+    const delay = Math.max(60_000, retryAtMs - Date.now());
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(job.id);
+      void this.executeJob(job);
+    }, delay);
+    this.retryTimers.set(job.id, timer);
+    // Surface the retry time in the UI's "next run" field when it is sooner
+    // than the natural schedule (or the job has no further natural runs).
+    if (!job.state.nextRunAtMs || retryAtMs < job.state.nextRunAtMs) {
+      job.state.nextRunAtMs = retryAtMs;
+    }
+  }
+
+  /**
+   * Weekly-cap failover: point the job's conversation at the configured
+   * fallback model ('rateLimit.fallbackModel' - e.g. an OpenRouter or ZenMux
+   * model). Returns the fallback's display string, or null when unconfigured
+   * or unresolvable.
+   */
+  private async trySwitchToFallbackModel(job: CronJob): Promise<string | null> {
+    try {
+      const fallback = await ProcessConfig.get('rateLimit.fallbackModel');
+      if (!fallback?.providerId || !fallback.useModel) return null;
+      const configured = await ProcessConfig.get('model.config');
+      const providers = Array.isArray(configured) ? configured : [];
+      const provider = providers.find((p) => p.id === fallback.providerId && p.enabled !== false);
+      if (!provider) return null;
+      const model = { ...provider, useModel: fallback.useModel } as TProviderWithModel;
+      await this.conversationRepo.updateConversation(job.metadata.conversationId, {
+        model,
+      } as Partial<TChatConversation>);
+      return `${provider.name}/${fallback.useModel}`;
+    } catch (err) {
+      console.warn('[CronService] fallback model switch failed:', err);
+      return null;
+    }
   }
 
   /**

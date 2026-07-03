@@ -2429,5 +2429,11 @@
     "loaded": "{{model}} chargé",
     "loadedSwapped": "{{model}} chargé (VRAM libérée : {{unloaded}})",
     "loadFailed": "Échec du chargement : {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "Modèle de secours (limites)",
+    "subtitle": "Quand une tâche planifiée atteint une limite hebdomadaire, elle bascule sur ce modèle (ex. OpenRouter ou ZenMux) et réessaie. Les limites courtes réessaient automatiquement au reset.",
+    "none": "Aucun secours",
+    "pickModel": "Choisir un modèle"
   }
 }

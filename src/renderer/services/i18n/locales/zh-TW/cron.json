@@ -175,5 +175,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "來自對話的週期性執行：{{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "已達每週限額 — 正在使用備用模型 {{model}} 重試",
+    "weeklyNoFallback": "已達每週限額。請在設定 → 一般中設定備用模型以自動切換。",
+    "windowRetry": "已達速率限制 — 將於 {{time}} 自動重試"
   }
 }

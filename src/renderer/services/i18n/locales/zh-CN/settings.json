@@ -2429,5 +2429,11 @@
     "loaded": "已加载 {{model}}",
     "loadedSwapped": "已加载 {{model}}（已释放显存：{{unloaded}}）",
     "loadFailed": "加载失败：{{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "限额备用模型",
+    "subtitle": "当计划任务达到每周限额时，会切换到此模型（如 OpenRouter 或 ZenMux）并重试。短周期限额会在重置时自动重试。",
+    "none": "无备用",
+    "pickModel": "选择模型"
   }
 }

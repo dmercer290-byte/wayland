@@ -4,6 +4,7 @@ import SystemModalContent from '@/renderer/components/settings/SettingsModal/con
 import PageHeader from '@renderer/components/settings/shared/forms/PageHeader';
 import SettingsPageWrapper from '../components/SettingsPageWrapper';
 import ContextModeSelector from './ContextModeSelector';
+import RateLimitFallbackSelector from './RateLimitFallbackSelector';
 
 const GeneralSettings: React.FC = () => {
   const { t } = useTranslation();
@@ -18,6 +19,7 @@ const GeneralSettings: React.FC = () => {
       />
       <SystemModalContent />
       <ContextModeSelector />
+      <RateLimitFallbackSelector />
     </SettingsPageWrapper>
   );
 };

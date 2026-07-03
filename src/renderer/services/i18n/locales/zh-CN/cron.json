@@ -175,5 +175,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "来自会话的周期性运行：{{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "已达每周限额 — 正在使用备用模型 {{model}} 重试",
+    "weeklyNoFallback": "已达每周限额。请在设置 → 通用中配置备用模型以自动切换。",
+    "windowRetry": "已达速率限制 — 将于 {{time}} 自动重试"
   }
 }

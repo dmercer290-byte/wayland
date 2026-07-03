@@ -174,5 +174,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "Execução recorrente da conversa: {{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "Limite semanal atingido — tentando novamente com o modelo reserva {{model}}",
+    "weeklyNoFallback": "Limite semanal atingido. Configure um modelo reserva em Configurações → Geral.",
+    "windowRetry": "Limite atingido — nova tentativa automática às {{time}}"
   }
 }

@@ -2447,5 +2447,11 @@
     "loaded": "Loaded {{model}}",
     "loadedSwapped": "Loaded {{model}} (freed VRAM: {{unloaded}})",
     "loadFailed": "Load failed: {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "Rate-limit fallback model",
+    "subtitle": "When a scheduled task hits a weekly rate limit, it switches to this model (e.g. OpenRouter or ZenMux) and retries. Short-window limits retry automatically at reset.",
+    "none": "No fallback",
+    "pickModel": "Pick a model"
   }
 }

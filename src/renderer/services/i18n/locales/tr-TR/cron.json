@@ -187,5 +187,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "Sohbetten yinelenen çalışma: {{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "Haftalık limit aşıldı — yedek model {{model}} ile yeniden deneniyor",
+    "weeklyNoFallback": "Haftalık limit aşıldı. Ayarlar → Genel'den yedek model yapılandırın.",
+    "windowRetry": "Limit aşıldı — {{time}} itibarıyla otomatik yeniden denenecek"
   }
 }

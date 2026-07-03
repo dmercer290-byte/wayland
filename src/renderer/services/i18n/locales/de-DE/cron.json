@@ -174,5 +174,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "Wiederkehrende Ausführung aus Chat: {{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "Wöchentliches Limit erreicht – erneuter Versuch mit Ausweichmodell {{model}}",
+    "weeklyNoFallback": "Wöchentliches Limit erreicht. Ausweichmodell in Einstellungen → Allgemein festlegen.",
+    "windowRetry": "Ratenlimit erreicht – automatischer neuer Versuch um {{time}}"
   }
 }

@@ -174,5 +174,10 @@
   },
   "smartPrefill": {
     "descriptionScaffold": "Recurring run from chat: {{chatTitle}}"
+  },
+  "rateLimit": {
+    "weeklyFallback": "Weekly rate limit hit — retrying on fallback model {{model}}",
+    "weeklyNoFallback": "Weekly rate limit hit. Configure a fallback model in Settings → General to auto-switch.",
+    "windowRetry": "Rate limit hit — will retry automatically at {{time}}"
   }
 }

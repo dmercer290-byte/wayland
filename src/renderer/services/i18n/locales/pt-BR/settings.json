@@ -2429,5 +2429,11 @@
     "loaded": "{{model}} carregado",
     "loadedSwapped": "{{model}} carregado (VRAM liberada: {{unloaded}})",
     "loadFailed": "Falha ao carregar: {{error}}"
+  },
+  "rateLimitFallback": {
+    "title": "Modelo reserva para limites",
+    "subtitle": "Quando uma tarefa agendada atinge o limite semanal, ela muda para este modelo (ex.: OpenRouter ou ZenMux) e tenta novamente. Limites curtos são repetidos automaticamente no reset.",
+    "none": "Sem reserva",
+    "pickModel": "Escolha um modelo"
   }
 }
