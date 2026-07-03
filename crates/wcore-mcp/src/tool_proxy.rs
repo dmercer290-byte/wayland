@@ -213,6 +213,72 @@ pub fn register_single_server_tools(
     builtin_names: &[String],
     deferred: bool,
 ) {
+    single_server_tools_impl(registry, manager, server_name, builtin_names, deferred, false);
+}
+
+/// #135: idempotent variant of [`register_single_server_tools`] for re-adding
+/// an already-known server name. Same collision logic, but each proxy goes in
+/// via `replace_by_name`, so a same-named entry from the previous manager is
+/// swapped out instead of appended alongside (breaker state is preserved by
+/// `replace_by_name` by design).
+pub fn replace_single_server_tools(
+    registry: &mut wcore_tools::registry::ToolRegistry,
+    manager: &Arc<McpManager>,
+    server_name: &str,
+    builtin_names: &[String],
+    deferred: bool,
+) {
+    single_server_tools_impl(registry, manager, server_name, builtin_names, deferred, true);
+}
+
+/// The display names [`register_single_server_tools`] would register for this
+/// server. #135: lets the replace path retire entries the re-added server no
+/// longer provides (registry proxies don't expose their server, so the caller
+/// recomputes the old set from the old manager with identical logic).
+pub fn single_server_display_names(
+    manager: &Arc<McpManager>,
+    server_name: &str,
+    builtin_names: &[String],
+) -> Vec<String> {
+    manager
+        .all_tools()
+        .iter()
+        .filter(|(sn, _)| *sn == server_name)
+        .map(|(_, tool_def)| single_server_display_name(manager, server_name, builtin_names, &tool_def.name))
+        .collect()
+}
+
+fn single_server_display_name(
+    manager: &Arc<McpManager>,
+    server_name: &str,
+    builtin_names: &[String],
+    original_name: &str,
+) -> String {
+    let collides_builtin = builtin_names.iter().any(|n| n == original_name);
+    let cross_server_collision = manager.tool_name_count(original_name) > 1;
+    if collides_builtin || cross_server_collision {
+        // mcp-41 — use a DOUBLE-underscore separator between server and
+        // tool. A single `_` is ambiguous: server `foo` + tool
+        // `bar_baz` and server `foo_bar` + tool `baz` both collapse to
+        // `mcp__foo_bar_baz`, so two distinct (server,tool) pairs map to
+        // one display name and one silently shadows the other. `__`
+        // matches the documented convention (and the upstream MCP
+        // gateway naming) and keeps the mapping injective for the common
+        // case where neither name contains `__`.
+        format!("mcp__{}__{}", server_name, original_name)
+    } else {
+        original_name.to_string()
+    }
+}
+
+fn single_server_tools_impl(
+    registry: &mut wcore_tools::registry::ToolRegistry,
+    manager: &Arc<McpManager>,
+    server_name: &str,
+    builtin_names: &[String],
+    deferred: bool,
+    replace: bool,
+) {
     let all_tools = manager.all_tools();
     let server_tools: Vec<_> = all_tools
         .iter()
@@ -221,22 +287,8 @@ pub fn register_single_server_tools(
 
     for (_, tool_def) in &server_tools {
         let original_name = &tool_def.name;
-        let collides_builtin = builtin_names.iter().any(|n| n == original_name);
-        let cross_server_collision = manager.tool_name_count(original_name) > 1;
-
-        let display_name = if collides_builtin || cross_server_collision {
-            // mcp-41 — use a DOUBLE-underscore separator between server and
-            // tool. A single `_` is ambiguous: server `foo` + tool
-            // `bar_baz` and server `foo_bar` + tool `baz` both collapse to
-            // `mcp__foo_bar_baz`, so two distinct (server,tool) pairs map to
-            // one display name and one silently shadows the other. `__`
-            // matches the documented convention (and the upstream MCP
-            // gateway naming) and keeps the mapping injective for the common
-            // case where neither name contains `__`.
-            format!("mcp__{}__{}", server_name, original_name)
-        } else {
-            original_name.clone()
-        };
+        let display_name =
+            single_server_display_name(manager, server_name, builtin_names, original_name);
 
         let proxy = McpToolProxy::new(
             display_name,
@@ -248,7 +300,11 @@ pub fn register_single_server_tools(
             deferred,
         );
 
-        registry.register(Box::new(proxy));
+        if replace {
+            registry.replace_by_name(Box::new(proxy));
+        } else {
+            registry.register(Box::new(proxy));
+        }
     }
 }
 
@@ -434,6 +490,92 @@ mod tests {
             names.len(),
             "display names must be unique, got duplicates in {names:?}"
         );
+    }
+
+    /// #135 — re-adding a server must not stack duplicate registry entries.
+    /// `register_single_server_tools` twice demonstrates the append bug shape;
+    /// the replace variant keeps exactly one entry per display name.
+    #[test]
+    fn issue135_replace_variant_is_idempotent() {
+        use crate::protocol::McpToolDef;
+
+        let make_manager = || {
+            Arc::new(McpManager::new_for_test_with_tools(vec![(
+                "srv",
+                false,
+                Box::new(StubTransport) as Box<dyn McpTransport>,
+                vec![McpToolDef {
+                    name: "do_thing".into(),
+                    description: None,
+                    input_schema: json!({}),
+                }],
+            )]))
+        };
+
+        let mut registry = wcore_tools::registry::ToolRegistry::new();
+        let builtins: Vec<String> = vec![];
+
+        let first = make_manager();
+        register_single_server_tools(&mut registry, &first, "srv", &builtins, true);
+        assert_eq!(registry.tool_names(), vec!["do_thing".to_string()]);
+
+        // Re-add (fresh manager, same server name) through the replace path:
+        // still exactly one entry, now backed by the new manager.
+        let second = make_manager();
+        replace_single_server_tools(&mut registry, &second, "srv", &builtins, true);
+        assert_eq!(
+            registry.tool_names(),
+            vec!["do_thing".to_string()],
+            "replace path must swap, not append"
+        );
+
+        // Control: the plain register path appends — the exact duplicate
+        // shape #135 describes (first match wins in get(), stale routing).
+        let third = make_manager();
+        register_single_server_tools(&mut registry, &third, "srv", &builtins, true);
+        assert_eq!(
+            registry.tool_names().len(),
+            2,
+            "append path stacks a duplicate (why the replace path exists)"
+        );
+    }
+
+    /// #135 — `single_server_display_names` mirrors registration exactly, so
+    /// the CLI replace path can retire stale entries computed from the OLD
+    /// manager.
+    #[test]
+    fn issue135_display_names_mirror_registration() {
+        use crate::protocol::McpToolDef;
+
+        let manager = Arc::new(McpManager::new_for_test_with_tools(vec![(
+            "srv",
+            false,
+            Box::new(StubTransport) as Box<dyn McpTransport>,
+            vec![
+                McpToolDef {
+                    name: "read".into(), // collides with builtin → prefixed
+                    description: None,
+                    input_schema: json!({}),
+                },
+                McpToolDef {
+                    name: "plain".into(),
+                    description: None,
+                    input_schema: json!({}),
+                },
+            ],
+        )]));
+
+        let builtins = vec!["read".to_string()];
+        let mut expected = single_server_display_names(&manager, "srv", &builtins);
+        expected.sort();
+
+        let mut registry = wcore_tools::registry::ToolRegistry::new();
+        register_single_server_tools(&mut registry, &manager, "srv", &builtins, true);
+        let mut actual = registry.tool_names();
+        actual.sort();
+
+        assert_eq!(expected, actual);
+        assert!(expected.contains(&"mcp__srv__read".to_string()));
     }
 
     /// Minimal transport stub for registration tests (never driven).

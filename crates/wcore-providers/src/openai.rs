@@ -1530,6 +1530,15 @@ const MAX_SSE_BUFFER_BYTES: usize = 1024 * 1024;
 /// bounding memory; on exceed the stream errors out rather than growing.
 const MAX_TOOL_ARGS_BYTES: usize = 8 * 1024 * 1024;
 
+/// Maximum tool-call slot index accepted from a streamed `tool_calls[].index`.
+/// The index is server-supplied and `get_or_create_tool` grows the accumulator
+/// Vec to fit it, so a malicious or malfunctioning OpenAI-compatible endpoint
+/// could send a single delta with `index: 1_000_000_000` and force a
+/// billion-entry allocation before the per-call argument cap ever applies.
+/// Legitimate parallel tool calls never approach 128; on exceed the stream
+/// errors out (same fail-closed pattern as [`MAX_TOOL_ARGS_BYTES`]).
+const MAX_TOOL_CALL_SLOTS: usize = 128;
+
 pub(crate) async fn process_sse_stream(
     response: reqwest::Response,
     tx: &mpsc::Sender<LlmEvent>,
@@ -1867,8 +1876,18 @@ fn parse_sse_chunk(data: &str, state: &mut StreamState) -> Vec<LlmEvent> {
     // Tool calls
     if let Some(tool_calls) = delta["tool_calls"].as_array() {
         for tc in tool_calls {
-            let index = tc["index"].as_u64().unwrap_or(0) as usize;
-            let acc = state.get_or_create_tool(index);
+            let index = tc["index"].as_u64().unwrap_or(0);
+            // Bound the server-supplied index BEFORE the accumulator grows to
+            // fit it — compare as u64 so a value above usize::MAX can't wrap
+            // past the cap on 32-bit targets.
+            if index >= MAX_TOOL_CALL_SLOTS as u64 {
+                events.push(LlmEvent::Error(format!(
+                    "tool-call index {index} exceeds the {MAX_TOOL_CALL_SLOTS}-slot cap — \
+                     aborting stream to bound memory"
+                )));
+                return events;
+            }
+            let acc = state.get_or_create_tool(index as usize);
 
             if let Some(id) = tc["id"].as_str() {
                 acc.id = id.to_string();
@@ -2975,6 +2994,47 @@ mod tests {
             }
             other => panic!("expected Done, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_tool_call_index_above_cap_errors_stream() {
+        // #136: a hostile/buggy endpoint sending a huge `index` must not force
+        // a matching Vec allocation — the stream errors out fail-closed.
+        let mut state = StreamState::new();
+        let chunk = r#"{"choices":[{"delta":{"tool_calls":[{"index":1000000000,"id":"x","function":{"name":"f","arguments":"{}"}}]}}]}"#;
+        let events = parse_sse_chunk(chunk, &mut state);
+        assert!(
+            matches!(events.as_slice(), [LlmEvent::Error(msg)] if msg.contains("slot cap")),
+            "expected a single fail-closed Error event, got {events:?}"
+        );
+        assert!(
+            state.tool_calls.is_empty(),
+            "accumulator must not grow for a rejected index"
+        );
+    }
+
+    #[test]
+    fn test_tool_call_index_at_cap_boundary() {
+        // Highest legal slot (cap - 1) still accumulates; the cap itself errors.
+        let mut state = StreamState::new();
+        let legal = format!(
+            r#"{{"choices":[{{"delta":{{"tool_calls":[{{"index":{},"id":"x","function":{{"name":"f","arguments":"{{}}"}}}}]}}}}]}}"#,
+            MAX_TOOL_CALL_SLOTS - 1
+        );
+        let events = parse_sse_chunk(&legal, &mut state);
+        assert!(events.is_empty(), "legal index must not error: {events:?}");
+        assert_eq!(state.tool_calls.len(), MAX_TOOL_CALL_SLOTS);
+
+        let mut state = StreamState::new();
+        let illegal = format!(
+            r#"{{"choices":[{{"delta":{{"tool_calls":[{{"index":{},"id":"x","function":{{"name":"f","arguments":"{{}}"}}}}]}}}}]}}"#,
+            MAX_TOOL_CALL_SLOTS
+        );
+        let events = parse_sse_chunk(&illegal, &mut state);
+        assert!(
+            matches!(events.as_slice(), [LlmEvent::Error(_)]),
+            "index == cap must error, got {events:?}"
+        );
     }
 
     fn openai_compat() -> ProviderCompat {

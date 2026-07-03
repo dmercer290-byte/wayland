@@ -37,7 +37,9 @@ use wcore_agent::session;
 use wcore_agent::slash::{Dispatcher as SlashDispatcher, SlashError, SlashOutcome};
 use wcore_config::config::{self, CliArgs, Config, McpServerConfig, TransportType};
 use wcore_mcp::manager::McpManager;
-use wcore_mcp::tool_proxy::register_single_server_tools;
+use wcore_mcp::tool_proxy::{
+    register_single_server_tools, replace_single_server_tools, single_server_display_names,
+};
 use wcore_protocol::commands::ProtocolCommand;
 use wcore_protocol::events::{FinishReason, ProtocolEvent};
 use wcore_protocol::reader::spawn_stdin_reader;
@@ -2728,7 +2730,9 @@ async fn run_json_stream_mode(
     let mut cmd_rx = spawn_stdin_reader();
 
     // --- Pre-message phase: accept AddMcpServer commands ---
-    let mut dynamic_managers: Vec<Arc<McpManager>> = Vec::new();
+    // #135: keyed by server name so a re-add REPLACES the existing entry
+    // (idempotency) instead of appending a duplicate manager + process.
+    let mut dynamic_managers: Vec<(String, Arc<McpManager>)> = Vec::new();
     let mut first_cmd: Option<ProtocolCommand> = None;
 
     while let Some(cmd) = cmd_rx.recv().await {
@@ -2767,6 +2771,12 @@ async fn run_json_stream_mode(
                         eprintln!("[mcp] Connected to '{name}': {} tools", tool_names.len());
                         let mgr_arc = Arc::new(mgr);
                         let builtin_names = engine.tool_names();
+                        // #135: an AddMcpServer for an already-known name is a
+                        // REPLACE, not an append — otherwise every re-add leaks
+                        // a live child process and stacks duplicate registry
+                        // entries whose stale first match wins in `get()`.
+                        let existing_idx =
+                            dynamic_managers.iter().position(|(n, _)| n == &name);
                         // Wave OR: `registry_mut` returns `Option` because
                         // the registry is now Arc-shared. At this CLI boot
                         // site the engine is not running so the refcount
@@ -2774,13 +2784,43 @@ async fn run_json_stream_mode(
                         // (not panic) keeps the dynamic-MCP add-path
                         // resilient if a future change leaks a clone.
                         match engine.registry_mut() {
-                            Some(reg) => register_single_server_tools(
-                                reg,
-                                &mgr_arc,
-                                &name,
-                                &builtin_names,
-                                config.deferred.unwrap_or(true),
-                            ),
+                            Some(reg) => {
+                                if let Some(idx) = existing_idx {
+                                    let old_mgr = Arc::clone(&dynamic_managers[idx].1);
+                                    // Retire tools the re-added server no longer
+                                    // provides; same-named survivors are swapped
+                                    // in place below (keeping breaker state).
+                                    let stale = single_server_display_names(
+                                        &old_mgr,
+                                        &name,
+                                        &builtin_names,
+                                    );
+                                    let fresh = single_server_display_names(
+                                        &mgr_arc,
+                                        &name,
+                                        &builtin_names,
+                                    );
+                                    reg.retain(|t| {
+                                        !stale.iter().any(|s| s == t.name())
+                                            || fresh.iter().any(|f| f == t.name())
+                                    });
+                                    replace_single_server_tools(
+                                        reg,
+                                        &mgr_arc,
+                                        &name,
+                                        &builtin_names,
+                                        config.deferred.unwrap_or(true),
+                                    );
+                                } else {
+                                    register_single_server_tools(
+                                        reg,
+                                        &mgr_arc,
+                                        &name,
+                                        &builtin_names,
+                                        config.deferred.unwrap_or(true),
+                                    );
+                                }
+                            }
                             None => {
                                 eprintln!(
                                     "[mcp] cannot register tools for '{name}': registry is currently borrowed"
@@ -2794,7 +2834,21 @@ async fn run_json_stream_mode(
                                 continue;
                             }
                         }
-                        dynamic_managers.push(mgr_arc);
+                        if let Some(idx) = existing_idx {
+                            let (_, old_mgr) = std::mem::replace(
+                                &mut dynamic_managers[idx],
+                                (name.clone(), Arc::clone(&mgr_arc)),
+                            );
+                            // Old manager's child process must not outlive its
+                            // replacement — terminate it now that the registry
+                            // routes every call to the new instance.
+                            old_mgr.shutdown().await;
+                            eprintln!(
+                                "[mcp] '{name}' re-added — previous instance shut down (idempotent replace)"
+                            );
+                        } else {
+                            dynamic_managers.push((name.clone(), Arc::clone(&mgr_arc)));
+                        }
                         let _ = writer.emit(&ProtocolEvent::McpReady {
                             name,
                             tools: tool_names,
@@ -3274,7 +3328,7 @@ async fn run_json_stream_mode(
     for mgr in &result.mcp_managers {
         mgr.shutdown().await;
     }
-    for mgr in &dynamic_managers {
+    for (_, mgr) in &dynamic_managers {
         mgr.shutdown().await;
     }
 
