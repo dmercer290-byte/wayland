@@ -846,7 +846,7 @@ mod tests {
         let (url, _state, _pkce) = flow.build_authorize_url("http://localhost:1455/auth/callback");
         assert!(url.contains("id_token_add_organizations=true"), "url={url}");
         assert!(url.contains("codex_cli_simplified_flow=true"), "url={url}");
-        assert!(url.contains("originator=genesis"), "url={url}");
+        assert!(url.contains("originator=wayland"), "url={url}");
     }
 
     // ── Task 2.3: token manager — fresh / rotate / errors / 429 ──────
