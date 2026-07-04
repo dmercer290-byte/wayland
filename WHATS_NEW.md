@@ -29,7 +29,7 @@ Deliberately preserved:
   upstream Wayland Core project (Apache-2.0) as required.
 
 Verified: the full 55-crate workspace compiles; the binary reports
-`genesis-core 0.12.20`.
+`genesis-core 0.12.22`.
 
 ## 2. Upstream Bug Fixes
 
