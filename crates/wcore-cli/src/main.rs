@@ -2469,7 +2469,7 @@ fn note_deferred_mcp_connect(
     engine: &mut wcore_agent::engine::AgentEngine,
     writer: &ProtocolWriter,
     output: &Arc<dyn OutputSink>,
-    dynamic_managers: &mut Vec<Arc<McpManager>>,
+    dynamic_managers: &mut Vec<(String, Arc<McpManager>)>,
 ) -> Option<(Arc<McpManager>, HashMap<String, McpServerConfig>)> {
     match outcome {
         Ok(mgr) => {
@@ -2495,7 +2495,7 @@ fn integrate_deferred_mcp(
     mgr: Arc<McpManager>,
     resolved_servers: &HashMap<String, McpServerConfig>,
     writer: &ProtocolWriter,
-    dynamic_managers: &mut Vec<Arc<McpManager>>,
+    dynamic_managers: &mut Vec<(String, Arc<McpManager>)>,
 ) -> bool {
     let builtin_names = engine.tool_names();
     let Some(reg) = engine.registry_mut() else {
@@ -2508,7 +2508,10 @@ fn integrate_deferred_mcp(
     for event in mcp_failed_events_for(&mgr) {
         let _ = writer.emit(&event);
     }
-    dynamic_managers.push(mgr);
+    // #135 keying: deferred config-MCP managers span multiple servers, so
+    // they get a synthetic key the AddMcpServer replace lookup never matches
+    // (re-adds of their servers are stopped earlier by the connected guard).
+    dynamic_managers.push(("\0config-deferred".to_string(), mgr));
     true
 }
 
