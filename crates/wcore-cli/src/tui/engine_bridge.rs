@@ -69,9 +69,12 @@ pub struct ChannelEmitter {
     /// GHSA-8r7g: sync correlation→secret lookup so a synthesized gate frame
     /// carries the unguessable `resume_token` for a bridge-backed approval
     /// (crucible/egress), and EMPTY for a regular tool (no bridge entry —
-    /// resolved via `ToolApprove`). `None` (ACP relay + unit tests) keeps the
-    /// legacy behavior of emitting the `call_id` as the resume handle; the ACP
-    /// projection's endpoint hardening is a separate follow-up.
+    /// resolved via `ToolApprove`). All production transports (TUI and, since
+    /// wayland#497, the ACP relay) pass `Some`; `None` (unit tests only)
+    /// falls back to the legacy call_id-as-token emit. NOTE: the ACP
+    /// PROJECTION still drops `resume_token` and its resolve endpoint stays
+    /// call_id-keyed — carrying/accepting the secret end-to-end on ACP is
+    /// tracked separately (see the RelayEmitter field doc).
     approval_bridge: Option<Arc<wcore_agent::approval::ApprovalBridge>>,
 }
 
@@ -99,7 +102,8 @@ impl ChannelEmitter {
     /// TUI/ACP emitters where the engine may also emit its own gate frame.
     /// GHSA-8r7g: `approval_bridge` supplies the sync correlation→secret lookup
     /// used to stamp the unguessable `resume_token` onto a bridge-backed gate
-    /// frame (`Some` for the TUI; `None` for the ACP relay keeps legacy emit).
+    /// frame (`Some` for the TUI and, since wayland#497, the ACP relay;
+    /// `None` only in unit tests).
     pub fn with_dedupe(
         tx: UnboundedSender<ProtocolEvent>,
         synthesized: DedupeSet,
@@ -702,6 +706,7 @@ fn mcp_config_from_target(target: &str) -> Result<wcore_config::config::McpServe
             headers: None,
             deferred: Some(false),
             allow_local: false,
+            only_for_assistant: None,
         });
     }
     let mut parts = target.split_whitespace();
@@ -720,6 +725,7 @@ fn mcp_config_from_target(target: &str) -> Result<wcore_config::config::McpServe
         headers: None,
         deferred: Some(false),
         allow_local: false,
+        only_for_assistant: None,
     })
 }
 
@@ -1883,6 +1889,24 @@ impl TuiEngine {
         name: String,
         mut config: wcore_config::config::McpServerConfig,
     ) {
+        // #135: idempotency. If a server with this name is already connected,
+        // re-adding it must NOT spawn a duplicate connection (a second stdio
+        // child process for stdio transports). Check the live registry BEFORE
+        // any connect, report the no-op, and return. Covers the plain `/mcp add`
+        // path and the Forge grant path (both funnel through here).
+        let already_connected = engine.lock().await.mcp_server_connected(&name);
+        if already_connected {
+            let _ = tx.send(ProtocolEvent::Info {
+                msg_id: String::new(),
+                message: format!(
+                    "MCP server '{name}' is already connected — keeping the existing \
+                     connection (no duplicate started). To change its settings, remove \
+                     it first, then add it again."
+                ),
+            });
+            return;
+        }
+
         // Resolve `${cred:KEY}` header references just before connecting. This
         // is the single-server live-add path: per the `mcp_cred_refs` contract,
         // a resolution failure (missing key / store error / malformed ref) is a

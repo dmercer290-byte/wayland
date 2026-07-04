@@ -69,6 +69,20 @@ enum ConnectOutcome {
     TimedOut(Duration),
 }
 
+/// Outcome of a transport-successful MCP tool call ([`McpManager::call_tool`]).
+///
+/// `text` is the concatenated content; `is_error` carries the MCP `isError`
+/// flag. A tool-level failure (argument validation, an API error the tool
+/// surfaces) is a SUCCESSFUL call with `is_error == true`, distinct from a
+/// transport `Err`. Callers must inspect `is_error`, not just `Ok`/`Err`, so an
+/// MCP tool failure is not mistaken for success (#475). The `text` still carries
+/// the tool's error message so the model can read it and recover.
+#[derive(Debug, Clone)]
+pub struct McpCallOutcome {
+    pub text: String,
+    pub is_error: bool,
+}
+
 /// Manages connections to multiple MCP servers
 pub struct McpManager {
     servers: HashMap<String, McpServer>,
@@ -348,13 +362,19 @@ impl McpManager {
             .unwrap_or(false)
     }
 
-    /// Execute a tool on a specific server
+    /// Execute a tool on a specific server.
+    ///
+    /// Returns [`McpCallOutcome`] on a transport-successful call: `text` is the
+    /// concatenated content, `is_error` is the MCP `isError` flag. A tool-level
+    /// failure (e.g. argument validation) is a SUCCESSFUL call with
+    /// `is_error == true` — NOT a transport `Err` — so callers must inspect the
+    /// flag, not just the `Ok`/`Err` split (#475).
     pub async fn call_tool(
         &self,
         server_name: &str,
         tool_name: &str,
         arguments: serde_json::Value,
-    ) -> Result<String, McpError> {
+    ) -> Result<McpCallOutcome, McpError> {
         let server = self
             .servers
             .get(server_name)
@@ -401,7 +421,10 @@ impl McpManager {
             }
         }
 
-        Ok(text_parts.join("\n"))
+        Ok(McpCallOutcome {
+            text: text_parts.join("\n"),
+            is_error: tool_result.is_error,
+        })
     }
 
     /// Get names of all connected servers.
@@ -498,6 +521,22 @@ impl McpManager {
             && let Err(e) = server.transport.close().await
         {
             warn!(server = %server_name, error = %e, "[mcp] close_server failed");
+        }
+    }
+
+    /// Test-only constructor: build a manager with an explicit health map
+    /// and no live servers. wayland#551 — lets `mcp_failed_events_for`-style
+    /// consumers be tested against `Failed` / `TimedOut` entries, which the
+    /// other test constructors can't produce (they mark everything Ready).
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn new_for_test_with_health(health: Vec<(&str, McpServerHealth)>) -> Self {
+        Self {
+            servers: HashMap::new(),
+            health: health
+                .into_iter()
+                .map(|(name, h)| (name.to_string(), h))
+                .collect(),
+            next_id: AtomicU64::new(10),
         }
     }
 
@@ -917,6 +956,7 @@ mod tests {
             headers: None,
             deferred: None,
             allow_local: false,
+            only_for_assistant: None,
         };
         let mut configs = HashMap::new();
         configs.insert("hung-server".to_string(), hung);
@@ -955,6 +995,7 @@ mod tests {
             headers: None,
             deferred: None,
             allow_local: false,
+            only_for_assistant: None,
         };
         // A real MCP handshake fixture: answer initialize + tools/list.
         let healthy_script = r#"
@@ -974,6 +1015,7 @@ mod tests {
             headers: None,
             deferred: None,
             allow_local: false,
+            only_for_assistant: None,
         };
         let mut configs = HashMap::new();
         configs.insert("hung".to_string(), hung);
@@ -1008,6 +1050,7 @@ mod tests {
             headers: None,
             deferred: None,
             allow_local: false,
+            only_for_assistant: None,
         };
         let mut configs = HashMap::new();
         configs.insert("hung".to_string(), hung);
@@ -1042,6 +1085,7 @@ mod tests {
             headers: None,
             deferred: None,
             allow_local: false,
+            only_for_assistant: None,
         };
         let mut configs = HashMap::new();
         configs.insert("broken".to_string(), broken);
@@ -1083,6 +1127,7 @@ mod tests {
             headers: None,
             deferred: None,
             allow_local: false,
+            only_for_assistant: None,
         };
         let hung = McpServerConfig {
             transport: TransportType::Stdio,
@@ -1093,6 +1138,7 @@ mod tests {
             headers: None,
             deferred: None,
             allow_local: false,
+            only_for_assistant: None,
         };
         let mut configs = HashMap::new();
         configs.insert("healthy".to_string(), healthy);

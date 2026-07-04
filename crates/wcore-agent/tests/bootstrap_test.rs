@@ -392,6 +392,144 @@ async fn bootstrap_no_mcp_when_no_servers() {
     assert!(result.mcp_managers.is_empty());
 }
 
+/// wayland#551 — `defer_config_mcp(true)` must skip the config-server
+/// connect entirely: build() returns without dialing (the configured
+/// server here would hang the full 30s per-server budget if dialed —
+/// the exact stall that blew hosts' 30s ready timeout), registers no
+/// #111 — a config MCP server marked `only_for_assistant` must be injected
+/// ONLY for a matching active assistant. Overwatch #613 requires proving a
+/// non-Concierge (or unidentified) session does NOT receive the scoped server
+/// while a Concierge session DOES. The server command exits immediately, so a
+/// DIALED server still yields a manager (connect_all is non-fatal per-server);
+/// a FILTERED server is never dialed, so `has_mcp` stays false.
+#[tokio::test]
+#[serial]
+async fn bootstrap_scopes_marked_mcp_server_to_matching_assistant() {
+    use wcore_config::config::{McpServerConfig, TransportType};
+
+    let (_plugins, _env) = isolated_plugins();
+    let scoped_config = || {
+        let mut config = minimal_config();
+        config.mcp.servers.insert(
+            "diag".into(),
+            McpServerConfig {
+                transport: TransportType::Stdio,
+                command: Some("sleep".into()),
+                args: Some(vec!["0".into()]), // exits immediately → fast connect
+                env: None,
+                url: None,
+                headers: None,
+                deferred: None,
+                allow_local: false,
+                only_for_assistant: Some(vec!["concierge".into()]),
+            },
+        );
+        config
+    };
+    let workdir = tempfile::TempDir::new().expect("workdir");
+
+    // Unidentified session (fail-closed): the marked server is filtered out and
+    // never dialed.
+    let excluded = AgentBootstrap::new(
+        scoped_config(),
+        workdir.path().to_str().unwrap(),
+        null_output(),
+    )
+    .active_assistant(None)
+    .build()
+    .await
+    .unwrap();
+    assert!(
+        !excluded.has_mcp,
+        "a scoped server must NOT reach an unidentified session (fail-closed)"
+    );
+    assert!(excluded.mcp_managers.is_empty());
+
+    // Non-matching assistant: also filtered out.
+    let wrong = AgentBootstrap::new(
+        scoped_config(),
+        workdir.path().to_str().unwrap(),
+        null_output(),
+    )
+    .active_assistant(Some("default".into()))
+    .build()
+    .await
+    .unwrap();
+    assert!(
+        !wrong.has_mcp,
+        "a scoped server must NOT reach a non-matching assistant"
+    );
+
+    // Concierge session: the scoped server IS in the dialed set.
+    let included = AgentBootstrap::new(
+        scoped_config(),
+        workdir.path().to_str().unwrap(),
+        null_output(),
+    )
+    .active_assistant(Some("concierge".into()))
+    .build()
+    .await
+    .unwrap();
+    assert!(
+        included.has_mcp,
+        "the Concierge session MUST receive its scoped server"
+    );
+    assert!(!included.mcp_managers.is_empty());
+}
+
+/// MCP tools, and reports has_mcp=false (the caller advertises MCP
+/// capability itself for declared-but-deferred servers).
+#[tokio::test]
+#[serial]
+async fn bootstrap_defer_config_mcp_skips_connect() {
+    use wcore_config::config::{McpServerConfig, TransportType};
+
+    let (_plugins, _env) = isolated_plugins();
+    let mut config = minimal_config();
+    config.mcp.servers.insert(
+        "hang".into(),
+        McpServerConfig {
+            transport: TransportType::Stdio,
+            // Starts fine, never speaks MCP — a dialed connect would sit in
+            // the handshake until the 30s per-server timeout.
+            command: Some("sleep".into()),
+            args: Some(vec!["300".into()]),
+            env: None,
+            url: None,
+            headers: None,
+            deferred: None,
+            allow_local: false,
+            only_for_assistant: None,
+        },
+    );
+    let workdir = tempfile::TempDir::new().expect("workdir");
+
+    let start = std::time::Instant::now();
+    let result = AgentBootstrap::new(config, workdir.path().to_str().unwrap(), null_output())
+        .defer_config_mcp(true)
+        .build()
+        .await
+        .unwrap();
+
+    // Generous bound: well under the 30s connect budget the skipped dial
+    // would have burned, far above any honest build cost.
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(15),
+        "deferred build must not dial config MCP servers (took {:?})",
+        start.elapsed()
+    );
+    assert!(!result.has_mcp, "deferred servers must not set has_mcp");
+    assert!(result.mcp_managers.is_empty());
+    assert!(
+        !result
+            .engine
+            .tool_names()
+            .iter()
+            .any(|n| n.contains("hang")),
+        "no tools from the deferred server may be registered at build time"
+    );
+}
+
 #[tokio::test]
 async fn bootstrap_with_custom_system_prompt() {
     let mut config = minimal_config();

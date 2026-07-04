@@ -1104,6 +1104,171 @@ fn loop_call_signature(
     h.finish()
 }
 
+/// #475 — the *failure*-loop backstop that complements [`LoopGuard`].
+///
+/// `LoopGuard` keys on the full `(tool, args, result)` signature, so it only
+/// trips when a call repeats IDENTICALLY. A model that keeps calling the same
+/// tool with DIFFERENT (still-wrong) arguments — e.g. retrying a required-field
+/// validation error with a new guess each time — produces a fresh signature on
+/// every call and slips past `LoopGuard`, burning the turn's budget mid-thought
+/// (the #475 `start_google_auth(service_name)` case).
+///
+/// `FailureGuard` counts CONSECUTIVE error results (`is_error == true`) across
+/// guarded tools, regardless of tool identity or arguments. Any success resets
+/// the streak, so productive work (which mixes in successful calls) is never
+/// cut. The threshold is read once per run from
+/// `GENESIS_MAX_CONSECUTIVE_TOOL_FAILURES` (default 10); `0` disables the
+/// breaker.
+///
+/// The count is GLOBAL (not per-tool) on purpose (#160): an early version keyed
+/// the streak on the tool NAME and reset it whenever the failing tool changed,
+/// so a loop that ALTERNATES failing tools — A fails, B fails, A fails, B
+/// fails… — never accumulated past 1 for either name and slipped the cap
+/// entirely (and if the content also varied, `LoopGuard` missed it too, letting
+/// the loop burn to the turn cap). Counting failures across tools closes that
+/// gap while preserving the #475 same-tool contract: N consecutive same-tool
+/// failures still trip at exactly N, and a single failure followed by a success
+/// still resets to 0 (recoverable `isError` is never hard-aborted).
+///
+/// Precedence (deterministic, NOT timing-dependent): the run loop checks the
+/// failure-break BEFORE the identical-signature loop-break, so `FailureGuard`
+/// OWNS failing loops — a failing loop always exits Continue-able
+/// (`finish_reason=max_turns`, #457). `LoopGuard` then handles only the
+/// identical-SUCCESS no-progress case (`FailureGuard` ignores successes).
+///
+/// Scope: the shell tool (`Bash`) is EXCLUDED at the observe site — its
+/// `is_error` is just a non-zero exit, so a legitimate coding burst (build,
+/// clippy, test all failing) must not be read as a stuck loop. Because Bash is
+/// filtered before `observe`, a Bash failure neither increments nor resets the
+/// streak (it is neutral). Identical Bash retries are still caught by
+/// `LoopGuard`.
+struct FailureGuard {
+    count: u32,
+    threshold: u32,
+}
+
+impl FailureGuard {
+    fn from_env() -> Self {
+        let threshold = std::env::var("GENESIS_MAX_CONSECUTIVE_TOOL_FAILURES")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(10);
+        Self {
+            count: 0,
+            threshold,
+        }
+    }
+
+    /// Record one guarded-tool outcome. Returns `Some(count)` once guarded tools
+    /// have returned an error `>= threshold` times in a row, counting across
+    /// tool identities (#160). Any success resets the streak to 0.
+    fn observe(&mut self, is_error: bool) -> Option<u32> {
+        if self.threshold == 0 {
+            return None;
+        }
+        if !is_error {
+            self.count = 0;
+            return None;
+        }
+        self.count = self.count.saturating_add(1);
+        (self.count >= self.threshold).then_some(self.count)
+    }
+}
+
+#[cfg(test)]
+mod failure_guard_tests {
+    use super::FailureGuard;
+
+    fn guard(threshold: u32) -> FailureGuard {
+        FailureGuard {
+            count: 0,
+            threshold,
+        }
+    }
+
+    #[test]
+    fn trips_on_consecutive_same_tool_failures() {
+        let mut g = guard(3);
+        assert_eq!(g.observe(true), None, "1st");
+        assert_eq!(g.observe(true), None, "2nd");
+        assert_eq!(
+            g.observe(true),
+            Some(3),
+            "3rd consecutive failure must trip"
+        );
+    }
+
+    #[test]
+    fn varied_args_still_accumulate() {
+        // #475: the model retries with different (still-wrong) args each time.
+        // FailureGuard ignores args, so the streak accumulates and trips where
+        // the signature-based LoopGuard never would.
+        let mut g = guard(3);
+        g.observe(true);
+        g.observe(true);
+        assert_eq!(g.observe(true), Some(3));
+    }
+
+    #[test]
+    fn a_success_resets_the_streak() {
+        let mut g = guard(3);
+        g.observe(true);
+        g.observe(true);
+        assert_eq!(g.observe(false), None, "success resets");
+        assert_eq!(g.observe(true), None, "streak restarts at 1");
+        assert_eq!(g.observe(true), None);
+        assert_eq!(g.observe(true), Some(3));
+    }
+
+    #[test]
+    fn interleaved_failing_tools_still_accumulate() {
+        // #160: the count is GLOBAL — `observe` no longer takes a tool name, so
+        // the call site records a failure regardless of which tool produced it.
+        // At the unit level this proves the count accumulates across successive
+        // errors and trips at the threshold; the cross-tool ALTERNATION guarantee
+        // (which the old per-tool key reset away) is exercised end-to-end by the
+        // `interleaved_failing_tools_converge_via_global_failure_cap` E2E test.
+        let mut g = guard(4);
+        assert_eq!(g.observe(true), None, "1");
+        assert_eq!(g.observe(true), None, "2");
+        assert_eq!(g.observe(true), None, "3");
+        assert_eq!(
+            g.observe(true),
+            Some(4),
+            "4th consecutive guarded-tool failure must trip"
+        );
+    }
+
+    #[test]
+    fn a_success_between_interleaved_failures_resets() {
+        // #160 companion: recoverable failures interspersed with a success never
+        // hard-abort — the success (from any tool) zeroes the streak.
+        let mut g = guard(3);
+        g.observe(true); // a
+        g.observe(true); // b
+        assert_eq!(g.observe(false), None, "a success resets the global streak");
+        assert_eq!(g.observe(true), None, "restart at 1");
+        assert_eq!(g.observe(true), None, "2");
+        assert_eq!(g.observe(true), Some(3), "3");
+    }
+
+    #[test]
+    fn threshold_zero_disables() {
+        let mut g = guard(0);
+        for _ in 0..100 {
+            assert_eq!(g.observe(true), None, "0 disables the breaker");
+        }
+    }
+
+    #[test]
+    fn successes_never_trip() {
+        let mut g = guard(2);
+        for _ in 0..100 {
+            assert_eq!(g.observe(false), None);
+        }
+    }
+}
+
 #[cfg(test)]
 mod loop_guard_tests {
     use super::{LoopGuard, loop_call_signature};
@@ -2133,6 +2298,29 @@ impl AgentEngine {
     /// [`Self::registry_mut`] which holds the `Arc::get_mut` invariant.
     pub fn tools(&self) -> Arc<ToolRegistry> {
         self.tools.clone()
+    }
+
+    /// #135 (pure, no `self`): does any tool def carry real provenance for the
+    /// MCP server `name`? Extracted so the engine accessor and its unit test
+    /// share one definition. Matches on `ToolDef::server` (real provenance,
+    /// #86), never the `mcp__` name prefix — a bare-named MCP tool still counts.
+    pub fn mcp_server_has_tools(defs: &[wcore_types::tool::ToolDef], name: &str) -> bool {
+        defs.iter().any(|t| t.server.as_deref() == Some(name))
+    }
+
+    /// #135: idempotency probe for the `/mcp add` entry points. Returns true
+    /// when server `name` already has ≥1 tool registered on the live registry,
+    /// so a caller can skip a duplicate connect (and, for stdio transports, a
+    /// duplicate child process). Deferred tools are registered eagerly as
+    /// name-only stubs, so a just-added deferred server is detected too.
+    ///
+    /// LIMITATION: keys on tool provenance only. A server that exposes ONLY
+    /// resources or prompts (zero tools) leaves no tool defs, so it is not
+    /// detected and a re-add still reconnects. That is the SAME behavior as
+    /// before this fix (no regression) — closing it needs a live
+    /// connected-server registry keyed by name, tracked as a follow-up.
+    pub fn mcp_server_connected(&self, name: &str) -> bool {
+        Self::mcp_server_has_tools(&self.tools().to_tool_defs(), name)
     }
 
     /// Initialize a new session for this engine run
@@ -3731,23 +3919,27 @@ impl AgentEngine {
 
     /// AUDIT A1 / E-C1 / A2 — shared clean-termination path for the
     /// non-natural loop exits (turn cap, budget cap, context ceiling,
-    /// host cancel).
+    /// host cancel, no-progress loop).
     ///
-    /// Every one of these is a *failure verdict*: the model did not
-    /// close the task on its own. They run the identical session-end
-    /// bookkeeping the `MaxTurns` exit already did — `fire_on_session_end`,
-    /// `save_session`, and the two learning observes — then return an
-    /// `AgentResult` with `StopReason::MaxTurns` (the engine's existing
-    /// "ran out of budget" verdict; `observe_*` already maps it to
-    /// `Failure` and `FinishReason::from_stop_reason` maps it to
-    /// `Error`). The distinct, user-visible reason is surfaced via the
-    /// `emit_error` call the caller makes before invoking this — the
-    /// `StopReason` enum lives in `wcore-types` and is not extended
-    /// here.
+    /// Every one of these is a *failure verdict*: the model did not close the
+    /// task on its own. They run the identical session-end bookkeeping —
+    /// `fire_on_session_end`, `save_session`, and the two learning observes —
+    /// then return an `AgentResult` with `StopReason::MaxTurns` (the engine's
+    /// existing "ran out of budget" verdict; `observe_*` maps it to `Failure`).
+    ///
+    /// #457: the host-facing `finish_reason` is passed IN by the caller, not
+    /// derived here, because the exits are NOT interchangeable — the budget
+    /// guardrails where "Continue" (resume with fresh headroom) is the right
+    /// affordance pass `FinishReason::MaxTurns`: the `max_turns` cap (#457) and
+    /// the per-tool failure cap (#475). A context ceiling / budget cap /
+    /// loop-break stays `FinishReason::Length` (Continue would not help). The
+    /// distinct human-readable reason is surfaced via the `emit_info`/
+    /// `emit_error` call the caller makes before invoking this.
     async fn finish_run_terminated(
         &mut self,
         user_input: &str,
         turn: usize,
+        finish_reason: FinishReason,
     ) -> Result<AgentResult, AgentError> {
         self.fire_on_session_end(turn).await;
         self.save_session();
@@ -3757,7 +3949,7 @@ impl AgentEngine {
         Ok(AgentResult {
             text: String::new(),
             stop_reason: StopReason::MaxTurns,
-            finish_reason: FinishReason::Length,
+            finish_reason,
             usage: self.total_usage.clone(),
             turns: turn,
             active_window_percent: self.active_window_percent_now(&self.model, 0),
@@ -4164,6 +4356,10 @@ impl AgentEngine {
         // no-progress loops that `max_turns = None` leaves unguarded. Terminates
         // the run if the same tool call keeps producing the same result.
         let mut loop_guard = LoopGuard::from_env();
+        // #475: complementary failure-loop breaker — trips when the SAME tool
+        // keeps failing with DIFFERENT (still-wrong) args, which LoopGuard's
+        // signature keying misses (a validation-error retry loop).
+        let mut failure_guard = FailureGuard::from_env();
         let mut turn: usize = 0;
         loop {
             // AUDIT A2 — cooperative cancellation check between turns.
@@ -4191,7 +4387,10 @@ impl AgentEngine {
                 self.output.emit_info(&format!(
                     "Run stopped: reached the configured max_turns limit ({limit})."
                 ));
-                return self.finish_run_terminated(user_input, turn).await;
+                // #457: the turn cap is a "Continue"-able exit, not a failure.
+                return self
+                    .finish_run_terminated(user_input, turn, FinishReason::MaxTurns)
+                    .await;
             }
             // Fire on_turn_start hooks at the top of each iteration so Rust
             // hooks can override the model or inject prompt messages before
@@ -4211,7 +4410,9 @@ impl AgentEngine {
                 if let Some(reason) = self.apply_pre_turn_outcome(outcome) {
                     self.output
                         .emit_info(&format!("Run stopped by on_turn_start hook: {reason}"));
-                    return self.finish_run_terminated(user_input, turn).await;
+                    return self
+                        .finish_run_terminated(user_input, turn, FinishReason::Length)
+                        .await;
                 }
             }
 
@@ -4565,7 +4766,10 @@ impl AgentEngine {
                         ),
                         false,
                     );
-                    return self.finish_run_terminated(user_input, turn).await;
+                    // Context ceiling: a bigger budget is needed, not more turns.
+                    return self
+                        .finish_run_terminated(user_input, turn, FinishReason::Length)
+                        .await;
                 }
             }
 
@@ -5193,7 +5397,9 @@ impl AgentEngine {
                     ),
                     false,
                 );
-                return self.finish_run_terminated(user_input, turn + 1).await;
+                return self
+                    .finish_run_terminated(user_input, turn + 1, FinishReason::Length)
+                    .await;
             }
 
             if tool_calls.is_empty() {
@@ -5584,6 +5790,9 @@ impl AgentEngine {
             // Runaway-loop breaker: set to the offending (tool, repeat-count) the
             // first time a call+outcome signature trips the window threshold.
             let mut loop_break: Option<(String, u32)> = None;
+            // #475 failure-loop breaker: set to the offending (tool, failure-count)
+            // the first time a tool's consecutive-error streak trips the threshold.
+            let mut failure_break: Option<(String, u32)> = None;
             // Display tool results AND populate the matching ToolCallTrace.
             for result in &outcome.results {
                 if let ContentBlock::ToolResult {
@@ -5623,6 +5832,31 @@ impl AgentEngine {
                         if let Some(count) = loop_guard.observe(sig) {
                             loop_break = Some((tool_name.to_string(), count));
                         }
+                    }
+
+                    // #475/#160: consecutive-failure breaker — counts guarded-tool
+                    // error results GLOBALLY (tool identity and args both ignored),
+                    // so both a same-tool validation-error retry loop AND a loop
+                    // that alternates failing tools accumulate. Any success resets
+                    // the streak. First trip wins.
+                    //
+                    // Scope guard: the cap targets structured-tool retry loops
+                    // (e.g. an MCP tool the model keeps calling with wrong args).
+                    // It deliberately EXCLUDES the shell tool — `Bash` sets
+                    // is_error on any non-zero exit, so a legitimate coding burst
+                    // (build fail, clippy fail, test fail, grep no-match) is a
+                    // stream of failures that is NOT a stuck loop and must not
+                    // abort the run. Bash is filtered here BEFORE `observe`, so a
+                    // Bash outcome is neutral — it neither increments nor resets
+                    // the streak. Identical Bash retries are still caught by
+                    // LoopGuard above. Unresolved names ("unknown") are also
+                    // skipped (ambiguous provenance).
+                    if failure_break.is_none()
+                        && tool_name != "Bash"
+                        && tool_name != "unknown"
+                        && let Some(count) = failure_guard.observe(*is_error)
+                    {
+                        failure_break = Some((tool_name.to_string(), count));
                     }
 
                     self.output.emit_tool_result(tool_name, *is_error, content);
@@ -5708,12 +5942,47 @@ impl AgentEngine {
                 }
             }
 
+            // #475/#160 failure-loop breaker tripped: guarded tools have failed
+            // `count` times in a row (tool identity and args both ignored, so a
+            // validation-error retry loop that varies its arguments AND a loop
+            // that alternates failing tools both accumulate). Checked BEFORE
+            // the identical-signature loop-break below so the failing-loop case
+            // is deterministically owned by the failure cap (independent of
+            // circuit-breaker timing): a failing loop always exits Continue-able
+            // (finish_reason=max_turns), while the loop-break handles only the
+            // identical-SUCCESS no-progress case. Mirrors the loop-break path
+            // (repair the now-unanswered tool_use blocks, emit a user-visible
+            // error, finish; tool results for this turn are not committed yet,
+            // hence `turn + 1`).
+            if let Some((failing_tool, count)) = failure_break {
+                self.repair_orphaned_tool_use();
+                self.output.emit_error(
+                    &format!(
+                        "Run stopped: tool calls failed {count} times in a row (most \
+                         recently `{failing_tool}`). Retrying with new guesses is burning \
+                         the turn — check the tool's required arguments (or its error \
+                         message) and fix the call, or try a different approach. (Tune or \
+                         disable via GENESIS_MAX_CONSECUTIVE_TOOL_FAILURES.)"
+                    ),
+                    false,
+                );
+                // #475 + #457: the retry-cap is a budget guardrail, not a hard
+                // failure — surface finish_reason=max_turns so the host offers
+                // "Continue" (resume with fresh headroom) rather than a
+                // model-failure UX.
+                return self
+                    .finish_run_terminated(user_input, turn + 1, FinishReason::MaxTurns)
+                    .await;
+            }
+
             // Runaway-loop breaker tripped: the agent is repeating the same tool
-            // call to no effect. Stop the run cleanly with guidance instead of
-            // looping and burning tokens. Mirrors the budget-cap termination
-            // path: repair the assistant's now-unanswered tool_use blocks, emit a
-            // user-visible error, and finish (tool results for this turn were not
-            // committed to history yet, hence `turn + 1`).
+            // call to no effect (an identical (tool, args, result) signature —
+            // for failing loops the failure cap above fires first). Stop the run
+            // cleanly with guidance instead of looping and burning tokens.
+            // Mirrors the budget-cap termination path: repair the assistant's
+            // now-unanswered tool_use blocks, emit a user-visible error, and
+            // finish (tool results for this turn were not committed to history
+            // yet, hence `turn + 1`).
             if let Some((looping_tool, count)) = loop_break {
                 self.repair_orphaned_tool_use();
                 self.output.emit_error(
@@ -5726,7 +5995,9 @@ impl AgentEngine {
                     ),
                     false,
                 );
-                return self.finish_run_terminated(user_input, turn + 1).await;
+                return self
+                    .finish_run_terminated(user_input, turn + 1, FinishReason::Length)
+                    .await;
             }
 
             // W1 F9: emit one TurnTrace per turn. Hosts that opt in via
@@ -9023,6 +9294,42 @@ mod set_config_tests {
             capped.len(),
             5,
             "all server:None tools kept (correctness > strict limit for built-ins)"
+        );
+    }
+
+    /// #135 — the `/mcp add` idempotency probe keys on real provenance
+    /// (`ToolDef::server`), NOT the tool-name shape. A connected server is
+    /// detected via its bare-named OR `mcp__`-prefixed tools; a not-connected
+    /// name (or a same-named built-in with `server: None`) must NOT match, so
+    /// re-adding a live server no-ops instead of spawning a duplicate process.
+    #[test]
+    fn mcp_server_connected_probe_keys_on_provenance() {
+        // bare_mcp_tool → server: Some("db"); cap_mcp_tool → server: Some("srv").
+        let defs = vec![
+            builtin_tool("execute_sql"), // server: None — name shape only
+            bare_mcp_tool("execute_sql"),
+            cap_mcp_tool("mcp__srv__query"),
+        ];
+
+        assert!(
+            super::AgentEngine::mcp_server_has_tools(&defs, "db"),
+            "server with a bare-named tool must be detected as connected"
+        );
+        assert!(
+            super::AgentEngine::mcp_server_has_tools(&defs, "srv"),
+            "server with a mcp__-prefixed tool must be detected as connected"
+        );
+        assert!(
+            !super::AgentEngine::mcp_server_has_tools(&defs, "notconnected"),
+            "an unconnected server name must not match"
+        );
+        assert!(
+            !super::AgentEngine::mcp_server_has_tools(&defs, "execute_sql"),
+            "a built-in name (server: None) must never be read as a connected server"
+        );
+        assert!(
+            !super::AgentEngine::mcp_server_has_tools(&[], "db"),
+            "empty registry → nothing connected"
         );
     }
 

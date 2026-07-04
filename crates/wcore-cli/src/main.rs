@@ -227,6 +227,14 @@ struct Cli {
     #[arg(long, value_name = "NAME")]
     agent: Option<String>,
 
+    /// #111 — the host's active assistant identity, for per-assistant MCP
+    /// scoping. A config MCP server marked `only_for_assistant` is injected
+    /// only when this matches its allow-list (fail-closed otherwise). Distinct
+    /// from `--agent` (persona/system-prompt); the desktop host sets this when
+    /// spawning the json-stream engine.
+    #[arg(long, value_name = "NAME", env = "GENESIS_ASSISTANT")]
+    assistant: Option<String>,
+
     /// List built-in agent personas and exit.
     #[arg(long)]
     list_agents: bool,
@@ -1465,7 +1473,15 @@ async fn run() -> anyhow::Result<ExitCode> {
 
     // Branch to JSON stream mode
     if cli.json_stream {
-        run_json_stream_mode(config, &cwd, resume, cli.session_id, cli.force).await?;
+        run_json_stream_mode(
+            config,
+            &cwd,
+            resume,
+            cli.session_id,
+            cli.force,
+            cli.assistant.clone(),
+        )
+        .await?;
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -1753,6 +1769,27 @@ fn approval_mode_to_session(
     }
 }
 
+/// Boot-time approval posture from local trust sources: the config's
+/// `[default] approval_mode`, with `--force` (or `GENESIS_ALLOW_WIRE_FORCE`,
+/// surfaced by the caller as `force`) overriding to `Force`. This is the
+/// LOCAL operator's posture — distinct from a wire-originated mode change,
+/// which goes through the GHSA-8r7g-gated `set_mode_from_wire`.
+///
+/// wayland#241: both the TUI (`run_tui_mode`) and json-stream
+/// (`run_json_stream_mode`) paths seed through this one helper so they can't
+/// drift — the json-stream path previously skipped the config seed entirely,
+/// silently ignoring a user's `approval_mode = "auto-edit"` / `"force"`.
+fn initial_session_mode(
+    config_mode: wcore_config::config::ApprovalMode,
+    force: bool,
+) -> wcore_protocol::commands::SessionMode {
+    if force {
+        wcore_protocol::commands::SessionMode::Force
+    } else {
+        approval_mode_to_session(config_mode)
+    }
+}
+
 /// GHSA-8r7g: the `GENESIS_ALLOW_WIRE_FORCE` env opt-in that lets a protocol
 /// peer request `SessionMode::Force`. Mirrors the env-based operator opt-ins
 /// elsewhere (e.g. `GENESIS_ALLOW_NO_SANDBOX`). Truthy = `1` / `true`.
@@ -1849,16 +1886,10 @@ async fn run_tui_mode(
     // operator opted in at launch (--force or GENESIS_ALLOW_WIRE_FORCE).
     approval_manager.set_allow_wire_force(force || wire_force_opt_in_env());
     // Seed the initial approval posture from config (`[default] approval_mode`,
-    // editable via /config). `--force` below overrides it to Force.
-    approval_manager.set_mode(approval_mode_to_session(config.approval_mode));
-    // Force mode: flip the engine's approval manager into `Force` mode at
-    // boot so every tool category is auto-approved. The TUI's approval
-    // modal then never opens (no `ApprovalRequired` event is produced),
-    // and the bottom status bar renders the FORCE badge so the user can
-    // see the mode is active.
-    if force {
-        approval_manager.set_mode(wcore_protocol::commands::SessionMode::Force);
-    }
+    // editable via /config); `--force` overrides to Force. When Force, the
+    // TUI's approval modal never opens (no `ApprovalRequired` event) and the
+    // status bar renders the FORCE badge so the mode is visible.
+    approval_manager.set_mode(initial_session_mode(config.approval_mode, force));
 
     // Phase 1B-2 — the interactive TUI is a primary long-running session, so
     // opt into inbound channel dispatch (the InboundSubscriber turns admitted
@@ -2393,6 +2424,94 @@ fn mcp_ready_events_for(mgr: &McpManager) -> Vec<ProtocolEvent> {
         .collect()
 }
 
+/// wayland#551 — companion to [`mcp_ready_events_for`]: one `McpFailed`
+/// event per server whose connect failed or timed out, so a host whose
+/// config MCP servers were dialed in the background still learns WHY a
+/// server's tools never appeared (parity with the dynamic `AddMcpServer`
+/// path's failure emit). Pure and name-sorted for deterministic tests.
+fn mcp_failed_events_for(mgr: &McpManager) -> Vec<ProtocolEvent> {
+    use wcore_mcp::manager::McpServerHealth;
+    let mut entries: Vec<(&String, &McpServerHealth)> = mgr.health().iter().collect();
+    entries.sort_by_key(|(name, _)| name.as_str());
+    entries
+        .into_iter()
+        .filter_map(|(name, health)| {
+            let reason = match health {
+                McpServerHealth::Failed { reason } => reason.clone(),
+                McpServerHealth::TimedOut { after } => {
+                    format!("connect timed out after {}s", after.as_secs())
+                }
+                McpServerHealth::Skipped { reason } => reason.clone(),
+                McpServerHealth::Ready { .. } => return None,
+            };
+            Some(ProtocolEvent::McpFailed {
+                name: name.clone(),
+                reason,
+            })
+        })
+        .collect()
+}
+
+/// wayland#551 — integrate a background-connected config-MCP manager into
+/// the LIVE engine. Registers the manager's tools (same collision handling
+/// as boot via [`wcore_mcp::tool_proxy::register_mcp_tools`]), emits one
+/// `McpReady` per connected server and one `McpFailed` per failed server,
+/// and parks the manager in `dynamic_managers` so it stays alive.
+///
+/// wayland#551 — absorb a settled background config-MCP connect: on
+/// success, integrate into the live engine (returning the parked pair when
+/// the registry is momentarily borrowed so the caller can retry between
+/// turns); on failure, surface the error with bootstrap's inline-connect
+/// wording. Shared by the loop-top non-blocking poll and the select arm.
+fn note_deferred_mcp_connect(
+    outcome: Result<McpManager, wcore_mcp::transport::McpError>,
+    resolved: HashMap<String, McpServerConfig>,
+    engine: &mut wcore_agent::engine::AgentEngine,
+    writer: &ProtocolWriter,
+    output: &Arc<dyn OutputSink>,
+    dynamic_managers: &mut Vec<Arc<McpManager>>,
+) -> Option<(Arc<McpManager>, HashMap<String, McpServerConfig>)> {
+    match outcome {
+        Ok(mgr) => {
+            let mgr = Arc::new(mgr);
+            if integrate_deferred_mcp(engine, mgr.clone(), &resolved, writer, dynamic_managers) {
+                None
+            } else {
+                Some((mgr, resolved))
+            }
+        }
+        Err(e) => {
+            output.emit_error(&format!("MCP initialization error: {e}"), false);
+            None
+        }
+    }
+}
+
+/// Returns `false` when the registry Arc is currently borrowed (a turn is
+/// mid-flight) — the caller parks the manager and retries at the next
+/// between-turns boundary.
+fn integrate_deferred_mcp(
+    engine: &mut wcore_agent::engine::AgentEngine,
+    mgr: Arc<McpManager>,
+    resolved_servers: &HashMap<String, McpServerConfig>,
+    writer: &ProtocolWriter,
+    dynamic_managers: &mut Vec<Arc<McpManager>>,
+) -> bool {
+    let builtin_names = engine.tool_names();
+    let Some(reg) = engine.registry_mut() else {
+        return false;
+    };
+    wcore_mcp::tool_proxy::register_mcp_tools(reg, &mgr, &builtin_names, resolved_servers);
+    for event in mcp_ready_events_for(&mgr) {
+        let _ = writer.emit(&event);
+    }
+    for event in mcp_failed_events_for(&mgr) {
+        let _ = writer.emit(&event);
+    }
+    dynamic_managers.push(mgr);
+    true
+}
+
 fn to_mcp_server_config(
     transport: &str,
     command: Option<String>,
@@ -2416,6 +2535,7 @@ fn to_mcp_server_config(
         headers,
         deferred: Some(false),
         allow_local: false,
+        only_for_assistant: None,
     })
 }
 
@@ -2558,6 +2678,7 @@ async fn run_json_stream_mode(
     resume: Option<String>,
     session_id: Option<String>,
     force: bool,
+    assistant: Option<String>,
 ) -> anyhow::Result<()> {
     let writer = Arc::new(ProtocolWriter::new());
 
@@ -2599,17 +2720,42 @@ async fn run_json_stream_mode(
     // GHSA-8r7g: a protocol peer may escalate to Force only when this local
     // operator opted in at launch (--force or GENESIS_ALLOW_WIRE_FORCE).
     approval_manager.set_allow_wire_force(force || wire_force_opt_in_env());
-    // F-002: plumb --force into json-stream mode. In the TUI path the
-    // approval manager is flipped to Force before the engine boots; the
-    // json-stream path was missing the same step, causing every mutating
-    // tool (Write/Edit/Bash) to time out waiting for an approval that
-    // would never arrive.
-    if force {
-        approval_manager.set_mode(wcore_protocol::commands::SessionMode::Force);
-    }
+    // wayland#241: seed the initial approval posture from config
+    // (`[default] approval_mode`) via the shared `initial_session_mode`
+    // helper, exactly like `run_tui_mode`. The json-stream path previously
+    // only honored `--force`, so a config `approval_mode = "auto-edit"` /
+    // `"force"` was silently ignored for the desktop host — every mutating
+    // tool then waited on an approval the host never sent. `--force` still
+    // overrides to Force (F-002).
+    approval_manager.set_mode(initial_session_mode(config.approval_mode, force));
     let output: Arc<dyn OutputSink> = protocol_sink.clone();
 
     let provider_name = config.provider_label.clone();
+
+    // wayland#551 — config-declared MCP connects must NOT gate the `ready`
+    // frame: a slow/hung server eats up to the full 30s per-server connect
+    // budget INSIDE bootstrap, and hosts (the desktop app) time out waiting
+    // for ready at 30s — the chat never opens. Capture + cred-resolve the
+    // servers now (config is moved into bootstrap next), tell bootstrap to
+    // skip them, and dial them in the background right after ready goes out.
+    // Resolution happens here on a clone, mirroring bootstrap's own connect
+    // boundary: the long-lived config keeps the literal `${cred:...}`.
+    // #111 — apply per-assistant MCP scoping to the DEFERRED path too (the
+    // second injection choke point per the #613 completeness guardrail): a
+    // server marked `only_for_assistant` must not be background-connected for a
+    // non-matching assistant. Fail-closed when `assistant` is None.
+    let scoped_config_servers = config.mcp.servers_for_assistant(assistant.as_deref());
+    let deferred_mcp_servers = if scoped_config_servers.is_empty() {
+        None
+    } else {
+        Some(match config.open_credentials_store() {
+            Ok(store) => wcore_config::mcp_cred_refs::resolve_servers_for_connect(
+                &scoped_config_servers,
+                &*store,
+            ),
+            Err(_) => scoped_config_servers,
+        })
+    };
 
     // Bootstrap engine with full feature initialization. Phase 1B-2 —
     // json-stream is a primary long-running host session (e.g. the Genesis
@@ -2617,7 +2763,9 @@ async fn run_json_stream_mode(
     // opt into inbound channel dispatch.
     let mut bootstrap = AgentBootstrap::new(config, cwd, output.clone())
         .plugin_provider_router(make_plugin_provider_router())
-        .enable_inbound_dispatch(true);
+        .enable_inbound_dispatch(true)
+        .active_assistant(assistant.clone())
+        .defer_config_mcp(deferred_mcp_servers.is_some());
 
     if let Some(resume_id) = &resume {
         let cfg = bootstrap.config();
@@ -2638,7 +2786,9 @@ async fn run_json_stream_mode(
         }
     };
     let mut engine = result.engine;
-    let initial_has_mcp = result.has_mcp;
+    // wayland#551 — declared-but-still-connecting servers count as MCP
+    // capability on the ready frame; their tools register shortly after.
+    let initial_has_mcp = result.has_mcp || deferred_mcp_servers.is_some();
     let initial_has_plugins = result.has_plugins;
     // W8c.3 H.2: snapshot the plugin-derived capability set so the
     // protocol sink advertises `browser_suite` / `computer_use` flags
@@ -2692,6 +2842,22 @@ async fn run_json_stream_mode(
         }
     }
 
+    // wayland#551 — dial the deferred config MCP servers in the background,
+    // AFTER ready is on the wire. The command loop integrates the manager
+    // into the live engine between turns (see the select below) and emits
+    // McpReady / McpFailed per server, exactly like the dynamic
+    // `AddMcpServer` path. A turn that starts before the connects settle
+    // simply runs without the MCP tools — the old behavior was a chat that
+    // never opened at all.
+    let mut deferred_mcp_rx = deferred_mcp_servers.map(|resolved| {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let outcome = McpManager::connect_all(&resolved).await;
+            let _ = tx.send((outcome, resolved));
+        });
+        rx
+    });
+
     engine.set_approval_manager(approval_manager.clone());
     // D012 (P0 security): install the gating writer as the engine's
     // tool-lifecycle emitter so a gated mutating tool emits a host-visible
@@ -2735,7 +2901,39 @@ async fn run_json_stream_mode(
     let mut dynamic_managers: Vec<(String, Arc<McpManager>)> = Vec::new();
     let mut first_cmd: Option<ProtocolCommand> = None;
 
-    while let Some(cmd) = cmd_rx.recv().await {
+    // wayland#551 — a deferred-MCP manager whose integration found the
+    // registry borrowed; retried at the next between-turns boundary.
+    let mut pending_deferred_mcp: Option<(Arc<McpManager>, HashMap<String, McpServerConfig>)> =
+        None;
+
+    loop {
+        // wayland#551 — the pre-message phase can park in recv() forever on
+        // a quiet host, so the background connect result must be settled
+        // here too, or McpReady/McpFailed health would wait on host
+        // activity (live-verify caught exactly that).
+        let cmd = tokio::select! {
+            c = cmd_rx.recv() => match c {
+                Some(c) => c,
+                None => break,
+            },
+            res = async { deferred_mcp_rx.as_mut().expect("guarded by is_some").await },
+                if deferred_mcp_rx.is_some() =>
+            {
+                deferred_mcp_rx = None;
+                // Err = connect task dropped without sending (panic).
+                if let Ok((outcome, resolved)) = res {
+                    pending_deferred_mcp = note_deferred_mcp_connect(
+                        outcome,
+                        resolved,
+                        &mut engine,
+                        &writer,
+                        &output,
+                        &mut dynamic_managers,
+                    );
+                }
+                continue;
+            }
+        };
         match cmd {
             ProtocolCommand::AddMcpServer {
                 name,
@@ -2749,6 +2947,30 @@ async fn run_json_stream_mode(
                 eprintln!(
                     "[mcp] AddMcpServer received: name={name}, transport={transport}, command={command:?}"
                 );
+                // #135: idempotency — re-adding an already-connected server (boot
+                // set or a prior dynamic add) does not spawn a duplicate. Re-emit
+                // the existing tools so the host's view stays consistent, then skip
+                // the reconnect. NOTE: a re-add with changed config is ignored (the
+                // existing connection is kept) — remove then add to reconfigure.
+                if engine.mcp_server_connected(&name) {
+                    let existing: Vec<String> = engine
+                        .tools()
+                        .to_tool_defs()
+                        .iter()
+                        .filter(|t| t.server.as_deref() == Some(name.as_str()))
+                        .map(|t| t.name.clone())
+                        .collect();
+                    eprintln!(
+                        "[mcp] '{name}' already connected ({} tools); keeping existing \
+                         connection, ignoring re-add (remove then add to change config)",
+                        existing.len()
+                    );
+                    let _ = writer.emit(&ProtocolEvent::McpReady {
+                        name,
+                        tools: existing,
+                    });
+                    continue;
+                }
                 let config =
                     match to_mcp_server_config(&transport, command, args, env, url, headers) {
                         Ok(c) => c,
@@ -2880,13 +3102,69 @@ async fn run_json_stream_mode(
     let has_mcp = initial_has_mcp || !dynamic_managers.is_empty();
     let mut pending_cmd = first_cmd;
 
-    loop {
+    'session: loop {
+        // wayland#551 — settle deferred MCP at every between-turns boundary,
+        // BEFORE the next command is processed, so a message that arrives
+        // after the connects finished runs WITH the MCP tools. Two sources:
+        // a non-blocking poll of the connect task (the blocking wait lives
+        // in the select below) and a parked integration whose earlier
+        // attempt found the registry borrowed.
+        if let Some(rx) = deferred_mcp_rx.as_mut()
+            && let Ok((outcome, resolved)) = rx.try_recv()
+        {
+            deferred_mcp_rx = None;
+            pending_deferred_mcp = note_deferred_mcp_connect(
+                outcome,
+                resolved,
+                &mut engine,
+                &writer,
+                &output,
+                &mut dynamic_managers,
+            );
+        }
+        if let Some((mgr, resolved)) = pending_deferred_mcp.take()
+            && !integrate_deferred_mcp(
+                &mut engine,
+                mgr.clone(),
+                &resolved,
+                &writer,
+                &mut dynamic_managers,
+            )
+        {
+            pending_deferred_mcp = Some((mgr, resolved));
+        }
+
         let cmd = if let Some(c) = pending_cmd.take() {
             c
         } else {
-            match cmd_rx.recv().await {
-                Some(c) => c,
-                None => break,
+            loop {
+                tokio::select! {
+                    c = cmd_rx.recv() => match c {
+                        Some(c) => break c,
+                        None => break 'session,
+                    },
+                    // wayland#551 — background config-MCP connect settled;
+                    // integrate into the live engine and keep waiting for
+                    // the next command. Guarded so a consumed receiver is
+                    // never polled again.
+                    res = async { deferred_mcp_rx.as_mut().expect("guarded by is_some").await },
+                        if deferred_mcp_rx.is_some() =>
+                    {
+                        deferred_mcp_rx = None;
+                        // Err = connect task dropped without sending (panic);
+                        // nothing to integrate.
+                        if let Ok((outcome, resolved)) = res {
+                            pending_deferred_mcp = note_deferred_mcp_connect(
+                                outcome,
+                                resolved,
+                                &mut engine,
+                                &writer,
+                                &output,
+                                &mut dynamic_managers,
+                            );
+                        }
+                    }
+                }
             }
         };
 
@@ -3018,11 +3296,16 @@ async fn run_json_stream_mode(
                                         approval_manager.resolve(&call_id, ToolApprovalResult::Denied { reason });
                                     }
                                     ProtocolCommand::Stop => {
-                                        // Cancelling the turn drops `engine_fut`, but the host's
-                                        // turn-loop still waits for a terminator. Emit `stream_end`
-                                        // (FinishReason::Stop) for this msg_id — same as the /exit
-                                        // path above — so the host doesn't hang forever waiting for
-                                        // a turn end that the bare break would never send.
+                                        // wayland#403 fix-3: Stop CANCELS THE ACTIVE TURN — it must
+                                        // NOT end the session. Dropping `engine_fut` (via the inner
+                                        // `break` below) cancels the turn; we emit `stream_end`
+                                        // (FinishReason::Stop) for this msg_id so the host's turn-loop
+                                        // gets its terminator and doesn't hang. `stopped` then makes
+                                        // the outer loop `continue` (keep reading commands) instead of
+                                        // breaking — the pre-fix `break` stranded the session
+                                        // ("new chat required") after any mid-turn Stop. Only EOF and
+                                        // `/exit` end a json-stream session, matching the TUI (Esc
+                                        // cancels the turn, never closes the session).
                                         output.emit_stream_end(&msg_id, 0, 0, 0, 0, 0, FinishReason::Stop);
                                         stopped = true;
                                         break;
@@ -3159,11 +3442,19 @@ async fn run_json_stream_mode(
                     );
                 }
                 if stopped {
-                    break;
+                    // wayland#403 fix-3: the mid-turn Stop cancelled the turn and
+                    // already emitted its `stream_end`; resume the command loop so
+                    // the next Message streams. Pre-fix this was `break`, which
+                    // ended the whole session.
+                    continue;
                 }
             }
             ProtocolCommand::Stop => {
-                break;
+                // wayland#403 fix-3: a Stop that arrives with no active turn (or
+                // just as one finishes) is a no-op — it must not close the
+                // session. Keep reading commands; EOF / `/exit` are the
+                // terminators.
+                continue;
             }
             ProtocolCommand::ToolApprove {
                 call_id,
@@ -3489,10 +3780,165 @@ mod tests {
         }
     }
 
+    /// wayland#551: background-connect failure surfacing — one `McpFailed`
+    /// per Failed/TimedOut/Skipped server, none for Ready, name-sorted.
+    /// Pre-fix the deferred path would have reported connect failures
+    /// nowhere (bootstrap's inline emit no longer runs for these servers).
+    #[test]
+    fn test_mcp_failed_events_for_reports_failures_only() {
+        use wcore_mcp::manager::McpServerHealth;
+        let mgr = McpManager::new_for_test_with_health(vec![
+            (
+                "slow",
+                McpServerHealth::TimedOut {
+                    after: std::time::Duration::from_secs(30),
+                },
+            ),
+            ("okay", McpServerHealth::Ready { tool_count: 3 }),
+            (
+                "broken",
+                McpServerHealth::Failed {
+                    reason: "handshake refused".into(),
+                },
+            ),
+        ]);
+        let events = mcp_failed_events_for(&mgr);
+        assert_eq!(events.len(), 2, "Ready servers must not emit McpFailed");
+        match &events[0] {
+            ProtocolEvent::McpFailed { name, reason } => {
+                assert_eq!(name, "broken");
+                assert!(reason.contains("handshake refused"), "reason = {reason}");
+            }
+            other => panic!("expected McpFailed, got {other:?}"),
+        }
+        match &events[1] {
+            ProtocolEvent::McpFailed { name, reason } => {
+                assert_eq!(name, "slow");
+                assert!(reason.contains("30"), "reason = {reason}");
+            }
+            other => panic!("expected McpFailed, got {other:?}"),
+        }
+    }
+
+    /// wayland#551: deferred-MCP integration must register the manager's
+    /// tools into a LIVE engine (post-boot), emit per-server events, and
+    /// park the manager alive in `dynamic_managers`. Pins the integration
+    /// half of the deferral wiring — removing `register_mcp_tools` from
+    /// `integrate_deferred_mcp` fails this.
+    #[tokio::test]
+    async fn integrate_deferred_mcp_registers_tools_into_live_engine() {
+        let (mut engine, _sink) = wcore_agent::bootstrap::AgentBootstrap::build_for_test(
+            wcore_config::config::Config::default(),
+            vec![],
+        );
+        let before = engine.tool_names().len();
+        let mgr = Arc::new(McpManager::new_for_test_with_tools(vec![(
+            "quick",
+            false,
+            Box::new(NoopTransport) as Box<dyn McpTransport>,
+            vec![tool("quick_echo")],
+        )]));
+        let writer = ProtocolWriter::new();
+        let mut dynamic_managers = Vec::new();
+        assert!(
+            integrate_deferred_mcp(
+                &mut engine,
+                mgr,
+                &HashMap::new(),
+                &writer,
+                &mut dynamic_managers
+            ),
+            "integration must succeed on an idle engine"
+        );
+        assert!(
+            engine.tool_names().len() > before
+                && engine.tool_names().iter().any(|n| n.contains("quick_echo")),
+            "deferred server's tools must be registered; got {:?}",
+            engine.tool_names()
+        );
+        assert_eq!(dynamic_managers.len(), 1, "manager must be kept alive");
+    }
+
+    /// wayland#551: while the registry Arc is borrowed (as during a turn),
+    /// integration must decline — no partial registration — so the caller
+    /// parks the manager and retries at the next between-turns boundary.
+    #[tokio::test]
+    async fn integrate_deferred_mcp_parks_while_registry_is_borrowed() {
+        let (mut engine, _sink) = wcore_agent::bootstrap::AgentBootstrap::build_for_test(
+            wcore_config::config::Config::default(),
+            vec![],
+        );
+        let hold = engine.tools(); // second Arc ref → registry_mut() is None
+        let mgr = Arc::new(McpManager::new_for_test_with_tools(vec![(
+            "quick",
+            false,
+            Box::new(NoopTransport) as Box<dyn McpTransport>,
+            vec![tool("quick_echo")],
+        )]));
+        let writer = ProtocolWriter::new();
+        let mut dynamic_managers = Vec::new();
+        assert!(
+            !integrate_deferred_mcp(
+                &mut engine,
+                mgr,
+                &HashMap::new(),
+                &writer,
+                &mut dynamic_managers
+            ),
+            "integration must decline while the registry is borrowed"
+        );
+        assert!(dynamic_managers.is_empty());
+        assert!(
+            !engine.tool_names().iter().any(|n| n.contains("quick_echo")),
+            "no tools may be registered on a declined integration"
+        );
+        drop(hold);
+    }
+
     /// Rank 47 regression: `--no-memory` must parse and flip
     /// `config.memory.enabled` to `false`, giving users an accessible way to
     /// run a stateless session. Pre-fix the flag did not exist (only a TODO
     /// in wcore-config), so there was no CLI path to disable memory per-run.
+    /// wayland#241: the boot approval posture both entry points seed
+    /// through. Config drives the mode; `--force` overrides to Force. The
+    /// json-stream path previously skipped the config seed, so a user's
+    /// `approval_mode` was ignored — this helper is now the single source
+    /// both paths use.
+    #[test]
+    fn initial_session_mode_honors_config_and_force_override() {
+        use wcore_config::config::ApprovalMode;
+        use wcore_protocol::commands::SessionMode;
+
+        // Config posture is honored when --force is absent.
+        assert_eq!(
+            initial_session_mode(ApprovalMode::Default, false),
+            SessionMode::Default
+        );
+        assert_eq!(
+            initial_session_mode(ApprovalMode::AutoEdit, false),
+            SessionMode::AutoEdit,
+            "config auto-edit must reach the session (the #241 regression)"
+        );
+        assert_eq!(
+            initial_session_mode(ApprovalMode::Force, false),
+            SessionMode::Force,
+            "config force must reach the session without --force"
+        );
+
+        // --force overrides every config posture to Force.
+        for m in [
+            ApprovalMode::Default,
+            ApprovalMode::AutoEdit,
+            ApprovalMode::Force,
+        ] {
+            assert_eq!(
+                initial_session_mode(m, true),
+                SessionMode::Force,
+                "--force must override config {m:?} to Force"
+            );
+        }
+    }
+
     #[test]
     fn test_no_memory_flag_disables_memory() {
         let cli = Cli::parse_from(["genesis-core", "--no-memory", "hello"]);

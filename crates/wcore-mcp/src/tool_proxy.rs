@@ -79,9 +79,15 @@ impl Tool for McpToolProxy {
             .call_tool(&self.server_name, &self.tool_name, input)
             .await
         {
-            Ok(content) => ToolResult {
-                content,
-                is_error: false,
+            // #475: a transport-successful call may still be a tool-level
+            // failure (MCP `isError: true`). Surface that as `is_error` so the
+            // agent (retry-cap guard, UI badge, model error signal) sees it —
+            // the `content` still carries the tool's error text so the model can
+            // read it and recover. A single failure never aborts; it is just a
+            // normal error result.
+            Ok(outcome) => ToolResult {
+                content: outcome.text,
+                is_error: outcome.is_error,
             },
             Err(e) => ToolResult {
                 content: format!("MCP tool error: {}", e),
@@ -339,6 +345,35 @@ mod tests {
         assert!(proxy.is_deferred());
     }
 
+    /// #135 linchpin — a DEFERRED MCP tool still registers EAGERLY and still
+    /// carries real provenance (`ToolDef::server`) in `to_tool_defs()`. The
+    /// `/mcp add` idempotency probe (`AgentEngine::mcp_server_connected`) keys
+    /// purely on that provenance, so this is the load-bearing property: if a
+    /// future refactor made deferred registration lazy or dropped the server
+    /// tag, the probe would silently stop detecting a just-added deferred
+    /// server and a re-add would spawn a duplicate process. Lock it here.
+    #[test]
+    fn deferred_mcp_tool_registers_eagerly_with_provenance() {
+        let mut registry = wcore_tools::registry::ToolRegistry::new();
+        registry.register(Box::new(make_proxy(true)));
+
+        let defs = registry.to_tool_defs();
+        assert_eq!(
+            defs.len(),
+            1,
+            "the deferred tool must be registered eagerly"
+        );
+        assert!(
+            defs[0].deferred,
+            "the tool is deferred (name-only schema stub)"
+        );
+        assert_eq!(
+            defs[0].server.as_deref(),
+            Some("test_server"),
+            "deferred registration must still carry real provenance for the probe"
+        );
+    }
+
     #[test]
     fn proxy_deferred_false_returns_false() {
         let proxy = make_proxy(false);
@@ -355,6 +390,7 @@ mod tests {
             headers: None,
             deferred,
             allow_local: false,
+            only_for_assistant: None,
         }
     }
 

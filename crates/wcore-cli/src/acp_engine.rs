@@ -227,13 +227,33 @@ struct RelayEmitter {
     /// `ApprovalRequired` (the live-workflow gate emits its own) is suppressed,
     /// preventing a malformed second gate frame on the ACP projection.
     synthesized: crate::tui::DedupeSet,
+    /// GHSA-8r7g M1 (wayland#497) — the session engine's `ApprovalBridge`.
+    /// Threaded into `ChannelEmitter::with_dedupe` so a bridge-backed
+    /// approval (Crucible council / egress consent) synthesized on the ACP
+    /// relay stamps the server-generated SECRET `apr-{uuid}` resume_token
+    /// instead of the legacy model-known `call_id`. `None` only in unit
+    /// tests.
+    ///
+    /// SCOPE (per the #497 cross-audit): this is frame-level parity with the
+    /// stdin/TUI transports only. The ACP PROJECTION drops `resume_token`
+    /// before it reaches the host (`MessageEvent::ApprovalRequired` carries
+    /// no token field) and the resolve endpoint stays call_id-keyed behind
+    /// X-API-Key — so a bridge-backed gate raised during an ACP turn is not
+    /// yet resolvable by the ACP host at all, and manager-gated resolution
+    /// still keys on the model-known call_id. Carrying + accepting the
+    /// secret end-to-end on ACP is tracked as FerroxLabs/wayland#568.
+    approval_bridge: Option<Arc<wcore_agent::approval::ApprovalBridge>>,
 }
 
 impl RelayEmitter {
-    fn new(handle: RelayHandle) -> Self {
+    fn new(
+        handle: RelayHandle,
+        approval_bridge: Option<Arc<wcore_agent::approval::ApprovalBridge>>,
+    ) -> Self {
         Self {
             handle,
             synthesized: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            approval_bridge,
         }
     }
 }
@@ -242,10 +262,8 @@ impl ProtocolEmitter for RelayEmitter {
     fn emit(&self, event: &ProtocolEvent) -> std::io::Result<()> {
         let tx = self.handle.lock().unwrap().clone();
         if let Some(tx) = tx {
-            // GHSA-8r7g: `None` bridge → legacy resume_token emit on the ACP
-            // relay (its crucible/egress call_ids are already uuids; the ACP
-            // endpoint's secret-token hardening is a separate follow-up).
-            ChannelEmitter::with_dedupe(tx, self.synthesized.clone(), None).emit(event)?;
+            ChannelEmitter::with_dedupe(tx, self.synthesized.clone(), self.approval_bridge.clone())
+                .emit(event)?;
         }
         Ok(())
     }
@@ -309,12 +327,15 @@ impl Drop for TerminalGuard {
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Map a protocol [`FinishReason`] onto an ACP StopReason string. `cancelled`
-/// / `max_turn_requests` are produced by other paths, not by `FinishReason`.
+/// is produced by other paths, not by `FinishReason`.
 fn stop_reason_str(reason: FinishReason) -> &'static str {
     match reason {
         FinishReason::Stop => "end_turn",
         FinishReason::Length => "max_tokens",
         FinishReason::Error => "refusal",
+        // #457: the engine's per-turn cap maps to the ACP `max_turn_requests`
+        // stop reason so an ACP client can offer Continue, not a refusal.
+        FinishReason::MaxTurns => "max_turn_requests",
     }
 }
 
@@ -457,12 +478,19 @@ impl ProtocolToMessageStream {
             // was not seen, e.g. an engine site that emits `ApprovalRequired`
             // without a preceding `ToolRequest`).
             ProtocolEvent::ApprovalRequired {
-                call_id, reason, ..
+                call_id,
+                reason,
+                resume_token,
+                ..
             } => {
                 let (name, input) = self
                     .pending_calls
                     .remove(&call_id)
                     .unwrap_or_else(|| (String::new(), serde_json::Value::Null));
+                // #568 (B): carry the SECRET resume_token to the host instead of
+                // dropping it. Bridge-backed gates stamp a real `apr-` token
+                // (via the RelayEmitter's ApprovalBridge); manager-gated tools
+                // carry an empty token and are resolved by `call_id`.
                 Some(MessageEvent::ApprovalRequired {
                     call: ToolCall {
                         id: call_id,
@@ -470,6 +498,7 @@ impl ProtocolToMessageStream {
                         input,
                     },
                     reason,
+                    resume_token,
                 })
             }
             // StreamStart / ToolRunning / ToolChunk / Suspend / ApprovalResume /
@@ -516,6 +545,10 @@ impl Stream for ProtocolToMessageStream {
 pub struct EngineSession {
     engine: Arc<AsyncMutex<AgentEngine>>,
     approval_manager: Arc<ToolApprovalManager>,
+    /// GHSA-8r7g M2 (#568) — the engine's `ApprovalBridge`, captured at build
+    /// time so `resolve_approval` can answer a bridge-backed gate by SECRET
+    /// resume_token WITHOUT locking the engine mutex (a live turn holds it).
+    approval_bridge: Arc<wcore_agent::approval::ApprovalBridge>,
     /// The relay handle the engine's `RelaySink`/`RelayEmitter` forward on.
     /// `run_turn` installs this turn's channel into it.
     relay: RelayHandle,
@@ -535,9 +568,11 @@ impl EngineSession {
         relay: RelayHandle,
     ) -> Self {
         let tool_names = engine.tools().tool_names();
+        let approval_bridge = engine.approval_bridge().clone();
         Self {
             engine: Arc::new(AsyncMutex::new(engine)),
             approval_manager,
+            approval_bridge,
             relay,
             tool_names,
         }
@@ -773,7 +808,11 @@ impl EngineTurnEngine {
         engine.rebind_memory_session().await;
         engine.run_session_start_hooks().await;
         engine.set_approval_manager(approval_manager.clone());
-        engine.set_protocol_writer(Arc::new(RelayEmitter::new(relay.clone())));
+        // GHSA-8r7g M1 (wayland#497): bind the engine's ApprovalBridge so
+        // bridge-backed gate frames on the ACP relay carry the secret
+        // resume_token (parity with the stdin/TUI transports).
+        let bridge = engine.approval_bridge().clone();
+        engine.set_protocol_writer(Arc::new(RelayEmitter::new(relay.clone(), Some(bridge))));
 
         let session = Arc::new(EngineSession::new(engine, approval_manager, relay));
 
@@ -836,6 +875,24 @@ impl TurnEngine for EngineTurnEngine {
                 wcore_protocol::commands::ApprovalScope::AlwaysPrefix { prefix }
             }
         };
+
+        // #568 (C): secret-preferred resolution. A BRIDGE-backed gate (Crucible
+        // council / egress consent) minted a SECRET `apr-` resume_token and is
+        // resolvable ONLY through the bridge; a manager-gated tool carries no
+        // secret and resolves by `call_id`. When the host presents a non-empty
+        // token, try the bridge first; fall through to the manager path if it
+        // is not a live bridge token (stale, or actually a manager gate). The
+        // ACP resolve carries no `modifications` payload (its `answer` threads
+        // to the manager path), so bridge consent is a plain approve/deny.
+        if let Some(token) = decision.resume_token.as_deref().filter(|t| !t.is_empty()) {
+            let outcome = wcore_agent::approval::ApprovalOutcome {
+                approved: decision.approved,
+                modifications: None,
+            };
+            if session.approval_bridge.resolve(token, outcome).await {
+                return Ok(());
+            }
+        }
 
         let resolved = session.approval_manager().resolve_host(
             call_id,
@@ -1091,13 +1148,23 @@ mod tests {
             other => panic!("expected ToolCall, got {other:?}"),
         }
         match &out[1] {
-            MessageEvent::ApprovalRequired { call, reason } => {
+            MessageEvent::ApprovalRequired {
+                call,
+                reason,
+                resume_token,
+            } => {
                 assert_eq!(call.id, "c9", "gate frame correlates to the call");
                 assert_eq!(
                     call.name, "Write",
                     "gate frame carries the gated tool name from the ToolRequest"
                 );
                 assert_eq!(reason, "edit");
+                // #568 (B): the SECRET resume_token on the protocol event is
+                // carried through to the host, not dropped by the projection.
+                assert_eq!(
+                    resume_token, "c9",
+                    "the projection must carry resume_token end-to-end (#568)"
+                );
             }
             other => panic!("expected ApprovalRequired, got {other:?}"),
         }
@@ -1120,7 +1187,7 @@ mod tests {
         // The relay's emitter forwards onto the per-turn channel and owns the
         // persistent dedupe set (mirrors `EngineSession`'s wiring).
         let relay: RelayHandle = Arc::new(Mutex::new(Some(tx)));
-        let emitter = RelayEmitter::new(relay);
+        let emitter = RelayEmitter::new(relay, None);
 
         // Reproduce the live-workflow gate's emit sequence (engine.rs):
         // (1) ToolRequest for the gated "Workflow" call, then
@@ -1180,6 +1247,102 @@ mod tests {
                 assert_eq!(
                     call.name, "Workflow",
                     "the surviving gate frame must carry the gated tool name, not an empty phantom"
+                );
+            }
+            other => panic!("expected ApprovalRequired, got {other:?}"),
+        }
+    }
+
+    /// GHSA-8r7g M1 (wayland#497): a bridge-backed approval synthesized on
+    /// the ACP relay must stamp the bridge's SECRET `apr-{uuid}`
+    /// resume_token — not the model-known `call_id` (the pre-fix legacy
+    /// behavior this transport had) and not an empty token. Asserted at the
+    /// raw `ProtocolEvent` boundary, where the wire value is decided.
+    #[tokio::test]
+    async fn relay_emitter_stamps_bridge_secret_resume_token() {
+        let bridge = Arc::new(wcore_agent::approval::ApprovalBridge::new());
+        let (secret, _outcome_rx) = bridge
+            .request_with_id(
+                "crucible-call-9".to_string(),
+                wcore_agent::approval::ApprovalRequest {
+                    call_id: "crucible-call-9".into(),
+                    reason: "council".into(),
+                    context: "ctx".into(),
+                },
+            )
+            .await;
+
+        let (tx, mut rx) = unbounded_channel::<ProtocolEvent>();
+        let relay: RelayHandle = Arc::new(Mutex::new(Some(tx)));
+        let emitter = RelayEmitter::new(relay, Some(bridge));
+
+        emitter
+            .emit(&ProtocolEvent::ToolRequest {
+                msg_id: "m".into(),
+                call_id: "crucible-call-9".into(),
+                tool: wcore_protocol::events::ToolInfo {
+                    name: "CrucibleCouncil".into(),
+                    category: wcore_protocol::events::ToolCategory::Exec,
+                    args: serde_json::json!({}),
+                    description: "council approval".into(),
+                },
+            })
+            .unwrap();
+
+        // First frame is the forwarded ToolRequest; second is the
+        // synthesized gate whose resume_token is under test.
+        let first = rx.recv().await.expect("forwarded ToolRequest");
+        assert!(matches!(first, ProtocolEvent::ToolRequest { .. }));
+        match rx.recv().await.expect("synthesized ApprovalRequired") {
+            ProtocolEvent::ApprovalRequired {
+                call_id,
+                resume_token,
+                ..
+            } => {
+                assert_eq!(call_id, "crucible-call-9");
+                assert_eq!(
+                    resume_token, secret,
+                    "ACP relay must stamp the bridge's secret resume_token"
+                );
+                assert!(resume_token.starts_with("apr-"), "got {resume_token:?}");
+                assert_ne!(
+                    resume_token, call_id,
+                    "the model-known call_id must never be the resume handle"
+                );
+            }
+            other => panic!("expected ApprovalRequired, got {other:?}"),
+        }
+    }
+
+    /// Companion negative: with the bridge bound but NO bridge entry for the
+    /// call (a regular tool gated by the ToolApprovalManager), the
+    /// synthesized token must be EMPTY — never a fallback to the call_id.
+    #[tokio::test]
+    async fn relay_emitter_emits_empty_token_for_non_bridge_call() {
+        let bridge = Arc::new(wcore_agent::approval::ApprovalBridge::new());
+        let (tx, mut rx) = unbounded_channel::<ProtocolEvent>();
+        let relay: RelayHandle = Arc::new(Mutex::new(Some(tx)));
+        let emitter = RelayEmitter::new(relay, Some(bridge));
+
+        emitter
+            .emit(&ProtocolEvent::ToolRequest {
+                msg_id: "m".into(),
+                call_id: "bash-1".into(),
+                tool: wcore_protocol::events::ToolInfo {
+                    name: "Bash".into(),
+                    category: wcore_protocol::events::ToolCategory::Exec,
+                    args: serde_json::json!({"command": "ls"}),
+                    description: "run".into(),
+                },
+            })
+            .unwrap();
+
+        let _tool_req = rx.recv().await.expect("forwarded ToolRequest");
+        match rx.recv().await.expect("synthesized ApprovalRequired") {
+            ProtocolEvent::ApprovalRequired { resume_token, .. } => {
+                assert!(
+                    resume_token.is_empty(),
+                    "non-bridge call must get an EMPTY token (resolved via ToolApprove), got {resume_token:?}"
                 );
             }
             other => panic!("expected ApprovalRequired, got {other:?}"),
@@ -1326,13 +1489,90 @@ mod tests {
         Arc::new(EngineSession::new(engine, approval_manager, relay))
     }
 
-    /// A plain "approve once" decision.
+    /// A plain "approve once" decision (manager path — no bridge secret).
     fn approve_once() -> ApprovalDecision {
         ApprovalDecision {
             approved: true,
             scope: ApprovalScopeWire::Once,
             answer: None,
+            resume_token: None,
         }
+    }
+
+    /// (#568 C) A BRIDGE-backed gate (Crucible council / egress consent) is
+    /// resolvable through the ACP resolve path via its SECRET resume_token — the
+    /// ingress that was previously missing, so such gates hung to TTL on ACP.
+    /// Proves the endpoint routes a non-empty token to `ApprovalBridge::resolve`.
+    #[tokio::test]
+    async fn resolve_bridge_gate_by_secret_resume_token() {
+        let turn = EngineTurnEngine::new(placeholder_config(), ".".to_string());
+        let session = live_session();
+        turn.sessions
+            .lock()
+            .await
+            .insert("s1".to_string(), session.clone());
+
+        // Stage a bridge-backed gate the way Crucible/egress would, capturing
+        // the server-minted SECRET token and the pending waiter.
+        let (secret, mut rx) = session
+            .approval_bridge
+            .request_with_id(
+                "corr-1".to_string(),
+                wcore_agent::approval::ApprovalRequest {
+                    call_id: "corr-1".to_string(),
+                    reason: "council".to_string(),
+                    context: String::new(),
+                },
+            )
+            .await;
+        assert!(
+            matches!(rx.try_recv(), Err(TryRecvError::Empty)),
+            "gate is pending before resolve"
+        );
+
+        // Resolve through the ACP endpoint path WITH the secret token.
+        let decision = ApprovalDecision {
+            approved: true,
+            scope: ApprovalScopeWire::Once,
+            answer: None,
+            resume_token: Some(secret),
+        };
+        turn.resolve_approval("s1", "corr-1", decision)
+            .await
+            .expect("bridge gate resolves via secret resume_token");
+
+        let outcome = rx
+            .try_recv()
+            .expect("approved outcome delivered to the bridge waiter");
+        assert!(outcome.approved, "the bridge waiter sees the approval");
+    }
+
+    /// (#568 C) A stale/unknown resume_token does NOT resolve via the bridge and
+    /// falls through to the manager path; with no manager gate staged either the
+    /// endpoint 404s (`Session` error) — idempotent, never a phantom 200.
+    #[tokio::test]
+    async fn resolve_with_stale_token_falls_through_then_404s() {
+        let turn = EngineTurnEngine::new(placeholder_config(), ".".to_string());
+        let session = live_session();
+        turn.sessions
+            .lock()
+            .await
+            .insert("s2".to_string(), session.clone());
+
+        let decision = ApprovalDecision {
+            approved: true,
+            scope: ApprovalScopeWire::Once,
+            answer: None,
+            resume_token: Some("apr-does-not-exist".to_string()),
+        };
+        let err = turn
+            .resolve_approval("s2", "no-such-call", decision)
+            .await
+            .expect_err("stale token + no manager gate must not resolve");
+        assert!(
+            matches!(err, AcpError::Session(_)),
+            "stale token falls through to the manager path and 404s, got {err:?}"
+        );
     }
 
     /// (a) Resolving for an UNKNOWN session id returns a `Session` error and
