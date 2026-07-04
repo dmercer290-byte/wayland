@@ -5,7 +5,7 @@ covering both repositories:
 
 | Repo | What it is | State |
 | --- | --- | --- |
-| **`dmercer290-byte/wayland`** | The desktop app (Electron) | All features below merged to `main`, **rebased onto upstream v0.11.12** |
+| **`dmercer290-byte/wayland`** | The desktop app (Electron) | All features below merged to `main`, **rebased onto upstream v0.11.13** (bundles wayland-core v0.12.22) |
 | **`dmercer290-byte/wayland-core`** | The engine, rebranded **Genesis** (Rust) | Rebrand + 2 fixes merged to `main` |
 
 ---
