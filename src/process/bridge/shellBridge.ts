@@ -6,6 +6,7 @@
 
 import { shell } from 'electron';
 import { ipcBridge } from '@/common';
+import type { ShellOpenResult } from '@/common/adapter/ipcBridge';
 import { isAllowedExternalUrl } from '@/common/utils/urlValidation';
 import { confinePath } from './pathConfinement';
 import { exec, spawn } from 'child_process';
@@ -15,6 +16,17 @@ import * as os from 'os';
 import * as path from 'path';
 
 const execAsync = promisify(exec);
+
+/**
+ * On Linux, Electron's `shell.openPath` routes through the desktop portal
+ * (GTK/GIO/xdg-desktop-portal). In a portal-less environment (headless box,
+ * minimal desktop, sandboxed session) that call NEVER resolves and hangs the
+ * whole IPC handler indefinitely (measured 25s+ with no fallback and no toast).
+ * We race it against this timeout and, if it wins, fall through to the proven
+ * direct `xdg-open` spawn. Real desktops resolve `shell.openPath` in well under
+ * this window, so the normal success/error paths are untouched.
+ */
+const LINUX_OPEN_PATH_TIMEOUT_MS = 2500;
 
 /**
  * Check if a command exists in PATH
@@ -220,21 +232,101 @@ async function findVSCodeExecutable(): Promise<string | null> {
   return null;
 }
 
-export function initShellBridge(): void {
-  ipcBridge.shell.openFile.provider(async (path) => {
+/**
+ * Spawn `xdg-open <target>` detached and resolve once we know whether the
+ * launcher itself could start. A missing `xdg-open` (xdg-utils not installed -
+ * common on minimal Linux desktops) surfaces as a spawn `error` event (ENOENT)
+ * which we capture and report; otherwise `xdg-open` forks the real handler and
+ * exits quickly, so the absence of a spawn error means the launch succeeded.
+ */
+function spawnXdgOpen(target: string): Promise<ShellOpenResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result: ShellOpenResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
     try {
-      const errorMessage = await shell.openPath(path);
-      if (errorMessage) {
-        console.warn(`[shellBridge] Failed to open path: ${errorMessage}`);
-      }
-    } catch (error) {
-      console.warn(`[shellBridge] Failed to open path:`, (error as Error).message);
+      const child = spawn('xdg-open', [target], { detached: true, stdio: 'ignore' });
+      child.on('error', (err) => settle({ ok: false, error: err.message }));
+      child.unref();
+      // No spawn error within a short window ⇒ the launcher started successfully.
+      setTimeout(() => settle({ ok: true }), 200);
+    } catch (err) {
+      settle({ ok: false, error: (err as Error).message });
     }
   });
+}
 
-  ipcBridge.shell.showItemInFolder.provider((path) => {
-    shell.showItemInFolder(path);
-    return Promise.resolve();
+/**
+ * Open a filesystem path with the OS default handler and report the outcome.
+ *
+ * On Linux, Electron's `shell.openPath` delegates to `xdg-open`; when xdg-utils
+ * is absent or no desktop association exists it returns a non-empty error string
+ * (or silently no-ops). Previously that failure was only `console.warn`-ed and
+ * the provider resolved as success, so the renderer's context-menu actions did
+ * nothing with no error shown (#616). We now surface the failure as a structured
+ * result and, on Linux, retry with an explicit `xdg-open` spawn whose ENOENT we
+ * can detect and report.
+ */
+async function openPathReporting(target: string): Promise<ShellOpenResult> {
+  try {
+    if (process.platform === 'linux') {
+      // Race shell.openPath against a timeout: it can hang forever when the
+      // desktop portal is unavailable (see LINUX_OPEN_PATH_TIMEOUT_MS). A fast
+      // rejection still propagates to the outer catch (unchanged behavior); a
+      // fast resolve of "" is success; anything else (non-empty error string OR
+      // a timeout/hang) falls through to the direct xdg-open spawn.
+      const TIMED_OUT = Symbol('shell.openPath-timeout');
+      let timer: ReturnType<typeof setTimeout>;
+      const timeoutPromise = new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), LINUX_OPEN_PATH_TIMEOUT_MS);
+      });
+      const openPathPromise = shell.openPath(target);
+      // If the timeout wins the race, openPathPromise is left pending; attach a
+      // no-op catch so an eventual late rejection can never surface as an
+      // unhandled promise rejection.
+      openPathPromise.catch(() => {});
+      let outcome: string | typeof TIMED_OUT;
+      try {
+        outcome = await Promise.race([openPathPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timer!);
+      }
+      if (outcome !== TIMED_OUT && !outcome) return { ok: true };
+      const fallback = await spawnXdgOpen(target);
+      if (fallback.ok) return { ok: true };
+      const openPathError = outcome === TIMED_OUT ? 'shell.openPath timed out' : outcome;
+      return { ok: false, error: fallback.error || openPathError };
+    }
+    // macOS / Windows: shell.openPath is reliable, so await it directly.
+    const errorMessage = await shell.openPath(target);
+    if (!errorMessage) return { ok: true };
+    return { ok: false, error: errorMessage };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+export function initShellBridge(): void {
+  ipcBridge.shell.openFile.provider((filePath) => openPathReporting(filePath));
+
+  ipcBridge.shell.showItemInFolder.provider(async (filePath) => {
+    // macOS (`open -R`) and Windows (`explorer /select`) reveal reliably through
+    // Electron. On Linux, `shell.showItemInFolder` depends on a freedesktop file
+    // manager over D-Bus and silently no-ops when none is available (#616), so
+    // fall back to opening the containing directory via `xdg-open` and report
+    // failure instead of a silent no-op.
+    if (process.platform === 'linux') {
+      return openPathReporting(path.dirname(filePath));
+    }
+    try {
+      shell.showItemInFolder(filePath);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
   });
 
   ipcBridge.shell.openExternal.provider(async (url) => {

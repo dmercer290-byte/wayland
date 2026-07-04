@@ -102,7 +102,20 @@
     "transcript_description": "Отражает чаты, вызовы инструментов и размышления в стенограмме памяти рабочего пространства. Старые записи автоматически сжимаются; секреты удаляются перед записью.",
     "manual_install_hint": "Для ручной установки выполните в терминале: `npx -y --package @ijfw/install@latest ijfw-install`",
     "about_title": "IJFW Memory",
-    "about_body": "Открытый движок постоянной памяти от Ferrox Labs."
+    "about_body": "Открытый движок постоянной памяти от Ferrox Labs.",
+    "setup_status_title": "Состояние настройки",
+    "status_install_label": "IJFW установлен",
+    "status_install_ok": "Установлен и актуален",
+    "status_install_pending": "Ещё не установлен",
+    "status_clis_label": "Обнаружены CLI",
+    "status_clis_ok": "Обнаружено: {{count}}",
+    "status_clis_none": "Пока не обнаружено",
+    "status_runtime_label": "Среда Memory",
+    "status_runtime_full": "Активна",
+    "status_runtime_degraded": "Ограничена (недоступна)",
+    "test_button": "Проверить",
+    "test_pass": "Memory ответила. Всё в порядке.",
+    "test_fail": "Memory не ответила. Проверьте статус установки выше."
   },
   "prelude": {
     "installing_notice": "IJFW устанавливается. Внешние CLI (Claude Code, Codex, Gemini CLI) подхватят его после завершения установки.",

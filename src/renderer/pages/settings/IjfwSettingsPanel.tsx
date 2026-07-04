@@ -19,6 +19,8 @@ import { Button, Message, Switch, Typography } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
+import type { IjfwLifecycleStatus } from '@/common/adapter/ipcBridge';
+import IjfwSetupStatus from './components/IjfwSetupStatus';
 import SettingsPageWrapper from './components/SettingsPageWrapper';
 
 const IJFW_GITHUB_URL = 'https://github.com/FerroxLabs/ijfw';
@@ -27,6 +29,8 @@ const IjfwSettingsPanel: React.FC = () => {
   const { t } = useTranslation();
   const [skipEnabled, setSkipEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<IjfwLifecycleStatus | null>(null);
+  const [cliCount, setCliCount] = useState(0);
   const [transcriptEnabled, setTranscriptEnabled] = useState(true);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
 
@@ -71,6 +75,7 @@ const IjfwSettingsPanel: React.FC = () => {
 
   // Read initial opt-out state from the lifecycle snapshot. Wave 2 sets
   // `status: 'not_installed', reason: 'opt_out'` whenever the Skip flag is on.
+  // Also seeds the setup-status checklist (install status + detected-CLI count).
   useEffect(() => {
     let disposed = false;
     void ipcBridge.ijfw.getStatus
@@ -78,6 +83,8 @@ const IjfwSettingsPanel: React.FC = () => {
       .then((payload) => {
         if (disposed || !payload) return;
         setSkipEnabled(payload.status === 'not_installed' && payload.reason === 'opt_out');
+        setStatus(payload.status);
+        setCliCount(payload.cliCount ?? 0);
       })
       .catch((err) => {
         console.error('[IjfwSettingsPanel] getStatus failed:', err);
@@ -136,6 +143,8 @@ const IjfwSettingsPanel: React.FC = () => {
         <Typography.Title heading={5} className='!mb-0'>
           {t('memory.settings.panel_title', { defaultValue: 'IJFW Memory (Ferrox Labs)' })}
         </Typography.Title>
+
+        <IjfwSetupStatus status={status} cliCount={cliCount} />
 
         <div className='flex flex-col gap-12px p-16px rd-12px bg-aou-1'>
           <div className='flex items-center justify-between gap-16px'>

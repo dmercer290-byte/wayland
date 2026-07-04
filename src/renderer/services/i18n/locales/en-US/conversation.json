@@ -19,7 +19,10 @@
     "none": "None",
     "quickActionsTitle": "What can Wayland do?",
     "quickActionFeedback": "Got feedback or suggestions?",
-    "quickActionStar": "Like us? Give us a star!"
+    "quickActionStar": "Like us? Give us a star!",
+    "bugReportScreenshotCopied": "Screenshot copied — paste it into the issue with Cmd/Ctrl+V.",
+    "bugReportNoScreenshot": "Opening a pre-filled GitHub issue — attach a screenshot manually.",
+    "bugReportChooser": "Opening the GitHub issue chooser (diagnostics unavailable)."
   },
   "history": {
     "recents": "Recents",
@@ -353,6 +356,10 @@
     "expandRow": "Toggle step detail",
     "sourcesCount": "{{count}} sources"
   },
+  "sidebarActivity": {
+    "working": "Working…",
+    "toggleAgents": "Show sub-agents"
+  },
   "actions": {
     "readAloud": "Read aloud",
     "stopReading": "Stop",
@@ -429,6 +436,22 @@
     "dismiss": "Dismiss",
     "recommended": "(recommended)"
   },
+  "contextCeiling": {
+    "title": "This run exceeded {{model}}’s context window",
+    "titleNoModel": "This run exceeded the model’s context window",
+    "explainer": "The request grew past the model’s context-window limit and history compaction couldn’t shrink it any further. Switch to a model with a larger context window, then retry the last message.",
+    "switch": {
+      "label": "Switch to a larger-context model",
+      "sublabel": "Pick a model with a bigger context window from the picker."
+    },
+    "retry": {
+      "label": "Retry the last message",
+      "sublabel": "Re-run the message that hit the limit on the selected model.",
+      "action": "Retry"
+    },
+    "details": "Show error details",
+    "dismiss": "Dismiss"
+  },
   "composerMenu": {
     "skills": "Skills",
     "connectors": "Connectors",
@@ -488,5 +511,8 @@
   },
   "cost": {
     "badgeTooltip": "Spend in this conversation: {{cost}} · {{tokens}} tokens"
+  },
+  "tool": {
+    "openGoogleConsent": "Open Google sign-in"
   }
 }
