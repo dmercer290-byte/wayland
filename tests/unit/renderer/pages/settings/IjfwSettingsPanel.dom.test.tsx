@@ -27,6 +27,8 @@ const {
   getRuntimeModeInvoke,
   brainInvoke,
   skipSetupInvoke,
+  getTranscriptLoggingInvoke,
+  setTranscriptLoggingInvoke,
   openExternalInvoke,
   messageSuccess,
   messageError,
@@ -35,6 +37,8 @@ const {
   getRuntimeModeInvoke: vi.fn<() => Promise<'full' | 'degraded'>>(),
   brainInvoke: vi.fn<(args: { verb: string }) => Promise<{ ok: boolean }>>(),
   skipSetupInvoke: vi.fn<(args: { enabled: boolean }) => Promise<{ ok: true }>>(),
+  getTranscriptLoggingInvoke: vi.fn<() => Promise<{ enabled: boolean }>>(),
+  setTranscriptLoggingInvoke: vi.fn<(args: { enabled: boolean }) => Promise<{ ok: true }>>(),
   openExternalInvoke: vi.fn<(url: string) => Promise<void>>(),
   messageSuccess: vi.fn<(msg: string) => void>(),
   messageError: vi.fn<(msg: string) => void>(),
@@ -53,6 +57,10 @@ vi.mock('@/common', () => ({
       getRuntimeMode: { invoke: getRuntimeModeInvoke },
       brainInvoke: { invoke: brainInvoke },
       skipSetup: { invoke: skipSetupInvoke },
+    },
+    memory: {
+      getTranscriptLogging: { invoke: getTranscriptLoggingInvoke },
+      setTranscriptLogging: { invoke: setTranscriptLoggingInvoke },
     },
     shell: {
       openExternal: { invoke: openExternalInvoke },
@@ -82,6 +90,8 @@ beforeEach(() => {
   getRuntimeModeInvoke.mockReset();
   brainInvoke.mockReset();
   skipSetupInvoke.mockReset();
+  getTranscriptLoggingInvoke.mockReset();
+  setTranscriptLoggingInvoke.mockReset();
   openExternalInvoke.mockReset();
   messageSuccess.mockReset();
   messageError.mockReset();
@@ -89,6 +99,8 @@ beforeEach(() => {
   getRuntimeModeInvoke.mockResolvedValue('full');
   brainInvoke.mockResolvedValue({ ok: true });
   skipSetupInvoke.mockResolvedValue({ ok: true });
+  getTranscriptLoggingInvoke.mockResolvedValue({ enabled: true });
+  setTranscriptLoggingInvoke.mockResolvedValue({ ok: true });
   openExternalInvoke.mockResolvedValue(undefined);
 });
 
