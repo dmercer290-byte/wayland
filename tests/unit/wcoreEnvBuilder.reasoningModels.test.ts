@@ -4,7 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// @process/secrets pulls in Electron (keychain vault, #710); envBuilder only
+// needs the child-fd constant, so stub the module to keep this suite Node-only.
+vi.mock('@process/secrets', () => ({
+  VAULT_PASSPHRASE_CHILD_FD: 3,
+  resolveSpawnVaultPassphrase: vi.fn(),
+}));
+
 import { buildSpawnConfig } from '../../src/process/agent/wcore/envBuilder';
 import type { TProviderWithModel } from '../../src/common/config/storage';
 

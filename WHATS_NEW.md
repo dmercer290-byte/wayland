@@ -3,10 +3,10 @@
 Everything added to the `dmercer290-byte` forks in the July 2026 working session —
 covering both repositories:
 
-| Repo | What it is | State |
-| --- | --- | --- |
-| **`dmercer290-byte/wayland`** | The desktop app (Electron) | All features below merged to `main`, **rebased onto upstream v0.11.13** (bundles wayland-core v0.12.22) |
-| **`dmercer290-byte/wayland-core`** | The engine, rebranded **Genesis** (Rust) | Rebrand + 2 fixes merged to `main` |
+| Repo                               | What it is                               | State                                                                                                   |
+| ---------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **`dmercer290-byte/wayland`**      | The desktop app (Electron)               | All features below merged to `main`, **rebased onto upstream v0.11.17** (bundles wayland-core v0.12.24) |
+| **`dmercer290-byte/wayland-core`** | The engine, rebranded **Genesis** (Rust) | Rebrand + 2 fixes merged to `main`                                                                      |
 
 ---
 
@@ -19,8 +19,8 @@ binary (`wayland-core` → `genesis-core`), five plugin crates (`genesis-browser
 
 Deliberately preserved:
 
-- **Linux display-protocol code** — this codebase also touches Wayland *the
-  Linux display server* (screen control). `WAYLAND_DISPLAY`, the compositor
+- **Linux display-protocol code** — this codebase also touches Wayland _the
+  Linux display server_ (screen control). `WAYLAND_DISPLAY`, the compositor
   probes, `Xwayland`, and the `wayland`/`wayland-test` cargo features keep
   their correct names.
 - **ChatGPT OAuth `originator` header** — server-validated; renaming would
@@ -39,7 +39,7 @@ Verified: the full 55-crate workspace compiles; the binary reports
   server-supplied tool-call index at 128 slots (fail-closed), so a malicious
   or buggy endpoint can't force a billion-entry allocation with one frame.
 - **#135 — duplicate MCP servers**: re-adding an MCP server with a known name
-  now *replaces* it — same-named tools swap in place (breaker state kept),
+  now _replaces_ it — same-named tools swap in place (breaker state kept),
   stale tools are retired, and the old child process is shut down.
 - #139 (tool-name sanitization) and #125 (Windows AppContainer hang) were
   already fixed on the upstream main this fork tracks; #113 (browser tool)
@@ -48,9 +48,10 @@ Verified: the full 55-crate workspace compiles; the binary reports
 ### Desktop app (`wayland`, from FerroxLabs issues)
 
 - **#587 — model selector missing in workflows**: workflows previously
-  hard-disabled model switching. Dedicated workflow panels now wire the real
-  model-selection hooks and surface the selector under the workflow header —
-  you can switch models mid-workflow (e.g., when one runs out of credits).
+  hard-disabled model switching. Fixed in the fork first (selector under the
+  workflow header); upstream v0.11.16 shipped its own version (`headerAccessory`
+  slot next to the view-mode toggle, also covering ACP/codex/remote backends),
+  which this fork now carries after the v0.11.17 merge.
 - **#572 — broken ijfw install command**: the troubleshooting UI told users to
   run `npx -y @ijfw/install@latest`, which fails ("could not determine
   executable to run" — the package exposes three binaries). Corrected to
@@ -86,11 +87,11 @@ tag.
 **Settings → General → "Context mode"** controls when the Genesis engine
 auto-compacts long conversations before re-sending them to the model:
 
-| Mode | Behavior | Use when |
-| --- | --- | --- |
-| **Economy** | Compacts around ~50K tokens; keeps 3 recent tool results | You pay per token and run long sessions |
-| **Light** (default) | Engine defaults; compacts near the context limit | Balanced |
-| **Max** | Holds context as long as possible; keeps 10 tool results | Recall matters more than cost |
+| Mode                | Behavior                                                 | Use when                                |
+| ------------------- | -------------------------------------------------------- | --------------------------------------- |
+| **Economy**         | Compacts around ~50K tokens; keeps 3 recent tool results | You pay per token and run long sessions |
+| **Light** (default) | Engine defaults; compacts near the context limit         | Balanced                                |
+| **Max**             | Holds context as long as possible; keeps 10 tool results | Recall matters more than cost           |
 
 Applies to new engine sessions via the generated `.wcore.toml`; raw-engine
 (power-user) mode is untouched.
@@ -146,12 +147,12 @@ Scheduled tasks now recover from provider rate limits instead of just failing:
 
 ## New configuration keys
 
-| Key | Where set | Meaning |
-| --- | --- | --- |
-| `memory.transcriptLogging` | Settings → IJFW Memory | Mirror chats/tools/thoughts into transcript.md (default on) |
-| `wcore.compactMode` | Settings → General | `economy` \| `light` \| `max` |
-| `modelHub.servers` | Settings → Models → Model Hub | Registered model servers |
-| `rateLimit.fallbackModel` | Settings → General | `{ providerId, useModel }` weekly-cap failover |
+| Key                        | Where set                     | Meaning                                                     |
+| -------------------------- | ----------------------------- | ----------------------------------------------------------- |
+| `memory.transcriptLogging` | Settings → IJFW Memory        | Mirror chats/tools/thoughts into transcript.md (default on) |
+| `wcore.compactMode`        | Settings → General            | `economy` \| `light` \| `max`                               |
+| `modelHub.servers`         | Settings → Models → Model Hub | Registered model servers                                    |
+| `rateLimit.fallbackModel`  | Settings → General            | `{ providerId, useModel }` weekly-cap failover              |
 
 ## Verification status
 
