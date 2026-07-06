@@ -187,6 +187,151 @@ describe('getEnhancedEnv', () => {
 });
 
 // -------------------------------------------------------------------
+// #628 - version-manager node (nvm/volta/fnm) PATH + env on macOS/Linux.
+//   A Finder/Dock launch has a login-only shell whose PATH misses the
+//   interactive-rc node dir; getEnhancedEnv must append the version-manager
+//   node bin and capture NVM_DIR / VOLTA_HOME.
+// -------------------------------------------------------------------
+describe('getEnhancedEnv version-manager node (#628)', () => {
+  // Build every path with path.join so the mock keys use the SAME separators as
+  // the code under test (which uses path.join). The code spoofs platform to
+  // 'darwin', but path.join still follows the REAL runner OS (backslashes on
+  // Windows), so hardcoded forward-slash literals would never match there.
+  const HOME = '/home/tester';
+  const NVM_DIR = path.join(HOME, '.nvm');
+  const NVM_NODE_BASE = path.join(NVM_DIR, 'versions', 'node');
+  const NVM_BIN = path.join(NVM_NODE_BASE, 'v20.11.0', 'bin');
+  const NVM_NODE = path.join(NVM_BIN, 'node');
+  const VOLTA_DIR = path.join(HOME, '.volta');
+  const VOLTA_BIN = path.join(VOLTA_DIR, 'bin');
+  const originalPlatform = process.platform;
+  let savedNvmDir: string | undefined;
+  let savedVoltaHome: string | undefined;
+
+  beforeEach(() => {
+    vi.resetModules();
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    // findSuitableNodeBin derives its nvm search base from process.env.NVM_DIR
+    // (falling back to ~/.nvm). A runner/leaked NVM_DIR would point the base
+    // away from the mocked dirs and defeat the append. Neutralize both vars so
+    // these tests are deterministic regardless of the ambient env or ordering.
+    savedNvmDir = process.env.NVM_DIR;
+    savedVoltaHome = process.env.VOLTA_HOME;
+    delete process.env.NVM_DIR;
+    delete process.env.VOLTA_HOME;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+    if (savedNvmDir === undefined) delete process.env.NVM_DIR;
+    else process.env.NVM_DIR = savedNvmDir;
+    if (savedVoltaHome === undefined) delete process.env.VOLTA_HOME;
+    else process.env.VOLTA_HOME = savedVoltaHome;
+  });
+
+  // Mock os.homedir + fs so the version-manager dirs "exist"; the login shell
+  // returns a PATH WITHOUT the nvm node dir (the Finder-launch condition).
+  const mockManagerFs = (present: Set<string>) => {
+    vi.doMock('os', async () => {
+      const actual = await vi.importActual<typeof import('os')>('os');
+      return { ...actual, default: { ...actual, homedir: () => HOME }, homedir: () => HOME };
+    });
+    vi.doMock('child_process', () => ({
+      // login shell PATH deliberately omits the nvm bin (the bug condition)
+      execFileSync: vi.fn().mockReturnValue('PATH=/usr/bin:/bin\nHOME=/home/tester\n'),
+      execFile: vi.fn(),
+    }));
+    vi.doMock('fs', async () => {
+      const actual = await vi.importActual<typeof import('fs')>('fs');
+      return {
+        ...actual,
+        existsSync: vi.fn((p: string) => present.has(p)),
+        readdirSync: vi.fn((p: string) => (p === NVM_NODE_BASE ? ['v20.11.0'] : [])),
+        accessSync: vi.fn((p: string) => {
+          if (!present.has(p)) throw new Error('ENOENT');
+        }),
+      };
+    });
+  };
+
+  it('appends the nvm versioned node bin dir to PATH', async () => {
+    mockManagerFs(new Set([NVM_DIR, NVM_NODE_BASE, NVM_BIN, NVM_NODE]));
+    const originalPath = process.env.PATH;
+    process.env.PATH = '/usr/bin';
+
+    const { getEnhancedEnv } = await import('@process/utils/shellEnv');
+    const result = getEnhancedEnv();
+
+    expect(result.PATH).toContain(NVM_BIN);
+    process.env.PATH = originalPath;
+  });
+
+  it('appends the volta shim dir to PATH when present', async () => {
+    mockManagerFs(new Set([VOLTA_DIR, VOLTA_BIN]));
+    const originalPath = process.env.PATH;
+    process.env.PATH = '/usr/bin';
+
+    const { getEnhancedEnv } = await import('@process/utils/shellEnv');
+    const result = getEnhancedEnv();
+
+    expect(result.PATH).toContain(VOLTA_BIN);
+    process.env.PATH = originalPath;
+  });
+
+  it('captures NVM_DIR and VOLTA_HOME when the dirs exist and the vars are unset', async () => {
+    mockManagerFs(new Set([NVM_DIR, VOLTA_DIR, VOLTA_BIN, NVM_NODE_BASE, NVM_BIN, NVM_NODE]));
+    const prevNvm = process.env.NVM_DIR;
+    const prevVolta = process.env.VOLTA_HOME;
+    delete process.env.NVM_DIR;
+    delete process.env.VOLTA_HOME;
+
+    const { getEnhancedEnv } = await import('@process/utils/shellEnv');
+    const result = getEnhancedEnv();
+
+    expect(result.NVM_DIR).toBe(NVM_DIR);
+    expect(result.VOLTA_HOME).toBe(VOLTA_DIR);
+    if (prevNvm === undefined) delete process.env.NVM_DIR;
+    else process.env.NVM_DIR = prevNvm;
+    if (prevVolta === undefined) delete process.env.VOLTA_HOME;
+    else process.env.VOLTA_HOME = prevVolta;
+  });
+
+  it('does NOT override an existing NVM_DIR from the environment', async () => {
+    mockManagerFs(new Set([NVM_DIR, NVM_NODE_BASE, NVM_BIN, NVM_NODE]));
+    const prevNvm = process.env.NVM_DIR;
+    process.env.NVM_DIR = '/custom/nvm';
+
+    const { getEnhancedEnv } = await import('@process/utils/shellEnv');
+    const result = getEnhancedEnv();
+
+    expect(result.NVM_DIR).toBe('/custom/nvm');
+    if (prevNvm === undefined) delete process.env.NVM_DIR;
+    else process.env.NVM_DIR = prevNvm;
+  });
+
+  it('adds nothing when no version manager is installed', async () => {
+    mockManagerFs(new Set()); // nothing exists
+    const originalPath = process.env.PATH;
+    process.env.PATH = '/usr/bin';
+    const prevNvm = process.env.NVM_DIR;
+    const prevVolta = process.env.VOLTA_HOME;
+    delete process.env.NVM_DIR;
+    delete process.env.VOLTA_HOME;
+
+    const { getEnhancedEnv } = await import('@process/utils/shellEnv');
+    const result = getEnhancedEnv();
+
+    expect(result.PATH).toContain('/usr/bin');
+    expect(result.NVM_DIR).toBeUndefined();
+    expect(result.VOLTA_HOME).toBeUndefined();
+
+    process.env.PATH = originalPath;
+    if (prevNvm !== undefined) process.env.NVM_DIR = prevNvm;
+    if (prevVolta !== undefined) process.env.VOLTA_HOME = prevVolta;
+  });
+});
+
+// -------------------------------------------------------------------
 // 3. Windows extra tool path detection
 //    getWindowsExtraToolPaths() is private, but its effect is visible
 //    through getEnhancedEnv() on win32.

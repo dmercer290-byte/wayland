@@ -51,6 +51,11 @@ const SystemModalContent: React.FC = () => {
   const [agentIdleTimeout, setAgentIdleTimeout] = useState<number>(5);
   const [saveUploadToWorkspace, setSaveUploadToWorkspace] = useState(false);
   const [autoPreviewOfficeFiles, setAutoPreviewOfficeFiles] = useState(true);
+  // #645 Terminal mode (advanced, off by default).
+  const [terminalMode, setTerminalMode] = useState(false);
+  // Update-on-quiesce (#651/#632): defer an auto-update restart while the app is
+  // actively working. Default ON.
+  const [deferUpdateWhileBusy, setDeferUpdateWhileBusy] = useState(true);
   // Concierge default landing persona (reversible). Default ON: a fresh chat
   // starts on the Concierge assistant; off keeps the last-used engine.
   const [conciergeDefaultPersona, setConciergeDefaultPersona] = useState(true);
@@ -124,12 +129,26 @@ const SystemModalContent: React.FC = () => {
       .catch((err) => console.warn('[SystemModalContent.getAutoPreviewOfficeFiles]', err));
   }, []);
 
+  useEffect(() => {
+    ipcBridge.systemSettings.getTerminalEnabled
+      .invoke()
+      .then((enabled) => setTerminalMode(enabled))
+      .catch((err) => console.warn('[SystemModalContent.getTerminalEnabled]', err));
+  }, []);
+
   // L17 (AUDIT-05 F16): poll auto-updater bootstrap status once on mount.
   useEffect(() => {
     ipcBridge.autoUpdate.getStatus
       .invoke()
       .then((status) => setUpdateChannelStatus(status))
       .catch((err) => console.warn('[SystemModalContent.getAutoUpdaterStatus]', err));
+  }, []);
+
+  useEffect(() => {
+    ipcBridge.autoUpdate.getDeferWhileBusy
+      .invoke()
+      .then((enabled) => setDeferUpdateWhileBusy(enabled))
+      .catch((err) => console.warn('[SystemModalContent.getDeferWhileBusy]', err));
   }, []);
 
   useEffect(() => {
@@ -142,6 +161,13 @@ const SystemModalContent: React.FC = () => {
     setCloseToTray(checked);
     ipcBridge.systemSettings.setCloseToTray.invoke({ enabled: checked }).catch(() => {
       setCloseToTray(!checked);
+    });
+  }, []);
+
+  const handleDeferUpdateWhileBusyChange = useCallback((checked: boolean) => {
+    setDeferUpdateWhileBusy(checked);
+    ipcBridge.autoUpdate.setDeferWhileBusy.invoke({ enabled: checked }).catch(() => {
+      setDeferUpdateWhileBusy(!checked);
     });
   }, []);
 
@@ -213,6 +239,13 @@ const SystemModalContent: React.FC = () => {
     setSaveUploadToWorkspace(checked);
     ipcBridge.systemSettings.setSaveUploadToWorkspace.invoke({ enabled: checked }).catch(() => {
       setSaveUploadToWorkspace(!checked);
+    });
+  }, []);
+
+  const handleTerminalModeChange = useCallback((checked: boolean) => {
+    setTerminalMode(checked);
+    ipcBridge.systemSettings.setTerminalEnabled.invoke({ enabled: checked }).catch(() => {
+      setTerminalMode(!checked);
     });
   }, []);
 
@@ -307,6 +340,28 @@ const SystemModalContent: React.FC = () => {
       label: t('settings.autoPreviewOfficeFiles'),
       description: t('settings.autoPreviewOfficeFilesDesc'),
       component: <Switch checked={autoPreviewOfficeFiles} onChange={handleAutoPreviewOfficeFilesChange} />,
+    },
+    {
+      key: 'terminalMode',
+      label: t('settings.terminalMode', { defaultValue: 'Terminal mode' }),
+      description: t('settings.terminalModeDesc', {
+        defaultValue: "Open the current chat's agent in its native terminal UI. Advanced.",
+      }),
+      component: (
+        <Switch checked={terminalMode} onChange={handleTerminalModeChange} data-testid='terminal-mode-switch' />
+      ),
+    },
+    {
+      key: 'deferUpdateWhileBusy',
+      label: t('settings.deferUpdateWhileBusy'),
+      description: t('settings.deferUpdateWhileBusyDesc'),
+      component: (
+        <Switch
+          checked={deferUpdateWhileBusy}
+          onChange={handleDeferUpdateWhileBusyChange}
+          data-testid='defer-update-while-busy-switch'
+        />
+      ),
     },
     {
       key: 'conciergeDefaultPersona',

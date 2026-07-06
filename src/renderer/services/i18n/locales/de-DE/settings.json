@@ -859,7 +859,8 @@
         "imapPassword": {
           "label": "IMAP-Passwort",
           "help": "Verwende ein App-Passwort für Gmail / Outlook, deine Kontoanmeldung funktioniert nicht.",
-          "required": "IMAP-Passwort ist erforderlich"
+          "required": "IMAP-Passwort ist erforderlich",
+          "savedPlaceholder": "Gespeichert – leer lassen, um zu behalten"
         },
         "imapTls": {
           "label": "IMAP TLS",
@@ -884,7 +885,8 @@
         },
         "smtpPassword": {
           "label": "SMTP-Passwort",
-          "required": "SMTP-Passwort ist erforderlich"
+          "required": "SMTP-Passwort ist erforderlich",
+          "savedPlaceholder": "Gespeichert – leer lassen, um zu behalten"
         },
         "smtpTls": {
           "label": "SMTP TLS",
@@ -2610,5 +2612,7 @@
     "subtitle": "Erreicht eine geplante Aufgabe ein Wochenlimit, wechselt sie zu diesem Modell (z. B. OpenRouter oder ZenMux) und versucht es erneut. Kurzzeitlimits werden beim Reset automatisch erneut versucht.",
     "none": "Kein Ausweichmodell",
     "pickModel": "Modell wählen"
-  }
+  },
+  "deferUpdateWhileBusy": "Updates bei Aktivität verschieben",
+  "deferUpdateWhileBusyDesc": "Warten, bis aktive Chats, geplante Aufgaben und Teams abgeschlossen sind, bevor zum Aktualisieren neu gestartet wird. Das Update wird im Leerlauf oder beim Beenden angewendet."
 }

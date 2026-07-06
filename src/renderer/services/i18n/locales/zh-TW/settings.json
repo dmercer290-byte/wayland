@@ -849,7 +849,8 @@
         "imapPassword": {
           "label": "IMAP 密碼",
           "help": "Gmail / Outlook 請使用應用程式密碼，您的帳號登入密碼無法使用。",
-          "required": "必須填寫 IMAP 密碼"
+          "required": "必須填寫 IMAP 密碼",
+          "savedPlaceholder": "已儲存 - 留空以保留"
         },
         "imapTls": {
           "label": "IMAP TLS",
@@ -874,7 +875,8 @@
         },
         "smtpPassword": {
           "label": "SMTP 密碼",
-          "required": "必須填寫 SMTP 密碼"
+          "required": "必須填寫 SMTP 密碼",
+          "savedPlaceholder": "已儲存 - 留空以保留"
         },
         "smtpTls": {
           "label": "SMTP TLS",
@@ -2611,5 +2613,7 @@
     "subtitle": "當排程任務達到每週限額時，會切換到此模型（如 OpenRouter 或 ZenMux）並重試。短週期限額會在重置時自動重試。",
     "none": "無備用",
     "pickModel": "選擇模型"
-  }
+  },
+  "deferUpdateWhileBusy": "忙碌時延後更新",
+  "deferUpdateWhileBusyDesc": "在重新啟動以更新之前，等待進行中的對話、排程工作和團隊完成。更新將在閒置時或結束時套用。"
 }

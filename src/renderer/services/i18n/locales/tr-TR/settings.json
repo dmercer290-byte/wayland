@@ -849,7 +849,8 @@
         "imapPassword": {
           "label": "IMAP Parolası",
           "help": "Gmail / Outlook için uygulama parolası kullanın; hesap giriş parolanız çalışmaz.",
-          "required": "IMAP parolası gereklidir"
+          "required": "IMAP parolası gereklidir",
+          "savedPlaceholder": "Kaydedildi - korumak için boş bırakın"
         },
         "imapTls": {
           "label": "IMAP TLS",
@@ -874,7 +875,8 @@
         },
         "smtpPassword": {
           "label": "SMTP Parolası",
-          "required": "SMTP parolası gereklidir"
+          "required": "SMTP parolası gereklidir",
+          "savedPlaceholder": "Kaydedildi - korumak için boş bırakın"
         },
         "smtpTls": {
           "label": "SMTP TLS",
@@ -2609,5 +2611,7 @@
     "subtitle": "Zamanlanmış bir görev haftalık limite ulaştığında bu modele (ör. OpenRouter veya ZenMux) geçer ve yeniden dener. Kısa süreli limitler sıfırlanınca otomatik yeniden denenir.",
     "none": "Yedek yok",
     "pickModel": "Model seçin"
-  }
+  },
+  "deferUpdateWhileBusy": "Meşgulken güncellemeleri ertele",
+  "deferUpdateWhileBusyDesc": "Güncelleme için yeniden başlatmadan önce etkin sohbetlerin, zamanlanmış görevlerin ve ekiplerin bitmesini bekleyin. Güncelleme boştayken veya çıkışta uygulanır."
 }

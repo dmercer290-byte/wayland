@@ -849,7 +849,8 @@
         "imapPassword": {
           "label": "IMAP 密码",
           "help": "Gmail / Outlook 请使用应用专用密码，账户登录密码无法使用。",
-          "required": "IMAP 密码为必填项"
+          "required": "IMAP 密码为必填项",
+          "savedPlaceholder": "已保存 - 留空以保留"
         },
         "imapTls": {
           "label": "IMAP TLS",
@@ -874,7 +875,8 @@
         },
         "smtpPassword": {
           "label": "SMTP 密码",
-          "required": "SMTP 密码为必填项"
+          "required": "SMTP 密码为必填项",
+          "savedPlaceholder": "已保存 - 留空以保留"
         },
         "smtpTls": {
           "label": "SMTP TLS",
@@ -2610,5 +2612,7 @@
     "subtitle": "当计划任务达到每周限额时，会切换到此模型（如 OpenRouter 或 ZenMux）并重试。短周期限额会在重置时自动重试。",
     "none": "无备用",
     "pickModel": "选择模型"
-  }
+  },
+  "deferUpdateWhileBusy": "忙碌时延迟更新",
+  "deferUpdateWhileBusyDesc": "在重启以更新之前，等待进行中的对话、计划任务和团队完成。更新将在空闲时或退出时应用。"
 }

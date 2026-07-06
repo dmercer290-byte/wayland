@@ -140,6 +140,14 @@ const REMOTE_DENIED_PREFIXES: readonly string[] = [
   // later. byConversation/series in particular disclose per-conversation usage
   // and a fine-grained activity timeline. Local-renderer-only surface.
   'cost.',
+  // #645 Terminal mode. terminal.open spawns a real PTY running the chat's agent
+  // CLI on a TTY; terminal.input writes keystrokes into it. A paired-device WS
+  // token proves a remote browser, NOT the local trusted user, so the ENTIRE
+  // terminal.* namespace (open/input/resize/close) is denied to remote callers.
+  // This IS the "local-only" control from the spec: a buildProvider handler has
+  // no per-call remote signal, so the guarantee is enforced here at the wire by
+  // name — a remote peer can never spawn or attach a PTY (acceptance §8.6).
+  'terminal.',
 ];
 // Note: fs provider keys are registered WITHOUT an `fs.` prefix on the wire
 // (e.g. `write-file`, `remove-entry`), so the dangerous fs surface is enumerated
@@ -156,6 +164,7 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   'write-file',
   'remove-entry',
   'rename-entry',
+  'move-entry',
   'read-file',
   'read-file-buffer',
   'create-temp-file',
@@ -270,6 +279,12 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   //     allowed. ---
   'channel.enable-plugin',
   'channel.disable-plugin',
+  // Discloses a channel's saved connection details (IMAP/SMTP hosts + the
+  // account address). Same disclosure threat class as the config mutators
+  // above, so a paired WebUI must not read it back. Secrets are already reduced
+  // to presence flags in the handler, but the non-secret host/address fields
+  // still warrant deny for remote callers.
+  'channel.get-plugin-config',
   'channel.rotate-webhook-token',
   'channel.sync-channel-settings',
   'channel.revoke-user',
@@ -334,6 +349,16 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   'mcp.cancel-oauth',
   'mcp.logout-oauth',
   'mcp.set-byo-oauth-credentials',
+  // --- Memory mutation (#414 edit/delete of the user's local memory files) ---
+  //     The memory.* namespace is intentionally open to the paired WebUI for
+  //     READS (list/get/projects/tags/stats). These two providers perform a
+  //     real, hard, unrecoverable rewrite/delete of an on-disk memory block, so
+  //     a remote/paired peer must never reach them: update-entry silently
+  //     rewrites a block, delete-entry hard-deletes it (atomic rename/unlink,
+  //     no recycle). Reads stay allowed; only the destructive mutations are
+  //     denied to remote. (Local Electron IPC never passes through this gate.)
+  'memory.update-entry',
+  'memory.delete-entry',
   // --- Project knowledge draft (reads arbitrary filePaths to feed the model) ---
   'project.generate-knowledge-draft',
   // --- Storage destructive / disk operations ---
@@ -361,6 +386,12 @@ const REMOTE_DENIED_KEYS: ReadonlySet<string> = new Set([
   //     reaching it is a clipboard-injection primitive, so deny it too. ---
   'doctor.run',
   'doctor.copy-text',
+  // --- Terminal mode (#645) ENABLE toggle. The read (get-terminal-enabled) is a
+  //     harmless boolean and stays allowed, but a remote peer must not flip the
+  //     advanced PTY feature ON. The PTY spawn itself is already denied via the
+  //     `terminal.` prefix, so this is defense-in-depth against enabling the
+  //     capability surface, matching app.set-* / storage:* setting denials. ---
+  'system-settings:set-terminal-enabled',
 ]);
 
 /**
@@ -386,6 +417,28 @@ export function isAllowedForRemote(name: string): boolean {
   if (REMOTE_DENIED_KEYS.has(key)) return false;
   for (const prefix of REMOTE_DENIED_PREFIXES) {
     if (key.startsWith(prefix)) return false;
+  }
+  return true;
+}
+
+/**
+ * Emitter/broadcast (main -> client) names that must NOT be forwarded to a
+ * remote WebSocket peer. Inbound denial (isAllowedForRemote) stops a peer
+ * INVOKING a provider; this stops a peer passively RECEIVING an emitter stream.
+ *
+ * #645: terminal.output / terminal.exit carry the live PTY stream (command
+ * output, file contents, whatever the agent CLI prints). The terminal is
+ * local-only, so a paired peer must never receive it even though it can never
+ * spawn/drive one. The local Electron renderer is unaffected — it receives
+ * emitters over the in-process IPC adapter, not this WS broadcast path.
+ */
+const REMOTE_OUTBOUND_DENIED_PREFIXES: readonly string[] = ['terminal.'];
+
+/** True iff an emitter `name` may be broadcast to remote WS peers. */
+export function isAllowedOutboundToRemote(name: string): boolean {
+  if (typeof name !== 'string' || name.length === 0) return false;
+  for (const prefix of REMOTE_OUTBOUND_DENIED_PREFIXES) {
+    if (name.startsWith(prefix)) return false;
   }
   return true;
 }

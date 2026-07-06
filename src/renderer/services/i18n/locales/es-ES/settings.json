@@ -859,7 +859,8 @@
         "imapPassword": {
           "label": "Contraseña IMAP",
           "help": "Usa una contraseña de app para Gmail / Outlook; el inicio de sesión de tu cuenta no funcionará.",
-          "required": "La contraseña IMAP es obligatoria"
+          "required": "La contraseña IMAP es obligatoria",
+          "savedPlaceholder": "Guardado: deja en blanco para mantenerlo"
         },
         "imapTls": {
           "label": "TLS IMAP",
@@ -884,7 +885,8 @@
         },
         "smtpPassword": {
           "label": "Contraseña SMTP",
-          "required": "La contraseña SMTP es obligatoria"
+          "required": "La contraseña SMTP es obligatoria",
+          "savedPlaceholder": "Guardado: deja en blanco para mantenerlo"
         },
         "smtpTls": {
           "label": "TLS SMTP",
@@ -2610,5 +2612,7 @@
     "subtitle": "Si una tarea programada alcanza el límite semanal, cambia a este modelo (p. ej., OpenRouter o ZenMux) y reintenta. Los límites cortos se reintentan automáticamente al reiniciarse.",
     "none": "Sin alternativa",
     "pickModel": "Elige un modelo"
-  }
+  },
+  "deferUpdateWhileBusy": "Aplazar actualizaciones si hay actividad",
+  "deferUpdateWhileBusyDesc": "Espera a que terminen los chats activos, las tareas programadas y los equipos antes de reiniciar para actualizar. La actualización se aplica al quedar inactivo o al salir."
 }

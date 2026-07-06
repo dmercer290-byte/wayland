@@ -859,7 +859,8 @@
         "imapPassword": {
           "label": "Senha IMAP",
           "help": "Use um app password para Gmail / Outlook; o login da sua conta não funcionará.",
-          "required": "A senha IMAP é obrigatória"
+          "required": "A senha IMAP é obrigatória",
+          "savedPlaceholder": "Salvo - deixe em branco para manter"
         },
         "imapTls": {
           "label": "TLS IMAP",
@@ -884,7 +885,8 @@
         },
         "smtpPassword": {
           "label": "Senha SMTP",
-          "required": "A senha SMTP é obrigatória"
+          "required": "A senha SMTP é obrigatória",
+          "savedPlaceholder": "Salvo - deixe em branco para manter"
         },
         "smtpTls": {
           "label": "TLS SMTP",
@@ -2610,5 +2612,7 @@
     "subtitle": "Quando uma tarefa agendada atinge o limite semanal, ela muda para este modelo (ex.: OpenRouter ou ZenMux) e tenta novamente. Limites curtos são repetidos automaticamente no reset.",
     "none": "Sem reserva",
     "pickModel": "Escolha um modelo"
-  }
+  },
+  "deferUpdateWhileBusy": "Adiar atualizações quando ocupado",
+  "deferUpdateWhileBusyDesc": "Aguarde os chats ativos, tarefas agendadas e equipes terminarem antes de reiniciar para atualizar. A atualização é aplicada quando ocioso ou ao sair."
 }

@@ -24,6 +24,8 @@ import PasteConfirmModal from './components/PasteConfirmModal';
 import WorkspaceContextMenu from './components/WorkspaceContextMenu';
 import WorkspaceDialogs from './components/WorkspaceDialogs';
 import WorkspaceTabBar from './components/WorkspaceTabBar';
+import TerminalPanel from './components/terminal/TerminalPanel';
+import { useTerminalEnabled } from './hooks/useTerminalEnabled';
 import WorkspaceToolbar from './components/WorkspaceToolbar';
 import { useFileChanges } from './hooks/useFileChanges';
 import { useWorkspaceCollapse } from './hooks/useWorkspaceCollapse';
@@ -66,6 +68,7 @@ const ChatWorkspace: React.FC<WorkspaceProps> = ({
 
   // Tab state and file changes
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('files');
+  const terminalEnabled = useTerminalEnabled();
   const fileChangesHook = useFileChanges({ workspace });
   const favoritesHook = useWorkspaceFavorites({ conversationId: conversation_id });
 
@@ -311,6 +314,7 @@ const ChatWorkspace: React.FC<WorkspaceProps> = ({
           changeCount={fileChangesHook.changeCount}
           branch={fileChangesHook.snapshotInfo?.branch ?? null}
           branches={fileChangesHook.branches}
+          showTerminal={terminalEnabled}
         />
 
         {/* Toolbar: search input + directory name + action buttons */}
@@ -428,6 +432,21 @@ const ChatWorkspace: React.FC<WorkspaceProps> = ({
                   isLeaf: 'isFile',
                 }}
                 multiple
+                draggable
+                allowDrop={({ dropNode, dropPosition }) => {
+                  // An onto-drop (dropPosition 0) moves INTO the target, so only
+                  // folders may accept it. A gap drop (non-zero) places the entry
+                  // as a sibling of the target, so any node type is a valid gap
+                  // anchor - its parent directory is the destination (issue #49).
+                  if (dropPosition === 0) {
+                    const target = extractNodeData(dropNode);
+                    return Boolean(target?.isDir) && !target?.isFile;
+                  }
+                  return true;
+                }}
+                onDrop={({ dragNode, dropNode, dropPosition }) => {
+                  void fileOpsHook.handleMoveNode(extractNodeData(dragNode), extractNodeData(dropNode), dropPosition);
+                }}
                 renderTitle={(node) => {
                   const relativePath = node.dataRef.relativePath;
                   const isFile = node.dataRef.isFile;
@@ -510,7 +529,9 @@ const ChatWorkspace: React.FC<WorkspaceProps> = ({
                       treeHook.setSelected(filteredKeys);
                     }
                     treeHook.selectedNodeRef.current = null;
-                    if (nodeData && clickedKey && !wasSelected) {
+                    // Always open preview on a file click - including when the
+                    // same file was previously selected (issue #49).
+                    if (nodeData && clickedKey) {
                       void fileOpsHook.handlePreviewFile(nodeData);
                     }
                     return;
@@ -593,6 +614,13 @@ const ChatWorkspace: React.FC<WorkspaceProps> = ({
               onDiscardFile={fileChangesHook.discardFile}
               onResetFile={fileChangesHook.resetFile}
             />
+          </FlexFullContainer>
+        )}
+
+        {/* #645 Terminal tab — the chat's agent in its native TUI over a PTY. */}
+        {!isWorkspaceCollapsed && terminalEnabled && activeTab === 'terminal' && (
+          <FlexFullContainer containerClassName='overflow-hidden'>
+            <TerminalPanel conversationId={conversation_id} cwd={workspace} />
           </FlexFullContainer>
         )}
       </div>

@@ -10,6 +10,7 @@ import { CHATGPT_SUBSCRIPTION_PROVIDER_ID } from '@process/providers/catalog/cha
 import { loadBaselineProviderCatalog } from '@process/providers/catalog/providerCatalogStore';
 import { PROVIDER_ENV_VARS } from '@process/providers/detection/KeyDiscovery';
 import type { ProviderId } from '@process/providers/types';
+import { VAULT_PASSPHRASE_CHILD_FD } from '@process/secrets';
 import { getEnhancedEnv } from '@process/utils/shellEnv';
 
 /**
@@ -303,6 +304,57 @@ function stripTrailingV1(url: string): string {
 }
 
 /**
+ * Thrown by the wcore spawn path (#629) BEFORE spawning the engine when the
+ * chosen provider requires an API key but `model.apiKey` is empty - e.g. a
+ * Flux/BYO key that was injected only per-spawn and never persisted, so it came
+ * back empty on a re-run after a credit top-up. Spawning anyway would bail 30s
+ * later with a raw "No API key found" and no recovery path (the reported
+ * dead-end). The message carries the classifiable "No API key found" phrasing so
+ * the renderer's auth-failure classifier routes it to the credential-recovery
+ * card (re-enter key / reconnect Flux) instead of a raw stderr bubble.
+ */
+export class MissingApiKeyError extends Error {
+  readonly code = 'MISSING_API_KEY' as const;
+  constructor(modelLabel?: string) {
+    const suffix = modelLabel ? ` for "${modelLabel}"` : '';
+    super(`No API key found${suffix}. Re-enter your API key or reconnect Flux to continue.`);
+    this.name = 'MissingApiKeyError';
+  }
+}
+
+/**
+ * Provider-key env vars the engine can read straight from the user's SHELL - the
+ * allowlisted subset of {@link ENGINE_ENV_ALLOWLIST} that carries a real key. A
+ * shell-exported one of these survives `buildEngineSpawnEnv` and satisfies the
+ * engine even when `model.apiKey` is empty, so a keyless in-app model is NOT
+ * actually doomed and must not trip the #629 missing-key guard.
+ */
+const SHELL_EXPORTABLE_KEY_VARS: ReadonlySet<string> = new Set([
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'OPENAI_API_KEY',
+  'GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+]);
+
+/**
+ * True when the engine would inherit a non-empty `varName` from the user's shell
+ * (case-insensitive, mirroring `buildEngineSpawnEnv`'s allowlist), so a spawn
+ * whose `model.apiKey` is empty is still authenticated and must NOT be refused.
+ * Only the allowlisted provider-key vars pass through - a non-allowlisted scoped
+ * var (e.g. a catalog PERPLEXITY_API_KEY) never reaches the engine from the
+ * shell, so it stays "missing" (#629 audit). `env` is injectable for tests.
+ */
+export function engineInheritsShellKey(varName: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!varName || !SHELL_EXPORTABLE_KEY_VARS.has(varName.toUpperCase())) return false;
+  const target = varName.toUpperCase();
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toUpperCase() === target && typeof v === 'string' && v.trim()) return true;
+  }
+  return false;
+}
+
+/**
  * Build CLI args and env vars for spawning wcore.
  */
 export function buildSpawnConfig(
@@ -345,6 +397,24 @@ export function buildSpawnConfig(
    * signal is the emitted `finish_reason:'length'`, which is budget-independent.
    */
   resolvedMaxTokens: number | undefined;
+  /**
+   * True when this spawn would hit the engine's "No API key found" init bail
+   * (#629): a key-based provider (catalog / engine-native / anthropic / cloud
+   * openai) whose `model.apiKey` is empty - the post-top-up dead-end. Callers
+   * MUST NOT spawn a doomed keyless engine; they throw a {@link MissingApiKeyError}
+   * so the credential-recovery card shows instead of a 30s ready-timeout + raw
+   * stderr. False for ChatGPT-OAuth, keyless-local openai, bedrock/vertex
+   * (non-key auth), and raw-engine mode - none require `model.apiKey`.
+   */
+  missingRequiredApiKey: boolean;
+  /**
+   * The scoped key env var the engine reads for this provider (e.g.
+   * `OPENAI_API_KEY`), when key-based. The spawn guard uses it to check whether a
+   * shell-exported key would satisfy the engine before refusing an empty
+   * `model.apiKey` (#629 audit) - so a user who exported the key in their shell
+   * is not wrongly pushed to re-enter it. Undefined for keyless spawns.
+   */
+  requiredKeyEnvVar?: string;
 } {
   // Raw-engine mode: pass ONLY the session-protocol args and let the engine
   // resolve provider/model/auth/tokens/security from its own config.toml. No
@@ -357,7 +427,7 @@ export function buildSpawnConfig(
     } else if (options.sessionId) {
       args.push('--session-id', options.sessionId);
     }
-    return { args, env: {}, projectConfig: '', resolvedMaxTokens: undefined };
+    return { args, env: {}, projectConfig: '', resolvedMaxTokens: undefined, missingRequiredApiKey: false };
   }
 
   const provider = mapProvider(model);
@@ -400,12 +470,15 @@ export function buildSpawnConfig(
     // here would override the engine's authority) and NO shared OPENAI_API_KEY
     // (ghost-key: a catalog provider must use its OWN scoped var).
     const envVar = catalogEnvVarById().get(catalogId);
-    if (envVar && model.apiKey) env[envVar] = model.apiKey;
+    const catalogKey = model.apiKey?.trim();
+    if (envVar && catalogKey) env[envVar] = catalogKey;
     const projectConfig = joinTomlSections(
       buildProjectConfig(model, provider),
       buildCompactSection(options.compactMode)
     );
-    return { args, env, projectConfig, resolvedMaxTokens };
+    // A catalog provider needs its scoped key; an empty one dooms the spawn (#629).
+    const missingRequiredApiKey = !!envVar && !catalogKey;
+    return { args, env, projectConfig, resolvedMaxTokens, missingRequiredApiKey, requiredKeyEnvVar: envVar };
   }
 
   // Engine-native providers (#177): the app persists these as openai-compatible
@@ -415,9 +488,15 @@ export function buildSpawnConfig(
   // api.openai.com. Mirrors the catalog block above.
   const nativeEnvVar = nativeEngineEnvVar(provider);
   if (nativeEnvVar !== undefined) {
-    if (model.apiKey) env[nativeEnvVar] = model.apiKey;
-    const projectConfig = buildProjectConfig(model, provider);
-    return { args, env, projectConfig, resolvedMaxTokens };
+    const nativeKey = model.apiKey?.trim();
+    if (nativeKey) env[nativeEnvVar] = nativeKey;
+    const projectConfig = joinTomlSections(
+      buildProjectConfig(model, provider),
+      buildCompactSection(options.compactMode)
+    );
+    // An engine-native provider needs its scoped key; empty dooms the spawn (#629).
+    const missingRequiredApiKey = !nativeKey;
+    return { args, env, projectConfig, resolvedMaxTokens, missingRequiredApiKey, requiredKeyEnvVar: nativeEnvVar };
   }
 
   // ChatGPT subscription (#243): the engine owns the ChatGPT backend host and
@@ -427,27 +506,48 @@ export function buildSpawnConfig(
   // OAuth bearer to api.openai.com (the rejected path); the base URL must stay
   // engine-owned, not the openai-compatible backend URL on the legacy row.
   if (provider === CHATGPT_SUBSCRIPTION_ENGINE_PROVIDER) {
-    const projectConfig = buildProjectConfig(model, provider);
-    return { args, env, projectConfig, resolvedMaxTokens };
+    const projectConfig = joinTomlSections(
+      buildProjectConfig(model, provider),
+      buildCompactSection(options.compactMode)
+    );
+    // OAuth backend (token from ~/.codex/auth.json) - no `model.apiKey` needed.
+    return { args, env, projectConfig, resolvedMaxTokens, missingRequiredApiKey: false };
   }
 
+  // Set for the key-based `switch` providers below (anthropic + cloud openai);
+  // the final return reports them so the caller can refuse a doomed keyless spawn.
+  let missingRequiredApiKey = false;
+  let requiredKeyEnvVar: string | undefined;
   switch (provider) {
-    case 'anthropic':
-      if (model.apiKey) env.ANTHROPIC_API_KEY = model.apiKey;
+    case 'anthropic': {
+      // Trim like the openai branch so a whitespace-only key is treated as empty
+      // (and flagged for recovery), not passed to the engine as a bogus key.
+      const key = model.apiKey?.trim();
+      if (key) env.ANTHROPIC_API_KEY = key;
+      else {
+        missingRequiredApiKey = true;
+        requiredKeyEnvVar = 'ANTHROPIC_API_KEY';
+      }
       if (model.baseUrl) args.push('--base-url', stripTrailingV1(model.baseUrl));
       break;
+    }
 
     case 'openai': {
       const baseUrl = resolveOpenAIBaseUrl(model);
       // Keyless LOCAL backend (local Ollama, #268): the engine still demands a
       // key for `--provider openai` or it bails at init, so inject the dummy
       // placeholder (the local daemon ignores Authorization). A keyless CLOUD
-      // endpoint is a genuine misconfig and is left to fail as before.
+      // endpoint is a genuine misconfig - #629 catches it pre-spawn (below) and
+      // routes the user to recovery instead of a raw "No API key found" bail.
       const trimmedKey = model.apiKey?.trim();
       if (trimmedKey) {
         env.OPENAI_API_KEY = trimmedKey;
       } else if (isLocalBaseUrl(baseUrl)) {
         env.OPENAI_API_KEY = LOCAL_KEYLESS_PLACEHOLDER;
+      } else {
+        // Cloud openai-compatible endpoint with no key: the spawn would bail.
+        missingRequiredApiKey = true;
+        requiredKeyEnvVar = 'OPENAI_API_KEY';
       }
       if (baseUrl) args.push('--base-url', stripTrailingV1(baseUrl));
       break;
@@ -476,7 +576,7 @@ export function buildSpawnConfig(
   // plus the user's context-compaction preset.
   const projectConfig = joinTomlSections(buildProjectConfig(model, provider), buildCompactSection(options.compactMode));
 
-  return { args, env, projectConfig, resolvedMaxTokens };
+  return { args, env, projectConfig, resolvedMaxTokens, missingRequiredApiKey, requiredKeyEnvVar };
 }
 
 /** Context compaction preset selectable in Settings ('wcore.compactMode'). */
@@ -578,6 +678,13 @@ const ENGINE_ENV_ALLOWLIST: readonly string[] = [
   'TMP',
   'TEMP',
   'PWD',
+  // ── Node version managers (#628) ───────────────────────────────────────
+  // getEnhancedEnv captures these when the version manager is installed but
+  // its interactive-rc export never ran (Finder/Dock launch). volta's shims
+  // in particular need VOLTA_HOME to resolve node; forward both so the engine's
+  // bash tool can run node/npm/npx installed via nvm/volta.
+  'NVM_DIR',
+  'VOLTA_HOME',
   // ── Linux dynamic linker ───────────────────────────────────────────────
   // Shared-library search path. Required on ARM64 Ubuntu 24.04 (Noble) when
   // the engine needs OpenSSL 1.1 from a non-system prefix. Without it the
@@ -673,6 +780,7 @@ export function buildEngineSpawnEnv(opts: {
   providerEnv: Record<string, string>;
   toolKeys?: Record<string, string>;
   waylandHome?: string;
+  vaultPassphraseEnv?: Record<string, string>;
 }): Record<string, string> {
   const full = getEnhancedEnv(opts.providerEnv);
   const allowed = new Set(ENGINE_ENV_ALLOWLIST.map((name) => name.toUpperCase()));
@@ -698,6 +806,15 @@ export function buildEngineSpawnEnv(opts: {
   // Active-profile config root (Design B). Authoritative - set last.
   if (opts.waylandHome) {
     out.WAYLAND_HOME = opts.waylandHome;
+  }
+
+  // #710: engine credentials-vault unlock material, produced by
+  // {@link planVaultPassphraseDelivery}. Layered after the allowlist filter on
+  // purpose: WAYLAND_VAULT_PASSPHRASE / _FD are deliberately NOT allowlisted,
+  // so a stale value in the user's shell can never leak into the spawn - only
+  // the desktop's own per-profile provisioning sets them.
+  for (const [name, value] of Object.entries(opts.vaultPassphraseEnv ?? {})) {
+    out[name] = value;
   }
 
   // Opt the bundled engine into honoring a wire `set_mode` that loosens
@@ -744,4 +861,41 @@ export function buildEngineSpawnEnv(opts: {
   out.WAYLAND_SEND_MESSAGE_HOST_DELEGATE = '1';
 
   return out;
+}
+
+/**
+ * How the engine-vault passphrase reaches the spawned engine (#710):
+ *  - `fd` (Unix): an extra `'pipe'` stdio slot at index
+ *    {@link VAULT_PASSPHRASE_CHILD_FD}; the parent writes `fdPayload` and
+ *    closes its end, and `WAYLAND_VAULT_PASSPHRASE_FD` tells the engine which
+ *    descriptor to read to EOF. Preferred - the passphrase never appears in
+ *    `/proc/<pid>/environ`.
+ *  - `env` (Windows): `WAYLAND_VAULT_PASSPHRASE` env var. File descriptors are
+ *    not portable to Windows, and the engine's `vault_unlock_material_present`
+ *    deliberately ignores `_FD` there (wcore-config credentials.rs), so the
+ *    env var is the ONLY channel that selects the vault on win32.
+ */
+export type VaultPassphraseDelivery =
+  | { mode: 'fd'; env: Record<string, string>; stdio: ['pipe', 'pipe', 'pipe', 'pipe']; fdPayload: string }
+  | { mode: 'env'; env: Record<string, string>; stdio: ['pipe', 'pipe', 'pipe'] };
+
+/**
+ * Plan the platform-appropriate delivery of a vault passphrase into the engine
+ * spawn: the env entries for {@link buildEngineSpawnEnv}'s `vaultPassphraseEnv`,
+ * the stdio layout for the spawn, and (fd mode) the payload to write into the
+ * extra pipe. Pure - `platform` is injectable for tests.
+ */
+export function planVaultPassphraseDelivery(
+  passphrase: string,
+  platform: NodeJS.Platform = process.platform
+): VaultPassphraseDelivery {
+  if (platform === 'win32') {
+    return { mode: 'env', env: { WAYLAND_VAULT_PASSPHRASE: passphrase }, stdio: ['pipe', 'pipe', 'pipe'] };
+  }
+  return {
+    mode: 'fd',
+    env: { WAYLAND_VAULT_PASSPHRASE_FD: String(VAULT_PASSPHRASE_CHILD_FD) },
+    stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+    fdPayload: passphrase,
+  };
 }

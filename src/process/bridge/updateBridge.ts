@@ -70,7 +70,12 @@ const MAX_REDIRECTS = 8;
 
 const getIjfwCommandPath = (mcpServerPath?: string): string | undefined => {
   if (!mcpServerPath) return undefined;
-  return path.join(path.dirname(mcpServerPath), 'mcp-server', 'bin', process.platform === 'win32' ? 'ijfw.cmd' : 'ijfw');
+  return path.join(
+    path.dirname(mcpServerPath),
+    'mcp-server',
+    'bin',
+    process.platform === 'win32' ? 'ijfw.cmd' : 'ijfw'
+  );
 };
 
 const isAllowedAssetName = (name: string) => {
@@ -452,11 +457,11 @@ const getIjfwUpdateStatus = async (): Promise<UpdateCheckResult['ijfw']> => {
     ]);
     const updateAvailable = Boolean(
       local.installed &&
-        local.version &&
-        latest &&
-        semver.valid(local.version) &&
-        semver.valid(latest) &&
-        semver.lt(local.version, latest)
+      local.version &&
+      latest &&
+      semver.valid(local.version) &&
+      semver.valid(latest) &&
+      semver.lt(local.version, latest)
     );
     const commandPath = getIjfwCommandPath(local.mcpServerPath);
 
@@ -900,12 +905,48 @@ export function initUpdateBridge(): void {
     }
   });
 
-  ipcBridge.autoUpdate.quitAndInstall.provider(async (): Promise<void> => {
+  ipcBridge.autoUpdate.quitAndInstall.provider(async (params: { force?: boolean } | undefined): Promise<void> => {
     try {
-      autoUpdaterService.quitAndInstall();
+      // "Install now anyway" bypasses the quiesce gate AND the drain, installing
+      // immediately via the raw hard-exit — the one case the user explicitly
+      // accepted an abrupt interruption (#651/#632 override).
+      if (params?.force) {
+        autoUpdaterService.quitAndInstall();
+        return;
+      }
+      // Default: defer the restart while the app is busy, apply once idle.
+      // Lazy import keeps the ProcessConfig/initStorage chain out of this
+      // module's load graph (same rationale as getI18n above).
+      const { installOrDefer } = await import('../services/updateQuiesceGate');
+      await installOrDefer(
+        // Route the install through the normal quit sequence — NOT the raw
+        // autoUpdaterService.quitAndInstall(), which hard-exits (app.exit(0) on a
+        // 1s timer) and would bypass the 12-step before-quit drain (DB, cron,
+        // workers, team sessions, tunnels, websocket/http server, agent
+        // children). app.quit() lets that drain run to completion and then
+        // installOnQuitIfReady() applies the staged update as the LAST step, in
+        // the correct order. Hard-exiting here would orphan child processes and
+        // drop unflushed writes right after the busy flag clears — the exact
+        // #651 bug class this feature exists to prevent.
+        () => app.quit(),
+        () => autoUpdaterService.notifyDeferred()
+      );
     } catch (err: unknown) {
       console.error('quitAndInstall failed:', err);
     }
+  });
+
+  // Update-on-quiesce setting (#651/#632). Persisted in main via ProcessConfig so
+  // the gate reads it directly (no IPC round-trip); the renderer toggle uses these.
+  ipcBridge.autoUpdate.getDeferWhileBusy.provider(async (): Promise<boolean> => {
+    const { ProcessConfig } = await import('@process/utils/initStorage');
+    const value = await ProcessConfig.get('update.deferWhileBusy');
+    return value ?? true; // default: defer while busy
+  });
+
+  ipcBridge.autoUpdate.setDeferWhileBusy.provider(async ({ enabled }): Promise<void> => {
+    const { ProcessConfig } = await import('@process/utils/initStorage');
+    await ProcessConfig.set('update.deferWhileBusy', enabled);
   });
 
   // L17 (AUDIT-05 F16): expose auto-updater bootstrap status so renderer System tab

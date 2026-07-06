@@ -849,7 +849,8 @@
         "imapPassword": {
           "label": "IMAP 비밀번호",
           "help": "Gmail / Outlook은 앱 비밀번호를 사용하세요. 계정 로그인 비밀번호는 작동하지 않습니다.",
-          "required": "IMAP 비밀번호는 필수입니다"
+          "required": "IMAP 비밀번호는 필수입니다",
+          "savedPlaceholder": "저장됨 - 유지하려면 비워 두세요"
         },
         "imapTls": {
           "label": "IMAP TLS",
@@ -874,7 +875,8 @@
         },
         "smtpPassword": {
           "label": "SMTP 비밀번호",
-          "required": "SMTP 비밀번호는 필수입니다"
+          "required": "SMTP 비밀번호는 필수입니다",
+          "savedPlaceholder": "저장됨 - 유지하려면 비워 두세요"
         },
         "smtpTls": {
           "label": "SMTP TLS",
@@ -2611,5 +2613,7 @@
     "subtitle": "예약된 작업이 주간 한도에 도달하면 이 모델(예: OpenRouter 또는 ZenMux)로 전환하여 재시도합니다. 단기 한도는 초기화 시 자동 재시도됩니다.",
     "none": "대체 없음",
     "pickModel": "모델 선택"
-  }
+  },
+  "deferUpdateWhileBusy": "작업 중 업데이트 연기",
+  "deferUpdateWhileBusyDesc": "활성 채팅, 예약 작업, 팀이 끝날 때까지 기다린 후 업데이트를 위해 다시 시작합니다. 업데이트는 유휴 상태이거나 종료할 때 적용됩니다."
 }

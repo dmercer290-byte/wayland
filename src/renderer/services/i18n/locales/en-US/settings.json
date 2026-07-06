@@ -179,6 +179,8 @@
   "saveUploadToWorkspace": "Save Uploads to Workspace",
   "autoPreviewOfficeFiles": "Auto Preview New Office Files",
   "autoPreviewOfficeFilesDesc": "Automatically open newly created Word, Excel, and PowerPoint files in the current workspace. Office temporary lock files are ignored.",
+  "terminalMode": "Terminal mode",
+  "terminalModeDesc": "Open the current chat's agent in its native terminal UI. Advanced.",
   "startOnBoot": "Start on Boot",
   "startOnBootDesc": "Launch Wayland automatically when you sign in to macOS, Windows, or Linux.",
   "startOnBootUnsupported": "Available only in packaged macOS, Windows, and Linux apps.",
@@ -865,7 +867,8 @@
         "imapPassword": {
           "label": "IMAP Password",
           "help": "Use an app password for Gmail / Outlook, your account login will not work.",
-          "required": "IMAP password is required"
+          "required": "IMAP password is required",
+          "savedPlaceholder": "Saved - leave blank to keep"
         },
         "imapTls": {
           "label": "IMAP TLS",
@@ -890,7 +893,8 @@
         },
         "smtpPassword": {
           "label": "SMTP Password",
-          "required": "SMTP password is required"
+          "required": "SMTP password is required",
+          "savedPlaceholder": "Saved - leave blank to keep"
         },
         "smtpTls": {
           "label": "SMTP TLS",
@@ -2710,5 +2714,7 @@
     "subtitle": "When a scheduled task hits a weekly rate limit, it switches to this model (e.g. OpenRouter or ZenMux) and retries. Short-window limits retry automatically at reset.",
     "none": "No fallback",
     "pickModel": "Pick a model"
-  }
+  },
+  "deferUpdateWhileBusy": "Defer updates while busy",
+  "deferUpdateWhileBusyDesc": "Wait for active chats, scheduled tasks, and teams to finish before restarting to update. The update still applies on idle or on quit."
 }

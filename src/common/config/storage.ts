@@ -302,6 +302,9 @@ export interface IConfigStorageRefer {
   'models.autoRefresh'?: boolean;
   // Minimize to system tray when closing the window
   'system.closeToTray'?: boolean;
+  // #645 Terminal mode (advanced, off by default): open the current chat's agent
+  // in its native terminal UI over a real PTY. Re-checked in main before spawn.
+  'terminal.enabled'?: boolean;
   // First-run flag: set once after applying smart defaults (close-to-tray on, start-on-boot on).
   // Once true, the app never re-applies defaults - user's explicit choices win.
   'system.firstRunDefaultsApplied'?: boolean;
@@ -333,6 +336,10 @@ export interface IConfigStorageRefer {
   'system.routeThroughFlux'?: boolean;
   // Automatically preview newly created Office files in the current workspace
   'system.autoPreviewOfficeFiles'?: boolean;
+  // Update-on-quiesce (#651/#632): defer an auto-update restart while any
+  // session/cron/team is actively working, applying it once idle or on quit.
+  // Default true (read in main by updateQuiesceGate).
+  'update.deferWhileBusy'?: boolean;
   // Per-channel assistant default-model and agent selections
   // (`assistant.<platform>.defaultModel` / `assistant.<platform>.agent`) are
   // provided by IChannelAssistantConfigRefer, intersected into ConfigStorage above.
