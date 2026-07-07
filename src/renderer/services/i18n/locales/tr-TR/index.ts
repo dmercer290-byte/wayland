@@ -25,6 +25,7 @@ import skills from './skills.json';
 import workflow from './workflow.json';
 import memory from './memory.json';
 import missionControl from './missionControl.json';
+import knowledge from './knowledge.json';
 import mcpLibrary from './mcpLibrary.json';
 import onboarding from './onboarding.json';
 import projects from './projects.json';
@@ -57,6 +58,7 @@ export default {
   workflow,
   memory,
   missionControl,
+  knowledge,
   mcpLibrary,
   onboarding,
   projects,

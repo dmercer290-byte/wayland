@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "Wiki",
+    "memory": "Memoria"
+  },
+  "wiki": {
+    "edit": "Editar",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "newPage": "Nueva página",
+    "deleteConfirm": "¿Eliminar esta página?",
+    "saved": "Página guardada",
+    "needTitle": "Introduce primero un título",
+    "searchPlaceholder": "Buscar en la wiki…",
+    "titlePlaceholder": "Título de la página",
+    "contentPlaceholder": "Escribe markdown… enlaza páginas con [[Nombre de página]]",
+    "empty": "Aún no hay páginas. Crea la primera.",
+    "welcome": "Tu wiki de conocimiento. Elige una página a la izquierda o crea una.",
+    "linksTo": "Enlaza a:",
+    "linkedFrom": "Enlazada desde:"
+  },
+  "memory": {
+    "searchPlaceholder": "Buscar recuerdos…",
+    "kindFilter": "Tipo",
+    "addPlaceholder": "Algo que valga la pena recordar…",
+    "tagsPlaceholder": "etiquetas, separadas, por comas",
+    "addButton": "Recordar",
+    "added": "Guardado en memoria",
+    "deleteConfirm": "¿Olvidar este recuerdo?",
+    "empty": "Aún no hay recuerdos. Añade hechos, decisiones y preferencias.",
+    "hint": "Notas tipadas y buscables sobre tu mundo. Los agentes pueden leerlas y añadir más durante el chat.",
+    "kind": {
+      "fact": "Hecho",
+      "decision": "Decisión",
+      "preference": "Preferencia",
+      "howto": "Guía",
+      "note": "Nota"
+    }
+  }
+}

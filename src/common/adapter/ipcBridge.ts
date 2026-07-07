@@ -1982,6 +1982,41 @@ export const modelHub = {
   >('model-hub.load-model'),
 };
 
+// ===== Knowledge Base (custom global wiki + memory in ~/.genesis) =====
+
+export type KnowledgeWikiMeta = { slug: string; title: string; tags: string[]; updatedMs: number; links: string[] };
+export type KnowledgeWikiPage = KnowledgeWikiMeta & { content: string; backlinks: string[] };
+export type KnowledgeWikiHit = { slug: string; title: string; snippet: string };
+export type KnowledgeMemoryKind = 'fact' | 'decision' | 'preference' | 'howto' | 'note';
+export type KnowledgeMemoryEntry = {
+  id: string;
+  ts: number;
+  kind: KnowledgeMemoryKind;
+  text: string;
+  tags: string[];
+  source?: string;
+};
+
+export const knowledge = {
+  listPages: buildProvider<KnowledgeWikiMeta[], void>('knowledge.list-pages'),
+  readPage: buildProvider<KnowledgeWikiPage | undefined, { slug: string }>('knowledge.read-page'),
+  writePage: buildProvider<
+    { ok: true; slug: string } | { ok: false; error: string },
+    { title: string; content: string; slug?: string }
+  >('knowledge.write-page'),
+  deletePage: buildProvider<{ ok: boolean }, { slug: string }>('knowledge.delete-page'),
+  searchWiki: buildProvider<KnowledgeWikiHit[], { query: string }>('knowledge.search-wiki'),
+  addMemory: buildProvider<
+    { ok: true; entry: KnowledgeMemoryEntry } | { ok: false; error: string },
+    { kind: KnowledgeMemoryKind; text: string; tags?: string[] }
+  >('knowledge.add-memory'),
+  listMemory: buildProvider<
+    KnowledgeMemoryEntry[],
+    { query?: string; kind?: KnowledgeMemoryKind; tag?: string; limit?: number }
+  >('knowledge.list-memory'),
+  deleteMemory: buildProvider<{ ok: boolean }, { id: string }>('knowledge.delete-memory'),
+};
+
 export type IjfwDropEntry = { name: string; size: number; mtimeMs: number };
 
 export type IjfwDropIngestResult =

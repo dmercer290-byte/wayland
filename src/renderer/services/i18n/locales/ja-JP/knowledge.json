@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "ウィキ",
+    "memory": "メモリー"
+  },
+  "wiki": {
+    "edit": "編集",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "newPage": "新規ページ",
+    "deleteConfirm": "このページを削除しますか？",
+    "saved": "ページを保存しました",
+    "needTitle": "先にタイトルを入力してください",
+    "searchPlaceholder": "ウィキを検索…",
+    "titlePlaceholder": "ページタイトル",
+    "contentPlaceholder": "Markdown を記述… [[ページ名]] でページをリンク",
+    "empty": "まだページがありません。最初のページを作成しましょう。",
+    "welcome": "あなたの知識ウィキです。左からページを選ぶか、新規作成してください。",
+    "linksTo": "リンク先：",
+    "linkedFrom": "リンク元："
+  },
+  "memory": {
+    "searchPlaceholder": "メモリーを検索…",
+    "kindFilter": "種類",
+    "addPlaceholder": "覚えておきたいこと…",
+    "tagsPlaceholder": "タグ、カンマ区切り",
+    "addButton": "記憶する",
+    "added": "メモリーに保存しました",
+    "deleteConfirm": "この記憶を忘れますか？",
+    "empty": "まだ記憶がありません。事実・決定・好みを追加しましょう。",
+    "hint": "あなたの環境に関する型付きの検索可能なメモ。エージェントはチャット中に読み書きできます。",
+    "kind": {
+      "fact": "事実",
+      "decision": "決定",
+      "preference": "好み",
+      "howto": "手順",
+      "note": "メモ"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "위키",
+    "memory": "메모리"
+  },
+  "wiki": {
+    "edit": "편집",
+    "save": "저장",
+    "cancel": "취소",
+    "newPage": "새 페이지",
+    "deleteConfirm": "이 페이지를 삭제할까요?",
+    "saved": "페이지 저장됨",
+    "needTitle": "먼저 제목을 입력하세요",
+    "searchPlaceholder": "위키 검색…",
+    "titlePlaceholder": "페이지 제목",
+    "contentPlaceholder": "마크다운 작성… [[페이지 이름]]으로 페이지 연결",
+    "empty": "아직 페이지가 없습니다. 첫 페이지를 만들어 보세요.",
+    "welcome": "나의 지식 위키입니다. 왼쪽에서 페이지를 선택하거나 새로 만드세요.",
+    "linksTo": "연결 대상:",
+    "linkedFrom": "연결된 곳:"
+  },
+  "memory": {
+    "searchPlaceholder": "메모리 검색…",
+    "kindFilter": "유형",
+    "addPlaceholder": "기억할 만한 것…",
+    "tagsPlaceholder": "태그, 쉼표로 구분",
+    "addButton": "기억하기",
+    "added": "메모리에 저장됨",
+    "deleteConfirm": "이 기억을 잊을까요?",
+    "empty": "아직 기억이 없습니다. 사실, 결정, 선호를 추가하세요.",
+    "hint": "내 환경에 대한 유형별 검색 가능한 노트. 에이전트가 채팅 중 읽고 추가할 수 있습니다.",
+    "kind": {
+      "fact": "사실",
+      "decision": "결정",
+      "preference": "선호",
+      "howto": "방법",
+      "note": "노트"
+    }
+  }
+}

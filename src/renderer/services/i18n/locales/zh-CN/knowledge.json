@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "维基",
+    "memory": "记忆"
+  },
+  "wiki": {
+    "edit": "编辑",
+    "save": "保存",
+    "cancel": "取消",
+    "newPage": "新建页面",
+    "deleteConfirm": "删除此页面？",
+    "saved": "页面已保存",
+    "needTitle": "请先输入标题",
+    "searchPlaceholder": "搜索维基…",
+    "titlePlaceholder": "页面标题",
+    "contentPlaceholder": "编写 Markdown… 使用 [[页面名称]] 链接页面",
+    "empty": "还没有页面，创建第一个吧。",
+    "welcome": "你的知识维基。在左侧选择页面或新建一个。",
+    "linksTo": "链接到：",
+    "linkedFrom": "被链接自："
+  },
+  "memory": {
+    "searchPlaceholder": "搜索记忆…",
+    "kindFilter": "类型",
+    "addPlaceholder": "值得记住的事…",
+    "tagsPlaceholder": "标签，逗号分隔",
+    "addButton": "记住",
+    "added": "已存入记忆",
+    "deleteConfirm": "忘记这条记忆？",
+    "empty": "还没有记忆。在这里添加事实、决定和偏好。",
+    "hint": "关于你的世界的类型化、可搜索笔记。智能体可以在聊天中读取和添加。",
+    "kind": {
+      "fact": "事实",
+      "decision": "决定",
+      "preference": "偏好",
+      "howto": "指南",
+      "note": "笔记"
+    }
+  }
+}

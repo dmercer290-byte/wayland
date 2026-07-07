@@ -21,6 +21,9 @@ import type { CostAnalyticsService } from '@process/services/cost/CostAnalyticsS
 import type { StdioMcpConfig } from '@process/team/mcp/team/TeamMcpServer';
 import { createTcpMessageReader, resolveMcpScriptDir, writeTcpMessage } from '@process/team/mcp/tcpHelpers';
 import { listAllModels, loadModel } from '@process/services/modelHub/modelHubService';
+import { MEMORY_KINDS } from '@process/services/knowledge/knowledgeFormat';
+import type { MemoryKind } from '@process/services/knowledge/knowledgeFormat';
+import { getKnowledgeService } from '@process/services/knowledge/knowledgeService';
 import { formatCostReport, formatHubList, formatLoadResult, resolveServerRef } from './hubToolsFormat';
 
 const DAY_MS = 24 * 3_600_000;
@@ -156,6 +159,52 @@ export class HubToolsMcpServer {
         const summary = this.costAnalytics.summary({ fromMs, toMs });
         const byModel = this.costAnalytics.byModel({ fromMs, toMs });
         return formatCostReport(label, summary, byModel);
+      }
+      case 'wiki_search': {
+        const query = String(args.query ?? '').trim();
+        if (!query) throw new Error('query is required');
+        const hits = await getKnowledgeService().searchWiki(query);
+        if (hits.length === 0) return `No wiki pages match "${query}".`;
+        return hits.map((h) => `- [[${h.slug}]] ${h.title}: ${h.snippet}`).join('\n');
+      }
+      case 'wiki_read': {
+        const slug = String(args.page ?? '').trim();
+        if (!slug) throw new Error('page is required');
+        const page = await getKnowledgeService().readPage(slug);
+        if (!page) {
+          const all = await getKnowledgeService().listPages();
+          return `Page "${slug}" not found. Existing pages: ${all.map((p) => p.slug).join(', ') || '(none)'}`;
+        }
+        const backlinks = page.backlinks.length ? `\n\nLinked from: ${page.backlinks.join(', ')}` : '';
+        return page.content + backlinks;
+      }
+      case 'wiki_write': {
+        const title = String(args.title ?? '').trim();
+        const content = String(args.content ?? '');
+        if (!title) throw new Error('title is required');
+        const result = await getKnowledgeService().writePage({ title, content });
+        if ('error' in result) throw new Error(result.error);
+        return `Saved wiki page [[${result.slug}]] ("${title}").`;
+      }
+      case 'memory_add': {
+        const text = String(args.text ?? '').trim();
+        if (!text) throw new Error('text is required');
+        const rawKind = String(args.kind ?? 'note');
+        const kind: MemoryKind = (MEMORY_KINDS as readonly string[]).includes(rawKind)
+          ? (rawKind as MemoryKind)
+          : 'note';
+        const tags = Array.isArray(args.tags) ? args.tags.map(String) : [];
+        const result = await getKnowledgeService().addMemory({ kind, text, tags, source: 'agent' });
+        if ('error' in result) throw new Error(result.error);
+        return `Remembered (${kind}): ${text.slice(0, 120)}`;
+      }
+      case 'memory_search': {
+        const query = String(args.query ?? '').trim() || undefined;
+        const entries = await getKnowledgeService().listMemory({ query, limit: 20 });
+        if (entries.length === 0) return query ? `No memories match "${query}".` : 'No memories stored yet.';
+        return entries
+          .map((e) => `- [${e.kind}] ${e.text}${e.tags.length ? ` (tags: ${e.tags.join(', ')})` : ''}`)
+          .join('\n');
       }
       default:
         throw new Error(`Unknown tool: ${toolName}`);

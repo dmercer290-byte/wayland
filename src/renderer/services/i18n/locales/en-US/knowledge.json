@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "Wiki",
+    "memory": "Memory"
+  },
+  "wiki": {
+    "edit": "Edit",
+    "save": "Save",
+    "cancel": "Cancel",
+    "newPage": "New page",
+    "deleteConfirm": "Delete this page?",
+    "saved": "Page saved",
+    "needTitle": "Enter a title first",
+    "searchPlaceholder": "Search wiki…",
+    "titlePlaceholder": "Page title",
+    "contentPlaceholder": "Write markdown… link pages with [[Page Name]]",
+    "empty": "No pages yet. Create your first one.",
+    "welcome": "Your knowledge wiki. Pick a page on the left or create one.",
+    "linksTo": "Links to:",
+    "linkedFrom": "Linked from:"
+  },
+  "memory": {
+    "searchPlaceholder": "Search memories…",
+    "kindFilter": "Type",
+    "addPlaceholder": "Something worth remembering…",
+    "tagsPlaceholder": "tags, comma, separated",
+    "addButton": "Remember",
+    "added": "Saved to memory",
+    "deleteConfirm": "Forget this memory?",
+    "empty": "No memories yet. Add facts, decisions, and preferences here.",
+    "hint": "Typed, searchable notes about your world. Agents can read and add to these mid-chat.",
+    "kind": {
+      "fact": "Fact",
+      "decision": "Decision",
+      "preference": "Preference",
+      "howto": "How-to",
+      "note": "Note"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "Wiki",
+    "memory": "Mémoire"
+  },
+  "wiki": {
+    "edit": "Modifier",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "newPage": "Nouvelle page",
+    "deleteConfirm": "Supprimer cette page ?",
+    "saved": "Page enregistrée",
+    "needTitle": "Saisissez d'abord un titre",
+    "searchPlaceholder": "Rechercher dans le wiki…",
+    "titlePlaceholder": "Titre de la page",
+    "contentPlaceholder": "Écrivez en markdown… liez des pages avec [[Nom de page]]",
+    "empty": "Aucune page pour l'instant. Créez la première.",
+    "welcome": "Votre wiki de connaissances. Choisissez une page à gauche ou créez-en une.",
+    "linksTo": "Lie vers :",
+    "linkedFrom": "Liée depuis :"
+  },
+  "memory": {
+    "searchPlaceholder": "Rechercher des souvenirs…",
+    "kindFilter": "Type",
+    "addPlaceholder": "Quelque chose à retenir…",
+    "tagsPlaceholder": "étiquettes, séparées, par virgules",
+    "addButton": "Retenir",
+    "added": "Enregistré en mémoire",
+    "deleteConfirm": "Oublier ce souvenir ?",
+    "empty": "Aucun souvenir pour l'instant. Ajoutez des faits, décisions et préférences.",
+    "hint": "Notes typées et consultables sur votre univers. Les agents peuvent les lire et en ajouter en cours de discussion.",
+    "kind": {
+      "fact": "Fait",
+      "decision": "Décision",
+      "preference": "Préférence",
+      "howto": "Guide",
+      "note": "Note"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "Wiki",
+    "memory": "Gedächtnis"
+  },
+  "wiki": {
+    "edit": "Bearbeiten",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "newPage": "Neue Seite",
+    "deleteConfirm": "Diese Seite löschen?",
+    "saved": "Seite gespeichert",
+    "needTitle": "Bitte zuerst einen Titel eingeben",
+    "searchPlaceholder": "Wiki durchsuchen…",
+    "titlePlaceholder": "Seitentitel",
+    "contentPlaceholder": "Markdown schreiben… Seiten mit [[Seitenname]] verlinken",
+    "empty": "Noch keine Seiten. Erstelle die erste.",
+    "welcome": "Dein Wissens-Wiki. Wähle links eine Seite oder erstelle eine neue.",
+    "linksTo": "Verlinkt auf:",
+    "linkedFrom": "Verlinkt von:"
+  },
+  "memory": {
+    "searchPlaceholder": "Erinnerungen durchsuchen…",
+    "kindFilter": "Typ",
+    "addPlaceholder": "Etwas Merkenswertes…",
+    "tagsPlaceholder": "Tags, durch, Kommas",
+    "addButton": "Merken",
+    "added": "Im Gedächtnis gespeichert",
+    "deleteConfirm": "Diese Erinnerung vergessen?",
+    "empty": "Noch keine Erinnerungen. Füge Fakten, Entscheidungen und Vorlieben hinzu.",
+    "hint": "Typisierte, durchsuchbare Notizen über deine Welt. Agenten können sie im Chat lesen und ergänzen.",
+    "kind": {
+      "fact": "Fakt",
+      "decision": "Entscheidung",
+      "preference": "Vorliebe",
+      "howto": "Anleitung",
+      "note": "Notiz"
+    }
+  }
+}

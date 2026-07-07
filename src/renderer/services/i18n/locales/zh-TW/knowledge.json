@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "維基",
+    "memory": "記憶"
+  },
+  "wiki": {
+    "edit": "編輯",
+    "save": "儲存",
+    "cancel": "取消",
+    "newPage": "新增頁面",
+    "deleteConfirm": "刪除此頁面？",
+    "saved": "頁面已儲存",
+    "needTitle": "請先輸入標題",
+    "searchPlaceholder": "搜尋維基…",
+    "titlePlaceholder": "頁面標題",
+    "contentPlaceholder": "撰寫 Markdown… 使用 [[頁面名稱]] 連結頁面",
+    "empty": "還沒有頁面，建立第一個吧。",
+    "welcome": "你的知識維基。在左側選擇頁面或新增一個。",
+    "linksTo": "連結到：",
+    "linkedFrom": "被連結自："
+  },
+  "memory": {
+    "searchPlaceholder": "搜尋記憶…",
+    "kindFilter": "類型",
+    "addPlaceholder": "值得記住的事…",
+    "tagsPlaceholder": "標籤，逗號分隔",
+    "addButton": "記住",
+    "added": "已存入記憶",
+    "deleteConfirm": "忘記這條記憶？",
+    "empty": "還沒有記憶。在這裡加入事實、決定與偏好。",
+    "hint": "關於你的世界的類型化、可搜尋筆記。智能體可在聊天中讀取與新增。",
+    "kind": {
+      "fact": "事實",
+      "decision": "決定",
+      "preference": "偏好",
+      "howto": "指南",
+      "note": "筆記"
+    }
+  }
+}

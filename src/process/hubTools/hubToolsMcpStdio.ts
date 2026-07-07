@@ -84,6 +84,65 @@ Use when the user asks what they have spent, which model is costing the most, or
   }
 );
 
+createHubTool(
+  server,
+  'wiki_search',
+  `Search the user's personal knowledge wiki (their curated notes in ~/.genesis/wiki). Returns matching pages with snippets.
+
+Use this FIRST when the user references their own projects, servers, decisions, or anything "we set up before" - their wiki is the source of truth for their environment.`,
+  {
+    query: z.string().min(1).describe('Search text; matches page titles and content, case-insensitive.'),
+  }
+);
+
+createHubTool(
+  server,
+  'wiki_read',
+  `Read one page from the user's knowledge wiki by its slug or title (as shown by wiki_search, or [[wikilinks]] inside other pages).`,
+  {
+    page: z.string().min(1).describe('Page slug or title, e.g. "home-lab" or "Home Lab".'),
+  }
+);
+
+createHubTool(
+  server,
+  'wiki_write',
+  `Create or update a page in the user's knowledge wiki. The content is markdown; link related pages with [[Page Name]]. Writing an existing title overwrites that page, so wiki_read it first and preserve anything still true.
+
+Use when the user says "add that to the wiki", or after completing significant work whose outcome the user will want to reference later.`,
+  {
+    title: z.string().min(1).describe('Page title, e.g. "Home Lab". Determines the page slug.'),
+    content: z.string().describe('Full markdown body of the page (replaces any previous content).'),
+  }
+);
+
+createHubTool(
+  server,
+  'memory_add',
+  `Save one durable memory about the user to their knowledge base (~/.genesis/memory.jsonl): a fact, decision, preference, or how-to. Keep each entry short and standalone.
+
+Use when the user states a lasting preference ("always use bun"), makes a decision, or asks you to remember something.`,
+  {
+    kind: z
+      .enum(['fact', 'decision', 'preference', 'howto', 'note'])
+      .optional()
+      .describe("Entry type; defaults to 'note'."),
+    text: z.string().min(1).describe('The thing to remember, one or two sentences.'),
+    tags: z.array(z.string()).optional().describe('Optional lowercase tags for later filtering.'),
+  }
+);
+
+createHubTool(
+  server,
+  'memory_search',
+  `Search the user's saved memories (facts, decisions, preferences, how-tos). Returns the 20 most recent matches.
+
+Use at the start of tasks that touch the user's environment or preferences, before asking them questions they may have already answered.`,
+  {
+    query: z.string().optional().describe('Search text; omit to list the most recent memories.'),
+  }
+);
+
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);

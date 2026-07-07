@@ -1,0 +1,40 @@
+{
+  "tabs": {
+    "wiki": "Viki",
+    "memory": "Bellek"
+  },
+  "wiki": {
+    "edit": "Düzenle",
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "newPage": "Yeni sayfa",
+    "deleteConfirm": "Bu sayfa silinsin mi?",
+    "saved": "Sayfa kaydedildi",
+    "needTitle": "Önce bir başlık girin",
+    "searchPlaceholder": "Vikide ara…",
+    "titlePlaceholder": "Sayfa başlığı",
+    "contentPlaceholder": "Markdown yazın… sayfaları [[Sayfa Adı]] ile bağlayın",
+    "empty": "Henüz sayfa yok. İlkini oluşturun.",
+    "welcome": "Bilgi vikiniz. Soldan bir sayfa seçin veya yeni oluşturun.",
+    "linksTo": "Bağlantılar:",
+    "linkedFrom": "Buraya bağlananlar:"
+  },
+  "memory": {
+    "searchPlaceholder": "Anıları ara…",
+    "kindFilter": "Tür",
+    "addPlaceholder": "Hatırlamaya değer bir şey…",
+    "tagsPlaceholder": "etiketler, virgülle, ayrılmış",
+    "addButton": "Hatırla",
+    "added": "Belleğe kaydedildi",
+    "deleteConfirm": "Bu anı unutulsun mu?",
+    "empty": "Henüz anı yok. Gerçekleri, kararları ve tercihleri ekleyin.",
+    "hint": "Dünyanız hakkında türlenmiş, aranabilir notlar. Ajanlar sohbet sırasında okuyup ekleyebilir.",
+    "kind": {
+      "fact": "Gerçek",
+      "decision": "Karar",
+      "preference": "Tercih",
+      "howto": "Kılavuz",
+      "note": "Not"
+    }
+  }
+}
