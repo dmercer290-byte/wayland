@@ -979,7 +979,7 @@ const WebuiModalContent: React.FC = () => {
                   className='text-primary hover:underline cursor-pointer bg-transparent border-none p-0 text-12px'
                   onClick={() =>
                     shell.openExternal
-                      .invoke('https://github.com/FerroxLabs/wayland/wiki/Remote-Internet-Access-Guide')
+                      .invoke('https://github.com/dmercer290-byte/wayland/blob/main/docs/guides/webui.md#remote-access')
                       .catch(console.error)
                   }
                 >

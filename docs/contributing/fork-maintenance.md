@@ -33,15 +33,23 @@ AND forbids `FerroxLabs` from reappearing in them. These are the
 highest-stakes lines in the repo: whoever owns the repos they name controls
 code that downloads and runs on every user's machine.
 
-Known remaining upstream references (deliberate, harmless - links and prose
-only, no code delivery):
+In-app help/docs links also point at our repo: the "wiki" is the in-repo
+`docs/` tree (`docs/README.md` is the home page), which is version-controlled
+and survives with the fork. Upstream's GitHub wiki was never published (404),
+so the old links were dead anyway. New user-facing guides go in
+`docs/guides/` and get linked by blob URL
+(`https://github.com/dmercer290-byte/wayland/blob/main/docs/...`).
+
+Known remaining upstream references (deliberate, harmless - prose only, no
+code delivery):
 
 - `appId: com.ferroxlabs.wayland` - changing the appId makes installed apps
   treat the next version as a different application (new data dir, broken
   auto-update handoff). Leave it unless we ship a data migration.
-- About/help links in the renderer (upstream wiki, getwayland.com docs,
-  `FerroxLabs/ijfw` brand link) - informational only; replace as our own
-  docs come online.
+- `IjfwSettingsPanel.tsx` brand link to `FerroxLabs/ijfw` (the IJFW project
+  itself) and the author's X/Twitter "contact" link in the About dialog.
+- `ClientFactory.ts` sends `HTTP-Referer: https://getwayland.com` as an
+  attribution header on OpenAI-compatible requests - cosmetic.
 - CI conditionals on `github.repository == 'FerroxLabs/wayland'` (coverage
   upload routing) and prose/issue references - inert on this repo.
 

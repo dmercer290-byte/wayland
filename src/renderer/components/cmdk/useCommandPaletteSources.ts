@@ -76,12 +76,10 @@ const FALLBACK_STARTER_PROMPTS: PaletteStarterPrompt[] = [
 const MAX_RECENT_PALETTE_ROWS = 10;
 
 /**
- * Canonical Wayland documentation URL opened by the "Search documentation"
- * palette action.
- * TODO(docs): confirm this is the live docs URL before release — no docs URL
- * constant existed elsewhere in the app at the time this was added.
+ * Canonical documentation URL opened by the "Search documentation" palette
+ * action - the fork's in-repo docs tree (docs/README.md is the home page).
  */
-const DOCS_URL = 'https://getwayland.com/docs';
+const DOCS_URL = 'https://github.com/dmercer290-byte/wayland/tree/main/docs';
 
 /** Static palette actions (commands that are not chat launches). */
 const PALETTE_ACTIONS: PaletteAction[] = [
@@ -135,7 +133,7 @@ export function useCommandPaletteSources(): CommandPaletteSources {
   const recents = useMemo<PaletteRecent[]>(() => {
     return conversations
       .slice()
-      .sort((a: TChatConversation, b: TChatConversation) => (b.modifyTime ?? 0) - (a.modifyTime ?? 0))
+      .toSorted((a: TChatConversation, b: TChatConversation) => (b.modifyTime ?? 0) - (a.modifyTime ?? 0))
       .slice(0, MAX_RECENT_PALETTE_ROWS)
       .map((conv: TChatConversation) => ({
         id: conv.id,

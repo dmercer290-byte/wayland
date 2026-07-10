@@ -204,6 +204,14 @@ const FORBIDDEN_UPSTREAM_REFS = [
   { file: 'src/process/bridge/updateBridge.ts', mustNotContain: "DEFAULT_REPO = 'FerroxLabs" },
   { file: 'src/process/extensions/constants.ts', mustNotContain: 'FerroxLabs/waylandHub' },
   { file: 'scripts/prepareHubResources.js', mustNotContain: 'FerroxLabs/waylandHub' },
+  // In-app help/docs links point at OUR repo (the fork's in-repo wiki under
+  // docs/), not upstream's never-published wiki or their marketing site.
+  { file: 'src/renderer/components/settings/SettingsModal/contents/AboutModalContent.tsx', mustNotContain: 'FerroxLabs' },
+  { file: 'src/renderer/components/settings/SettingsModal/contents/WebuiModalContent.tsx', mustNotContain: 'FerroxLabs' },
+  { file: 'src/renderer/components/layout/Sider/SiderFooter/SiderFooterQuickActions.tsx', mustNotContain: 'FerroxLabs' },
+  { file: 'src/renderer/pages/settings/AgentSettings/RemoteAgentManagement.tsx', mustNotContain: 'FerroxLabs' },
+  { file: 'src/renderer/pages/settings/AgentSettings/AgentHubModal.tsx', mustNotContain: 'FerroxLabs' },
+  { file: 'src/renderer/components/cmdk/useCommandPaletteSources.ts', mustNotContain: 'getwayland.com' },
 ];
 
 describe('fork integrity (see docs/contributing/fork-maintenance.md)', () => {

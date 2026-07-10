@@ -33,7 +33,7 @@ const FormItem = Form.Item;
 
 const PAIRING_POLL_INTERVAL = 5_000;
 const PAIRING_TIMEOUT = 5 * 60 * 1000;
-const REMOTE_AGENT_GUIDE_URL = 'https://github.com/FerroxLabs/wayland/wiki/Remote-Agent-Guide-Chinese';
+const REMOTE_AGENT_GUIDE_URL = 'https://github.com/dmercer290-byte/wayland/blob/main/docs/guides/remote-agent.md';
 
 type PairingState = 'idle' | 'handshaking' | 'pending' | 'timeout';
 
