@@ -81,6 +81,20 @@ class BridgeClient(baseUrl: String) {
     }
   }
 
+  /** Pairing-code login: POST /api/auth/qr-login {qrToken} sets the auth cookie. */
+  suspend fun qrLogin(qrToken: String) {
+    val body = buildJsonObject { put("qrToken", qrToken) }
+    val res = call(
+      Request.Builder()
+        .url(base.newBuilder().addPathSegments("api/auth/qr-login").build())
+        .post(body.toString().toRequestBody("application/json".toMediaType()))
+        .build()
+    )
+    res.use {
+      if (!it.isSuccessful) throw IOException("Pairing failed: HTTP ${it.code}")
+    }
+  }
+
   suspend fun connect() {
     val tokenRes = call(
       Request.Builder().url(base.newBuilder().addPathSegments("api/ws-token").build()).build()
@@ -185,5 +199,8 @@ class BridgeClient(baseUrl: String) {
     const val P_MESSAGES = "database.get-conversation-messages"
     const val P_SEND = "chat.send.message"
     const val P_CREATE = "create-conversation"
+
+    /** Emitter broadcast carrying streamed agent output (IResponseMessage). */
+    const val E_RESPONSE_STREAM = "chat.response.stream"
   }
 }

@@ -65,6 +65,12 @@ private fun ConnectScreen(vm: AppViewModel) {
       visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()
     )
     Button(onClick = { vm.connect(url, user, pass) }, enabled = !vm.busy) { Text("Connect") }
+    var pairCode by remember { mutableStateOf("") }
+    Text("Or pair with a code (desktop: QR-login page)", style = MaterialTheme.typography.labelMedium)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      OutlinedTextField(pairCode, { pairCode = it }, label = { Text("Pairing code") }, modifier = Modifier.weight(1f))
+      Button(onClick = { vm.pair(url, pairCode) }, enabled = pairCode.isNotBlank() && !vm.busy) { Text("Pair") }
+    }
     if (vm.busy) CircularProgressIndicator()
     vm.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     if (vm.hasCache) {

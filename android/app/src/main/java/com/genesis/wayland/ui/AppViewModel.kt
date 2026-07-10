@@ -36,14 +36,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
   val lastUrl: String get() = prefs.getString("url", "http://192.168.1.10:3000") ?: ""
   val lastUser: String get() = prefs.getString("user", "admin") ?: ""
 
-  fun connect(url: String, user: String, pass: String) {
+  fun connect(url: String, user: String, pass: String) = connectWith(url, user) { it.login(user, pass) }
+
+  /** Pairing-code login (the desktop's QR page shows the token). */
+  fun pair(url: String, qrToken: String) = connectWith(url, lastUser) { it.qrLogin(qrToken) }
+
+  private fun connectWith(url: String, user: String, auth: suspend (BridgeClient) -> Unit) {
     busy = true; error = null
     viewModelScope.launch {
       runCatching {
         val c = BridgeClient(url)
-        c.login(user, pass)
+        auth(c)
         c.connect()
         c.onClosed = { online = false }
+        c.onEvent = { name, data -> onBridgeEvent(name, data) }
         client = c
         prefs.edit().putString("url", url).putString("user", user).apply()
         syncConversations()
@@ -90,6 +96,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         syncMessages(c.id)
       }.onFailure { error = it.message }
       busy = false
+    }
+  }
+
+  /**
+   * Streamed agent output arrives as chat.response.stream broadcasts. Rather
+   * than reimplement the renderer's incremental IResponseMessage merge, treat
+   * each event for the open conversation as a change signal and re-fetch,
+   * throttled to one refresh per second.
+   */
+  private var refreshQueued = false
+  private fun onBridgeEvent(name: String, data: kotlinx.serialization.json.JsonElement?) {
+    if (name != BridgeClient.E_RESPONSE_STREAM) return
+    val current = (screen as? Screen.Chat)?.conversation?.id ?: return
+    val convId = runCatching {
+      (data as? kotlinx.serialization.json.JsonObject)
+        ?.get("conversation_id")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+    }.getOrNull()
+    if (convId != null && convId != current) return
+    if (refreshQueued) return
+    refreshQueued = true
+    viewModelScope.launch {
+      kotlinx.coroutines.delay(1_000)
+      refreshQueued = false
+      runCatching { syncMessages(current) }
     }
   }
 

@@ -42,12 +42,21 @@ Providers used: `database.get-user-conversations`,
 `database.get-conversation-messages`, `chat.send.message`
 (`src/common/adapter/ipcBridge.ts`).
 
-## Current scope / next steps
+## Current scope
 
-- Read + send + offline cache. Streaming updates arrive as bridge emitter
-  events (`BridgeClient.onEvent`) but v1 refreshes by re-fetching after send —
-  wiring the streamed message events into the chat view is the first upgrade.
+- Read + send + offline cache.
+- Live updates: `chat.response.stream` broadcasts for the open conversation
+  trigger a throttled (1s) message re-fetch, so agent replies appear as they
+  stream without reimplementing the renderer's incremental merge.
+- Pairing-code login: enter the token from the desktop's QR-login page
+  instead of a password (`POST /api/auth/qr-login`). Camera scanning is a
+  future nicety - it needs a barcode dependency.
+- Signed release builds: set repo secrets `ANDROID_KEYSTORE_BASE64` (base64
+  of your .keystore), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+  `ANDROID_KEY_PASSWORD` and the workflow's release job produces a signed
+  APK artifact. Locally: export the same vars (`ANDROID_KEYSTORE_FILE` path
+  instead of base64) and run `gradle assembleRelease`. Generate a keystore
+  once with `keytool -genkeypair -keystore wayland.keystore -alias wayland
+  -keyalg RSA -keysize 4096 -validity 10000`.
 - Cleartext HTTP is permitted for LAN servers (see the manifest note). Use
   HTTPS or a VPN/tunnel for anything beyond your own network.
-- QR pairing (`/api/auth/qr-login`) exists server-side and would remove the
-  password step on the phone.

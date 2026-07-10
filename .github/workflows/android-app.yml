@@ -36,3 +36,58 @@ jobs:
           name: wayland-android-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  release:
+    name: Build signed release APK
+    # Only when a signing keystore is configured (base64 of the .jks/.keystore
+    # as ANDROID_KEYSTORE_BASE64 + the three password/alias secrets).
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check signing secrets
+        id: signing
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KS" ]; then
+            echo "::notice title=Release APK skipped::Set ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD secrets to build a signed release APK."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.signing.outputs.skip != '1'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.signing.outputs.skip != '1'
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Decode keystore
+        if: steps.signing.outputs.skip != '1'
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KS" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Build signed release
+        if: steps.signing.outputs.skip != '1'
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v7
+        if: steps.signing.outputs.skip != '1'
+        with:
+          name: wayland-android-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

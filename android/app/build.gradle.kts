@@ -17,9 +17,26 @@ android {
     versionName = "0.1.0"
   }
 
+  // Release signing from environment (CI decodes the keystore from the
+  // ANDROID_KEYSTORE_BASE64 secret). Absent env -> unsigned release build.
+  val keystorePath = System.getenv("ANDROID_KEYSTORE_FILE")
+  if (keystorePath != null) {
+    signingConfigs {
+      create("release") {
+        storeFile = file(keystorePath)
+        storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+        keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+      }
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = false
+      if (keystorePath != null) {
+        signingConfig = signingConfigs.getByName("release")
+      }
     }
   }
   buildFeatures { compose = true }
