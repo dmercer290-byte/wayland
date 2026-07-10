@@ -73,7 +73,7 @@ const AboutModalContent: React.FC = () => {
     },
     {
       title: t('settings.contactMe'),
-      url: 'https://x.com/WailiVery',
+      url: 'https://github.com/dmercer290-byte',
       icon: <ChevronRight size={16} />,
     },
     {

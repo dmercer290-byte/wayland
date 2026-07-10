@@ -380,37 +380,49 @@ jobs:
     # publish-release actually succeeded.
     if: ${{ always() && needs.publish-release.result == 'success' }}
     steps:
-      - name: Require an npm token
+      # Fork note: the `getwayland` npm package name belongs to the original
+      # author. Before ever setting NPM_TOKEN on this fork, rename the package
+      # in installer/package.json to a name this fork owns on npm - publishing
+      # to the author's name will fail (or collide). Until a token is set this
+      # job skips gracefully instead of failing the whole release.
+      - name: Check for an npm token (publish is optional on this fork)
+        id: npm_token
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NPM_TOKEN" ]; then
-            echo "::error title=NPM_TOKEN missing::Add an npm automation token as the NPM_TOKEN repo secret so the getwayland self-host CLI publishes on every release."
-            exit 1
+            echo "::warning title=npm publish skipped::NPM_TOKEN is not set - skipping the self-host CLI npm publish. To enable: pick an npm package name this fork owns (installer/package.json), then add the NPM_TOKEN secret."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout
+        if: steps.npm_token.outputs.skip != '1'
         uses: actions/checkout@v6
 
       - name: Setup Node.js
+        if: steps.npm_token.outputs.skip != '1'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup bun
+        if: steps.npm_token.outputs.skip != '1'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install dependencies
+        if: steps.npm_token.outputs.skip != '1'
         run: bun install --frozen-lockfile
 
       - name: Build the getwayland payload (syncs version to the release)
+        if: steps.npm_token.outputs.skip != '1'
         working-directory: installer
         run: node scripts/build-payload.mjs
 
       - name: Publish to npm
+        if: steps.npm_token.outputs.skip != '1'
         working-directory: installer
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -352,14 +352,28 @@ jobs:
       # secret is missing on a release tag, fail loudly BEFORE the build (the
       # build step below swallows its own failures into a notice, so this is the
       # hard gate). Non-tag/dev builds are unaffected and may build unsigned.
+      #
+      # Fork note: the azureSignOptions in electron-builder.yml name the
+      # original author's signing account, so this fork cannot produce signed
+      # Windows builds until its own Azure Trusted Signing account (or cert)
+      # is configured. Explicit escape hatch: set the repository variable
+      # ALLOW_UNSIGNED_WINDOWS_RELEASE=1 to ship unsigned (SmartScreen will
+      # warn users, and verifyUpdateCodeSignature must be set to false in
+      # electron-builder.yml in the same change or Windows auto-update will
+      # reject the unsigned installer).
       - name: Require Azure signing credentials on release tag (Windows)
         if: startsWith(matrix.platform, 'windows') && startsWith(github.ref, 'refs/tags/') && !contains(github.ref, '-dev-')
         shell: bash
         env:
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ALLOW_UNSIGNED: ${{ vars.ALLOW_UNSIGNED_WINDOWS_RELEASE }}
         run: |
           if [ -z "$AZURE_CLIENT_SECRET" ]; then
-            echo "::error title=Windows signing not configured::AZURE_CLIENT_SECRET is empty on a release tag. Refusing to ship an unsigned Windows build. Set AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET repo secrets."
+            if [ "$ALLOW_UNSIGNED" = "1" ]; then
+              echo "::warning title=Unsigned Windows release::ALLOW_UNSIGNED_WINDOWS_RELEASE=1 - shipping an UNSIGNED Windows build. Ensure verifyUpdateCodeSignature is false in electron-builder.yml."
+              exit 0
+            fi
+            echo "::error title=Windows signing not configured::AZURE_CLIENT_SECRET is empty on a release tag. Refusing to ship an unsigned Windows build. Set AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET repo secrets (your own signing account - the config's previous account belonged to upstream), or set repo variable ALLOW_UNSIGNED_WINDOWS_RELEASE=1 to ship unsigned."
             exit 1
           fi
           echo "Azure Trusted Signing credentials present — proceeding with signed Windows build."

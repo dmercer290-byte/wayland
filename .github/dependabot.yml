@@ -1,0 +1,33 @@
+# Dependency-update automation. This fork no longer tracks upstream, so
+# security/version bumps must arrive on their own. The test suite (including
+# tests/unit/forkIntegrity.test.ts) gates every PR Dependabot opens.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: ['minor', 'patch']
+    ignore:
+      # Electron majors change the runtime contract - bump deliberately.
+      - dependency-name: electron
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: npm
+    directory: '/installer'
+    schedule:
+      interval: weekly
+    groups:
+      installer:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
