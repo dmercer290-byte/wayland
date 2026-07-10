@@ -1,5 +1,8 @@
 # Genesis Rebrand — Rules for Merging Upstream Updates
 
+> **Current upstream base: v0.12.24** (merged in `f92a486`). Update this line
+> on every upstream merge.
+
 This fork renames the product **Wayland → Genesis** (`wayland`→`genesis`,
 `Wayland`→`Genesis`, `WAYLAND`→`GENESIS`) across code, docs, and CI. When
 merging upstream (FerroxLabs/wayland-core) releases, upstream-touched files
