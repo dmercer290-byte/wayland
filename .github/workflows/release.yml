@@ -22,6 +22,11 @@ on:
         description: "Release tag to build and publish (e.g., v0.2.0)"
         required: true
         type: string
+      create_from_sha:
+        description: "Optional commit SHA to create tag_name from when the tag does not exist yet (for environments whose push access is branch-scoped)"
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -39,6 +44,22 @@ jobs:
     outputs:
       version: ${{ steps.metadata.outputs.version }}
     steps:
+      # Runs before checkout (pure API call). Lets a dispatch cut the release
+      # tag itself when the caller cannot push tags directly.
+      - name: Create tag from SHA (dispatch only)
+        if: ${{ inputs.create_from_sha != '' && inputs.create_from_sha != null }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag_name }}
+          SHA: ${{ inputs.create_from_sha }}
+        run: |
+          if gh api "repos/${{ github.repository }}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists - building it as-is."
+          else
+            gh api "repos/${{ github.repository }}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${SHA}"
+            echo "Created tag ${TAG} at ${SHA}."
+          fi
+
       - uses: actions/checkout@v6
         with:
           ref: refs/tags/${{ inputs.tag_name || github.ref_name }}
