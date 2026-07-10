@@ -84,6 +84,18 @@ Use when the user asks what they have spent, which model is costing the most, or
   }
 );
 
+createHubTool(
+  server,
+  'memory_recall',
+  `Recall distilled memories of past conversations from the workspace's episodic memory sidecar (.ijfw/memory/episodes.md + the live transcript). Returns the top matches with dates and relevance scores.
+
+Use when the user references earlier work ("like we did before", "what did we decide about X"), or when past context would improve the answer.`,
+  {
+    query: z.string().describe('What to remember - topic keywords work best (e.g. "android release signing").'),
+    workspace: z.string().describe('Absolute path of the workspace whose memory to search (the project root).'),
+  }
+);
+
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -149,6 +149,21 @@ export class HubToolsMcpServer {
         const result = await loadModel(server.id, model);
         return formatLoadResult(result, server.name);
       }
+      case 'memory_recall': {
+        // Episodic sidecar recall: lets the agent consult distilled memories
+        // of past conversations mid-turn (episodes.md + live transcript).
+        const query = String(args.query ?? '').trim();
+        const workspace = String(args.workspace ?? '').trim();
+        if (!query) throw new Error('query is required');
+        if (!workspace) throw new Error('workspace is required');
+        const { searchMemory } = await import('@process/services/memory/memoryRecall');
+        const memDir = path.join(workspace, '.ijfw', 'memory');
+        const hits = await searchMemory(memDir, query, 6);
+        if (!hits.length) return 'No stored memories matched.';
+        return hits
+          .map((h) => `[${h.source} ${h.stored.slice(0, 10)} score=${h.score.toFixed(2)}] ${h.summary}\n${h.body}`)
+          .join('\n\n');
+      }
       case 'cost_report': {
         const raw = String(args.period ?? 'week');
         const period: Period = raw === 'today' || raw === 'month' ? raw : 'week';
