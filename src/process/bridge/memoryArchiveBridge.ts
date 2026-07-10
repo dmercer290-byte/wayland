@@ -19,6 +19,8 @@ import { ProcessConfig } from '@process/utils/initStorage';
 import { promoteEntry, undoPromotion } from '@process/services/memory/wikiWriter';
 import { startPromotionSweep } from '@process/services/memory/promotionSweep';
 import { readSourceContext } from '@process/services/memory/sourceReader';
+import { searchMemory } from '@process/services/memory/memoryRecall';
+import nodePath from 'node:path';
 import type { ListFilter } from '@/common/types/memory';
 import type { SweepHandle } from '@process/services/memory/promotionSweep';
 
@@ -288,6 +290,18 @@ export function initMemoryArchiveBridge(): void {
     invalidateTranscriptLoggingCache();
     log.info('[memory-archive] setTranscriptLogging', { enabled });
     return { ok: true as const };
+  });
+
+  // ===== Episodic recall =====
+
+  ipcBridge.memory.searchMemory.provider(async (args: unknown) => {
+    const parsed = z
+      .object({ workspace: z.string().min(1), query: z.string().min(1), limit: z.number().int().positive().max(50).optional() })
+      .safeParse(args);
+    if (!parsed.success) return [];
+    const { workspace, query, limit } = parsed.data;
+    const memDir = nodePath.join(workspace, '.ijfw', 'memory');
+    return searchMemory(memDir, query, limit ?? 8);
   });
 
   // ===== Emitters =====

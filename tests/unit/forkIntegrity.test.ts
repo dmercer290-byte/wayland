@@ -24,6 +24,8 @@ const FORK_OWNED_FILES = [
   // Transcript logging (full-detail conversation mirror into IJFW memory)
   'src/process/services/memory/transcriptFormat.ts',
   'src/process/services/memory/transcriptLogger.ts',
+  'src/process/services/memory/episodicMemory.ts',
+  'src/process/services/memory/memoryRecall.ts',
   // Hub tools MCP server (Model Hub VRAM swap + cost report as agent tools)
   'src/process/hubTools/HubToolsMcpServer.ts',
   'src/process/hubTools/hubToolsFormat.ts',
@@ -66,12 +68,18 @@ const FORK_HOOKS: ForkHook[] = [
       'invalidateTranscriptLoggingCache',
       'ipcBridge.memory.getTranscriptLogging.provider',
       'ipcBridge.memory.setTranscriptLogging.provider',
+      'ipcBridge.memory.searchMemory.provider',
     ],
+  },
+  {
+    file: 'src/process/services/memory/transcriptLogger.ts',
+    feature: 'episodic sidecar - rotation distills leaving transcript blocks into episodes.md',
+    mustContain: ['appendEpisodes(memDir, distillEpisodes(archive))'],
   },
   {
     file: 'src/common/adapter/ipcBridge.ts',
     feature: 'IPC surface for transcript toggle + Model Hub',
-    mustContain: ['getTranscriptLogging', 'setTranscriptLogging', 'export const modelHub'],
+    mustContain: ['getTranscriptLogging', 'setTranscriptLogging', 'searchMemory', 'export const modelHub'],
   },
   {
     file: 'src/common/config/storage.ts',

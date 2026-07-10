@@ -26,6 +26,7 @@ import { promisify } from 'node:util';
 import type { TMessage } from '@/common/chat/chatLib';
 import { ProcessConfig } from '../../utils/initStorage';
 import { getDatabase } from '../database/export';
+import { appendEpisodes, distillEpisodes } from './episodicMemory';
 import {
   TRANSCRIPT_HEADER,
   TRANSCRIPT_KIND_BY_TYPE,
@@ -160,6 +161,15 @@ async function rotateIfOversized(memDir: string, filePath: string): Promise<void
     const archivePath = path.join(archiveDir, `transcript-${stamp}.md.gz`);
     const compressed = await gzip(Buffer.from(archive, 'utf8'));
     await fs.promises.writeFile(archivePath, compressed);
+
+    // Episodic sidecar: distill the slice that is leaving the live transcript
+    // into compact per-conversation episodes BEFORE it becomes an opaque gzip.
+    // Best-effort - a distillation failure must never break rotation.
+    try {
+      await appendEpisodes(memDir, distillEpisodes(archive));
+    } catch (episodeErr) {
+      console.error('[TranscriptLogger] episode distillation failed:', episodeErr);
+    }
 
     // Write-then-rename so a crash mid-rotation never truncates the live file.
     const tmpPath = `${filePath}.rotating`;

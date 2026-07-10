@@ -2813,6 +2813,11 @@ export const memory = {
   getTranscriptLogging: buildProvider<{ enabled: boolean }, void>('memory.get-transcript-logging'),
   /** Persist the transcript-logging toggle. */
   setTranscriptLogging: buildProvider<{ ok: true }, { enabled: boolean }>('memory.set-transcript-logging'),
+  /** Recall from the episodic sidecar + live transcript (memoryRecall.ts). */
+  searchMemory: buildProvider<
+    Array<{ source: 'episode' | 'transcript'; summary: string; body: string; stored: string; score: number }>,
+    { workspace: string; query: string; limit?: number }
+  >('memory.search-memory'),
   /** Import verbs - stubs until W1a wires the actual importers. */
   import: {
     claudeMem: buildProvider<{ count: number; errors: string[] }, void>('memory.import.claude-mem'),

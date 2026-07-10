@@ -93,7 +93,11 @@ Mirrors every chat, tool call, and thinking block into
 chat AND team sessions because everything funnels through one store.
 
 - Fork-owned: `src/process/services/memory/transcriptLogger.ts`,
-  `transcriptFormat.ts` (+ tests)
+  `transcriptFormat.ts`, `episodicMemory.ts`, `memoryRecall.ts` (+ tests).
+  The episodic sidecar distills each rotated transcript slice into compact
+  per-conversation episodes (`.ijfw/memory/episodes.md`) before it becomes an
+  opaque gzip; `memoryRecall.searchMemory` ranks episodes + live transcript
+  for a query and is exposed as `ipcBridge.memory.searchMemory`.
 - Hooks: `src/process/utils/message.ts` (`recordTranscriptMessage(...)` in
   `ConversationManageWithDB.sync()` - **the load-bearing line**; every agent
   manager and `TeamSession`/`TeammateManager` route through this store),
