@@ -42,6 +42,17 @@ Providers used: `database.get-user-conversations`,
 `database.get-conversation-messages`, `chat.send.message`
 (`src/common/adapter/ipcBridge.ts`).
 
+## Full-system mode
+
+"Open full app" (conversation list, when online) embeds the server's complete
+WebUI in a WebView - the same renderer the desktop ships, so **every** feature
+(settings, teams, memory, channels, cost analytics) works on the phone. The
+native screens remain the offline-capable fast path for chat.
+
+To run the *entire* system on the phone with no other machine: install the
+headless server in Termux ([webui.md](webui.md#android-termux)), then point
+this app at `http://localhost:3000`.
+
 ## Current scope
 
 - Read + send + offline cache.

@@ -27,6 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.annotation.SuppressLint
+import android.webkit.CookieManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.viewinterop.AndroidView
 import com.genesis.wayland.data.ChatMessage
 import com.genesis.wayland.data.Conversation
 import com.genesis.wayland.ui.AppViewModel
@@ -46,6 +52,7 @@ private fun App(vm: AppViewModel = viewModel()) {
         is AppViewModel.Screen.Connect -> ConnectScreen(vm)
         is AppViewModel.Screen.Conversations -> ConversationsScreen(vm)
         is AppViewModel.Screen.Chat -> ChatScreen(vm, screen.conversation)
+        is AppViewModel.Screen.FullApp -> FullAppScreen(vm, screen.url)
       }
     }
   }
@@ -86,6 +93,9 @@ private fun ConversationsScreen(vm: AppViewModel) {
       Text("Conversations", style = MaterialTheme.typography.titleLarge)
       Text(if (vm.online) "online" else "offline cache", style = MaterialTheme.typography.labelMedium)
     }
+    if (vm.online) {
+      Button(onClick = { vm.openFullApp() }) { Text("Open full app (all features)") }
+    }
     vm.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
       items(vm.conversations, key = { it.id }) { c: Conversation ->
@@ -95,6 +105,35 @@ private fun ConversationsScreen(vm: AppViewModel) {
       }
     }
   }
+}
+
+/**
+ * The complete Wayland system UI: the server's WebUI is the same renderer the
+ * desktop ships, so every feature (settings, teams, memory, channels, cost)
+ * works here. The user logs in once inside the view; the WebView cookie jar
+ * persists the session. Android back navigates web history, then exits.
+ */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun FullAppScreen(vm: AppViewModel, url: String) {
+  var webView by remember { mutableStateOf<WebView?>(null) }
+  BackHandler {
+    val w = webView
+    if (w?.canGoBack() == true) w.goBack() else vm.backToList()
+  }
+  AndroidView(
+    modifier = Modifier.fillMaxSize(),
+    factory = { ctx ->
+      WebView(ctx).apply {
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        CookieManager.getInstance().setAcceptCookie(true)
+        webViewClient = WebViewClient()
+        loadUrl(url)
+        webView = this
+      }
+    }
+  )
 }
 
 @Composable

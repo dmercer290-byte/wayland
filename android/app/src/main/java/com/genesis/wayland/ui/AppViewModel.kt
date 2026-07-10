@@ -19,6 +19,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     data object Connect : Screen
     data object Conversations : Screen
     data class Chat(val conversation: Conversation) : Screen
+
+    /** Full system UI: the server's complete WebUI in an embedded WebView. */
+    data class FullApp(val url: String) : Screen
+  }
+
+  fun openFullApp() {
+    screen = Screen.FullApp(prefs.getString("url", "") ?: "")
   }
 
   private val store = SyncStore(app)
