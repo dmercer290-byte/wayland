@@ -59,7 +59,9 @@ Release builds **fail closed** until our own release streams exist:
 
 1. **Engine first**: in wayland-core, tag a `vX.Y.Z-genesis-*` release (the
    Release workflow builds all six platform archives + a
-   `genesis-core-checksums.txt`). Bump the `X.Y.Z` part on every release -
+   `genesis-core-checksums.txt`). If your environment cannot push tags
+   (branch-scoped push access), dispatch the Release workflow instead with
+   `tag_name` + `create_from_sha` - it creates the tag itself. Bump the `X.Y.Z` part on every release -
    the in-app engine updater compares only `major.minor.patch`, so a
    suffix-only bump (`-genesis-2`) is invisible to installed apps. Then run
    `node scripts/stage-wcore-bump.mjs <tag> --write` in this repo: it updates
