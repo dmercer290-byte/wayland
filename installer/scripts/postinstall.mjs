@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 // Kept in lockstep with scripts/prepareWaylandCore.js DEFAULT_WCORE_VERSION by
 // scripts/stage-wcore-bump.mjs. Do not hand-edit; run that tool so both move.
-const WCORE_VERSION = 'v0.12.24';
+const WCORE_VERSION = 'v0.12.24-genesis-1';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PAYLOAD = resolve(HERE, '..', 'payload');
 
@@ -34,13 +34,20 @@ const runtimeKey = `${process.platform}-${process.arch}`;
 const triple = TRIPLES[runtimeKey];
 
 function warn(msg) {
-  console.log(`\n  [wayland] ${msg}\n  The Flux / API-key path works without it; the Wayland Core agent will be unavailable until then.\n`);
+  console.log(
+    `\n  [wayland] ${msg}\n  The Flux / API-key path works without it; the Wayland Core agent will be unavailable until then.\n`
+  );
 }
 
-if (!triple) { warn(`No prebuilt Wayland Core engine for ${runtimeKey} (skipping).`); process.exit(0); }
+if (!triple) {
+  warn(`No prebuilt Wayland Core engine for ${runtimeKey} (skipping).`);
+  process.exit(0);
+}
 
-const asset = `wayland-core-${WCORE_VERSION}-${triple}.tar.gz`;
-const url = `https://github.com/FerroxLabs/wayland-core/releases/download/${WCORE_VERSION}/${asset}`;
+// Engine releases come from OUR fork (genesis-core-* archives) - never from
+// the original upstream org. tests/unit/forkIntegrity.test.ts guards this.
+const asset = `genesis-core-${WCORE_VERSION}-${triple}.tar.gz`;
+const url = `https://github.com/dmercer290-byte/wayland-core/releases/download/${WCORE_VERSION}/${asset}`;
 const tmp = join(PAYLOAD, '.wcore-tmp');
 const tarPath = join(tmp, asset);
 const destDir = join(PAYLOAD, 'resources', 'bundled-wayland-core', runtimeKey);
@@ -54,7 +61,10 @@ function download(u, dest, redirects = 0) {
         r.resume();
         return res(download(r.headers.location, dest, redirects + 1));
       }
-      if (r.statusCode !== 200) { r.resume(); return rej(new Error(`HTTP ${r.statusCode}`)); }
+      if (r.statusCode !== 200) {
+        r.resume();
+        return rej(new Error(`HTTP ${r.statusCode}`));
+      }
       const f = createWriteStream(dest);
       r.pipe(f);
       f.on('finish', () => f.close(() => res()));
@@ -71,12 +81,15 @@ try {
   await download(url, tarPath);
   const x = spawnSync('tar', ['-xzf', tarPath, '-C', tmp], { stdio: 'ignore' });
   if (x.status !== 0) throw new Error('tar extract failed');
-  // Find the engine binary in the extracted tree (named aionrs / wayland-core / wcore).
+  // Find the engine binary in the extracted tree (genesis-core in the fork's
+  // archives; older names kept for hand-built archives).
   const found = (function find(dir) {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
-      if (e.isDirectory()) { const r = find(p); if (r) return r; }
-      else if (/^(aionrs|wayland-core|wcore)$/.test(e.name)) return p;
+      if (e.isDirectory()) {
+        const r = find(p);
+        if (r) return r;
+      } else if (/^(genesis-core|aionrs|wayland-core|wcore)$/.test(e.name)) return p;
     }
     return null;
   })(tmp);

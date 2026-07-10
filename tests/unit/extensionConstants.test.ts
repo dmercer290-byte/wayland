@@ -60,8 +60,8 @@ describe('extension constants', () => {
       vi.resetModules();
       const { HUB_REMOTE_URLS: urls } = await import('../../src/process/extensions/constants');
       expect(urls).toEqual([
-        'https://raw.githubusercontent.com/FerroxLabs/waylandHub/dist-latest/',
-        'https://cdn.jsdelivr.net/gh/FerroxLabs/waylandHub@dist-latest/',
+        'https://raw.githubusercontent.com/dmercer290-byte/waylandHub/dist-latest/',
+        'https://cdn.jsdelivr.net/gh/dmercer290-byte/waylandHub@dist-latest/',
       ]);
     });
 

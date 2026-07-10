@@ -55,13 +55,18 @@ export function getEnvExtensionsDirs(): string[] {
 export const HUB_SUPPORTED_SCHEMA_VERSION = 1;
 
 /**
- * Remote mirror base URLs for the WaylandHub repository (tried in order).
+ * Remote mirror base URLs for the extension hub repository (tried in order).
  * Set WAYLAND_HUB_URL to prepend custom URLs (comma-separated, highest priority).
  * Example: WAYLAND_HUB_URL=http://localhost:3000/,http://staging.example.com/
+ *
+ * Pinned to OUR org: the hub installs extension content into the app, so this
+ * must never name a repo the original upstream org controls. The repo does not
+ * exist yet - fetches fail soft and the hub UI degrades - but if/when we ship
+ * a hub, we create dmercer290-byte/waylandHub and it lights up.
  */
 const HUB_DEFAULT_URLS = [
-  'https://raw.githubusercontent.com/FerroxLabs/waylandHub/dist-latest/',
-  'https://cdn.jsdelivr.net/gh/FerroxLabs/waylandHub@dist-latest/',
+  'https://raw.githubusercontent.com/dmercer290-byte/waylandHub/dist-latest/',
+  'https://cdn.jsdelivr.net/gh/dmercer290-byte/waylandHub@dist-latest/',
 ];
 
 function resolveHubRemoteUrls(): string[] {

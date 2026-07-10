@@ -343,9 +343,13 @@ removePackageScripts: true
 electronDownload:
   cache: ${env.ELECTRON_CACHE}
 
+# Auto-update + publish target is OUR fork. Never point this back at upstream
+# (FerroxLabs) - installed apps pull updates from whatever repo is named here,
+# so upstream would be able to replace our build on users' machines.
+# tests/unit/forkIntegrity.test.ts guards this.
 publish:
   provider: github
-  owner: FerroxLabs
+  owner: dmercer290-byte
   repo: wayland
   publishAutoUpdate: true
   releaseType: release

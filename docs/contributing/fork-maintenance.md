@@ -1,15 +1,66 @@
 # Fork Maintenance
 
-This repository is a fork of upstream **FerroxLabs/wayland** carrying a set of
-custom features. This document is the single source of truth for **what the
-fork owns** and **how to merge upstream without losing it**. It exists because
-upstream merges have repeatedly threatened to silently drop fork wiring.
+This repository began as a fork of **FerroxLabs/wayland** and is now
+**independent**: as of v0.11.17 we no longer track upstream. Upstream code
+enters this repo only as a deliberate, reviewed cherry-pick - never as a
+routine merge. This document is the single source of truth for **what the
+fork owns**, **how we stay independent**, and how to import upstream code on
+the rare occasion we choose to.
 
-**Current upstream base: v0.11.17** (merged in `9417e0d`, bundles
-wayland-core v0.12.24). Update this line on every upstream merge.
+**Upstream divergence point: v0.11.17** (merged in `9417e0d`, bundles engine
+v0.12.24). This is the last upstream code wholesale-imported into this repo.
 
-The engine fork (dmercer290-byte/wayland-core) has its own merge playbook in
-its `REBRANDING.md` - the rules below cover only this desktop repo.
+The engine fork (dmercer290-byte/wayland-core) has its own playbook in its
+`REBRANDING.md` - the rules below cover only this desktop repo.
+
+## Independence: nothing may point at upstream infrastructure
+
+Installed apps and release builds must depend only on repos we control:
+
+| Surface | File | Points at |
+|---|---|---|
+| Auto-update feed (electron-updater) | `electron-builder.yml` `publish:` | `dmercer290-byte/wayland` releases |
+| App update metadata + integrity hashes | `src/process/bridge/updateBridge.ts` (`DEFAULT_REPO`) | `dmercer290-byte/wayland` |
+| Bundled engine binaries (release build) | `scripts/prepareWaylandCore.js` (`GITHUB_OWNER`) | `dmercer290-byte/wayland-core` releases (`genesis-core-*` archives on `v*-genesis-*` tags) |
+| In-app engine updater (runtime) | `src/process/agent/wcore/wcoreUpdater.ts` (`REPO`) | `dmercer290-byte/wayland-core` |
+| Headless installer engine fetch | `installer/scripts/postinstall.mjs` | `dmercer290-byte/wayland-core` |
+| Engine pin/checksum bump tool | `scripts/stage-wcore-bump.mjs` (`REPO`) | `dmercer290-byte/wayland-core` |
+| Extension hub mirrors | `src/process/extensions/constants.ts`, `scripts/prepareHubResources.js` | `dmercer290-byte/waylandHub` (repo doesn't exist yet; fetches fail soft) |
+| Engine self-update + provenance | wayland-core `crates/wcore-cli/src/self_update.rs` | `dmercer290-byte/wayland-core` |
+
+`tests/unit/forkIntegrity.test.ts` asserts every desktop-side surface above
+AND forbids `FerroxLabs` from reappearing in them. These are the
+highest-stakes lines in the repo: whoever owns the repos they name controls
+code that downloads and runs on every user's machine.
+
+Known remaining upstream references (deliberate, harmless - links and prose
+only, no code delivery):
+
+- `appId: com.ferroxlabs.wayland` - changing the appId makes installed apps
+  treat the next version as a different application (new data dir, broken
+  auto-update handoff). Leave it unless we ship a data migration.
+- About/help links in the renderer (upstream wiki, getwayland.com docs,
+  `FerroxLabs/ijfw` brand link) - informational only; replace as our own
+  docs come online.
+- CI conditionals on `github.repository == 'FerroxLabs/wayland'` (coverage
+  upload routing) and prose/issue references - inert on this repo.
+
+## Releasing without upstream (first-release runbook)
+
+Release builds **fail closed** until our own release streams exist:
+
+1. **Engine first**: in wayland-core, tag a `vX.Y.Z-genesis-*` release (the
+   Release workflow builds all six platform archives + a
+   `genesis-core-checksums.txt`). Bump the `X.Y.Z` part on every release -
+   the in-app engine updater compares only `major.minor.patch`, so a
+   suffix-only bump (`-genesis-2`) is invisible to installed apps. Then run
+   `node scripts/stage-wcore-bump.mjs <tag> --write` in this repo: it updates
+   `DEFAULT_WCORE_VERSION` (`scripts/prepareWaylandCore.js`), the headless
+   installer pin (`installer/scripts/postinstall.mjs`), and
+   `scripts/bundled-wcore-shasums.json` from the published checksums.
+2. **Desktop second**: run the release workflow here; installers bundle the
+   engine from step 1 and publish to `dmercer290-byte/wayland` releases,
+   which is also the auto-update feed for installed apps.
 
 ## Enforcement
 
@@ -101,40 +152,43 @@ The fork adds keys to `conversation`, `cron`, `memory`, `missionControl`, and
 as a **union** (keep both sides' keys). `bun run i18n:types` +
 `node scripts/check-i18n.js` + typecheck catch dropped keys.
 
-## Upstream merge playbook
+## Importing upstream code (exceptional, not routine)
 
-Use the `upstream-merge` skill (`.claude/skills/upstream-merge/SKILL.md`) or
-follow by hand:
+Default answer to "upstream shipped X, should we merge?" is **no** - we build
+and maintain our own changes. Import upstream code only when it clearly pays
+its way (e.g. a security fix in code we still share), and then:
 
-1. `git remote add upstream https://github.com/FerroxLabs/wayland` (once),
-   then `git fetch upstream --tags` and merge the **release tag**, not
-   upstream main.
+1. **Cherry-pick the specific commits**, never merge a release:
+   `git remote add upstream https://github.com/FerroxLabs/wayland` (once),
+   `git fetch upstream`, `git cherry-pick <sha>...`. Review the diff like a
+   third-party PR - upstream's direction is no longer trusted by default.
 2. Resolve conflicts with this document open:
-   - Fork-owned files: keep ours (upstream should never touch them; if it
-     suddenly does, upstream may have shipped its own version of the feature -
-     compare before choosing).
-   - Hook files: take upstream's new content **and re-apply the hook lines**.
-     Hooks are deliberately tiny (1-5 lines + an import) to make this easy.
+   - Fork-owned files (listed below): keep ours.
+   - Hook files: take the incoming change only where wanted **and keep the
+     hook lines** (each is an import + 1-5 lines; the inventory below says
+     exactly what goes where).
    - Locale JSON / `i18n-keys.d.ts`: union merge, then regenerate types.
 3. Verify, in order:
-   - `bun run test tests/unit/forkIntegrity.test.ts` - fork wiring intact
+   - `bun run test tests/unit/forkIntegrity.test.ts` - fork wiring AND
+     independence guards intact
    - `bun run test tests/unit/process/services/memory/` - memory/transcript suite
    - `bun run typecheck && bun run test` - full check
    - `bun run i18n:types && node scripts/check-i18n.js` if locales changed
-4. Update the "Current upstream base" line at the top of this file.
-5. If upstream shipped its own equivalent of a fork feature, prefer retiring
-   the fork version: delete the fork files, remove the hooks, and prune the
-   corresponding entries from `forkIntegrity.test.ts` and this document.
 
-## Keeping the fork mergeable (rules for new fork work)
+The `upstream-merge` skill (`.claude/skills/upstream-merge/SKILL.md`) encodes
+this procedure.
 
-1. **New feature code goes in new files.** One directory or file per feature,
-   never interleaved into upstream modules.
+## Keeping the codebase guarded (rules for new work)
+
+The hook inventory below is no longer about merge conflicts - it is the map
+of load-bearing wiring for the fork's flagship features, and the tripwire
+test keeps any refactor (human or agent) from disconnecting them silently.
+
+1. **New feature code goes in new files.** One directory or file per feature.
 2. **Hooks stay tiny.** One import + one call/JSX element per hook site.
-   If a hook grows past ~5 lines, extract the body into a fork-owned file and
-   call it.
+   If a hook grows past ~5 lines, extract the body into its own file.
 3. **Every new hook gets a tripwire.** Add the file/needle to
    `tests/unit/forkIntegrity.test.ts` and an entry here, in the same PR.
-4. **Prefer upstream extension points** (existing registries, bridge init
-   lists, settings keys) over editing upstream logic - a hook in a
-   registration list merges clean; a hook inside a function body conflicts.
+4. **Never point build/update/release surfaces at repos we don't control.**
+   New binary downloads follow the `prepareWaylandCore.js` pattern: pinned
+   tag + SHA-256 manifest, sourced from our org.

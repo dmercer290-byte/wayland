@@ -28,21 +28,25 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type {
-  WCoreInstallResult,
-  WCoreUpdateCheck,
-  WCoreUpdateProgress,
-} from '@/common/update/wcoreUpdateTypes';
+import type { WCoreInstallResult, WCoreUpdateCheck, WCoreUpdateProgress } from '@/common/update/wcoreUpdateTypes';
 import { WCORE_OVERRIDE_SUBDIR, detectWCore } from './binaryResolver';
 
 export type { WCoreInstallResult, WCoreUpdateCheck, WCoreUpdateProgress };
 
-/** The engine release repo. */
-const REPO = 'FerroxLabs/wayland-core';
+/**
+ * The engine release repo - OUR fork, never the original upstream org. This
+ * updater downloads and executes a native binary, so whoever owns this repo
+ * controls code running on users' machines. Guarded by
+ * tests/unit/forkIntegrity.test.ts.
+ */
+const REPO = 'dmercer290-byte/wayland-core';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const DOWNLOAD_BASE = `https://github.com/${REPO}/releases/download`;
-const CHECKSUMS_ASSET = 'wayland-core-checksums.txt';
+const CHECKSUMS_ASSET = 'genesis-core-checksums.txt';
+/** Local install name (binaryResolver looks this up). */
 const PRIMARY_BINARY = 'wayland-core';
+/** Name of the binary inside the fork's release archives. */
+const ARCHIVE_BINARY = 'genesis-core';
 
 /** GitHub requires a User-Agent on every API request. */
 const UA = 'Wayland-Desktop';
@@ -63,23 +67,28 @@ export function runtimeKey(platform: string = process.platform, arch: string = p
 
 /**
  * The release asset filename for a tag on a platform/arch, e.g.
- * `wayland-core-v0.12.2-aarch64-apple-darwin.tar.gz`. Returns `null` for an
- * unsupported platform/arch.
+ * `genesis-core-v0.12.24-genesis-1-aarch64-apple-darwin.tar.gz`. Returns
+ * `null` for an unsupported platform/arch.
  */
-export function assetNameFor(tag: string, platform: string = process.platform, arch: string = process.arch): string | null {
+export function assetNameFor(
+  tag: string,
+  platform: string = process.platform,
+  arch: string = process.arch
+): string | null {
   const a = ARCH_MAP[arch];
   const p = PLATFORM_MAP[platform];
   if (!a || !p) return null;
-  return `wayland-core-${tag}-${a}-${p.triple}.${p.ext}`;
+  return `${ARCHIVE_BINARY}-${tag}-${a}-${p.triple}.${p.ext}`;
 }
 
 /**
- * A well-formed engine release tag (`v0.12.2`, `0.12.3`, `v0.13.0-rc.1`). The
- * tag flows into temp paths and (on Windows) a PowerShell `-Command` string, so
- * it is validated against this strict allowlist BEFORE any use - a tag carrying
- * shell metacharacters (e.g. a single quote) is rejected outright.
+ * A well-formed engine release tag (`v0.12.2`, `0.12.3`, `v0.13.0-rc.1`,
+ * `v0.12.24-genesis-1`). The tag flows into temp paths and (on Windows) a
+ * PowerShell `-Command` string, so it is validated against this strict
+ * allowlist BEFORE any use - a tag carrying shell metacharacters (e.g. a
+ * single quote) is rejected outright.
  */
-const RELEASE_TAG_RE = /^v?\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$/;
+const RELEASE_TAG_RE = /^v?\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$/;
 
 /** True when `tag` is a safe, well-formed release tag. */
 export function isValidReleaseTag(tag: string): boolean {
@@ -276,11 +285,13 @@ export async function installWCoreUpdate(
     const actual = await sha256File(archivePath);
     if (actual !== expected) return { ok: false, error: 'checksum mismatch' };
 
-    // 3. Extract + locate the binary.
+    // 3. Extract + locate the binary. Fork archives ship it as genesis-core;
+    //    it is installed under the local wayland-core name below.
     onProgress?.({ phase: 'extracting' });
     extractArchive(archivePath, extractDir);
-    const extracted = await findBinary(extractDir, binaryName);
-    if (!extracted) return { ok: false, error: `binary ${binaryName} not found in archive` };
+    const archiveBinaryName = process.platform === 'win32' ? `${ARCHIVE_BINARY}.exe` : ARCHIVE_BINARY;
+    const extracted = (await findBinary(extractDir, archiveBinaryName)) ?? (await findBinary(extractDir, binaryName));
+    if (!extracted) return { ok: false, error: `binary ${archiveBinaryName} not found in archive` };
 
     // 4. Install atomically into <override>/<runtimeKey>/ (copy to a temp name in
     //    the SAME dir, chmod, then rename over the final path).

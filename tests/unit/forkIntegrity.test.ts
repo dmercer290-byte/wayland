@@ -150,6 +150,62 @@ const FORK_HOOKS: ForkHook[] = [
   },
 ];
 
+/**
+ * Independence guards: this fork no longer tracks upstream (FerroxLabs).
+ * Nothing in the build, update, or release path may point at upstream
+ * infrastructure - upstream controlling our auto-update feed or engine
+ * binaries means upstream code lands on users' machines uninvited.
+ */
+const INDEPENDENCE_GUARDS: ForkHook[] = [
+  {
+    file: 'electron-builder.yml',
+    feature: 'auto-updater feed - installed apps pull updates from the repo named here',
+    mustContain: ['owner: dmercer290-byte'],
+  },
+  {
+    file: 'scripts/prepareWaylandCore.js',
+    feature: 'bundled engine binaries - release builds download the engine from this repo',
+    mustContain: ["const GITHUB_OWNER = 'dmercer290-byte'"],
+  },
+  {
+    file: 'installer/scripts/postinstall.mjs',
+    feature: 'headless installer engine fetch - npm installs download the engine from this repo',
+    mustContain: ['github.com/dmercer290-byte/wayland-core/releases'],
+  },
+  {
+    file: 'scripts/stage-wcore-bump.mjs',
+    feature: 'engine pin/checksum bump tool - reads published checksums from this repo',
+    mustContain: ["const REPO = 'dmercer290-byte/wayland-core'"],
+  },
+  {
+    file: 'src/process/agent/wcore/wcoreUpdater.ts',
+    feature: 'in-app engine updater - downloads and executes engine binaries from this repo at runtime',
+    mustContain: ["const REPO = 'dmercer290-byte/wayland-core'"],
+  },
+  {
+    file: 'src/process/bridge/updateBridge.ts',
+    feature: 'app update metadata + integrity hashes - packaged builds update from this repo (RT-B6-04)',
+    mustContain: ["const DEFAULT_REPO = 'dmercer290-byte/wayland'"],
+  },
+  {
+    file: 'src/process/extensions/constants.ts',
+    feature: 'extension hub - installs extension content from these mirrors',
+    mustContain: ['dmercer290-byte/waylandHub'],
+  },
+];
+
+/** Patterns that must NOT appear in release-critical files. */
+const FORBIDDEN_UPSTREAM_REFS = [
+  { file: 'electron-builder.yml', mustNotContain: 'owner: FerroxLabs' },
+  { file: 'scripts/prepareWaylandCore.js', mustNotContain: "GITHUB_OWNER = 'FerroxLabs'" },
+  { file: 'installer/scripts/postinstall.mjs', mustNotContain: 'FerroxLabs' },
+  { file: 'scripts/stage-wcore-bump.mjs', mustNotContain: "REPO = 'FerroxLabs" },
+  { file: 'src/process/agent/wcore/wcoreUpdater.ts', mustNotContain: 'FerroxLabs' },
+  { file: 'src/process/bridge/updateBridge.ts', mustNotContain: "DEFAULT_REPO = 'FerroxLabs" },
+  { file: 'src/process/extensions/constants.ts', mustNotContain: 'FerroxLabs/waylandHub' },
+  { file: 'scripts/prepareHubResources.js', mustNotContain: 'FerroxLabs/waylandHub' },
+];
+
 describe('fork integrity (see docs/contributing/fork-maintenance.md)', () => {
   it.each(FORK_OWNED_FILES)('fork-owned file survives upstream merges: %s', (file) => {
     expect(
@@ -172,4 +228,30 @@ describe('fork integrity (see docs/contributing/fork-maintenance.md)', () => {
       ).toBe(true);
     }
   });
+
+  it.each(INDEPENDENCE_GUARDS.map((guard) => [guard.file, guard] as const))(
+    'independent of upstream: %s',
+    (_file, guard) => {
+      const content = readFileSync(path.join(REPO_ROOT, guard.file), 'utf-8');
+      for (const needle of guard.mustContain) {
+        expect(
+          content.includes(needle),
+          `${guard.file} no longer points at our fork: expected \`${needle}\`.\n` +
+            `This controls: ${guard.feature}.\n` +
+            `Pointing this at upstream hands them control of what runs on users' machines.`
+        ).toBe(true);
+      }
+    }
+  );
+
+  it.each(FORBIDDEN_UPSTREAM_REFS.map((ref) => [ref.file, ref] as const))(
+    'no upstream infrastructure in %s',
+    (_file, ref) => {
+      const content = readFileSync(path.join(REPO_ROOT, ref.file), 'utf-8');
+      expect(
+        content.includes(ref.mustNotContain),
+        `${ref.file} references upstream infrastructure again: \`${ref.mustNotContain}\` must not reappear.`
+      ).toBe(false);
+    }
+  );
 });

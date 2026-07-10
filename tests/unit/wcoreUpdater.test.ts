@@ -29,12 +29,16 @@ describe('wcoreUpdater - runtimeKey', () => {
 
 describe('wcoreUpdater - assetNameFor', () => {
   it('maps each platform/arch to the signed-release archive name', () => {
-    expect(assetNameFor('v0.12.2', 'darwin', 'arm64')).toBe('wayland-core-v0.12.2-aarch64-apple-darwin.tar.gz');
-    expect(assetNameFor('v0.12.2', 'darwin', 'x64')).toBe('wayland-core-v0.12.2-x86_64-apple-darwin.tar.gz');
-    expect(assetNameFor('v0.12.2', 'linux', 'arm64')).toBe('wayland-core-v0.12.2-aarch64-unknown-linux-gnu.tar.gz');
-    expect(assetNameFor('v0.12.2', 'linux', 'x64')).toBe('wayland-core-v0.12.2-x86_64-unknown-linux-gnu.tar.gz');
-    expect(assetNameFor('v0.12.2', 'win32', 'arm64')).toBe('wayland-core-v0.12.2-aarch64-pc-windows-msvc.zip');
-    expect(assetNameFor('v0.12.2', 'win32', 'x64')).toBe('wayland-core-v0.12.2-x86_64-pc-windows-msvc.zip');
+    expect(assetNameFor('v0.12.2', 'darwin', 'arm64')).toBe('genesis-core-v0.12.2-aarch64-apple-darwin.tar.gz');
+    expect(assetNameFor('v0.12.2', 'darwin', 'x64')).toBe('genesis-core-v0.12.2-x86_64-apple-darwin.tar.gz');
+    expect(assetNameFor('v0.12.2', 'linux', 'arm64')).toBe('genesis-core-v0.12.2-aarch64-unknown-linux-gnu.tar.gz');
+    expect(assetNameFor('v0.12.2', 'linux', 'x64')).toBe('genesis-core-v0.12.2-x86_64-unknown-linux-gnu.tar.gz');
+    expect(assetNameFor('v0.12.2', 'win32', 'arm64')).toBe('genesis-core-v0.12.2-aarch64-pc-windows-msvc.zip');
+    expect(assetNameFor('v0.12.2', 'win32', 'x64')).toBe('genesis-core-v0.12.2-x86_64-pc-windows-msvc.zip');
+    // Fork tag convention (v*-genesis-*) flows straight into the asset name.
+    expect(assetNameFor('v0.12.24-genesis-1', 'darwin', 'arm64')).toBe(
+      'genesis-core-v0.12.24-genesis-1-aarch64-apple-darwin.tar.gz'
+    );
   });
 
   it('returns null for an unsupported platform or arch', () => {
@@ -65,6 +69,7 @@ describe('wcoreUpdater - isValidReleaseTag', () => {
     expect(isValidReleaseTag('v0.12.2')).toBe(true);
     expect(isValidReleaseTag('0.12.3')).toBe(true);
     expect(isValidReleaseTag('v1.0.0-rc.1')).toBe(true);
+    expect(isValidReleaseTag('v0.12.24-genesis-1')).toBe(true);
   });
 
   it('rejects tags carrying shell/path metacharacters (injection guard)', () => {

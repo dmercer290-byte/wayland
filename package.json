@@ -6,7 +6,7 @@
   "license": "AGPL-3.0-or-later",
   "author": {
     "name": "Wayland",
-    "url": "https://github.com/FerroxLabs/wayland"
+    "url": "https://github.com/dmercer290-byte/wayland"
   },
   "main": "./out/main/index.js",
   "scripts": {

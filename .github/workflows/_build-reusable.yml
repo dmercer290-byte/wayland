@@ -32,13 +32,15 @@ env:
   # mirrors") and aborts the build. Skip hub staging until that repo is
   # published; hub extensions are not required to ship a working release.
   WAYLAND_HUB_SKIP: '1'
-  # Bundle the Wayland-Core engine into every release installer. The engine's
-  # multi-platform release stream (FerroxLabs/wayland-core) now exists with all
-  # six platform archives + verified shasums, so prepareWaylandCore.js downloads
-  # and bundles the matching binary at build time (auth via the GH_TOKEN passed
-  # to the build step). There is NO runtime download fallback, so the release
-  # MUST bundle the engine here. PR/test builds (build-matrix.yml, pr-checks.yml)
-  # keep WCORE_SKIP=1 to stay fast; only this release path ships the engine.
+  # Bundle the engine into every release installer. The engine release stream
+  # is OUR fork (dmercer290-byte/wayland-core, genesis-core-* archives on
+  # v*-genesis-* tags) - prepareWaylandCore.js downloads and bundles the
+  # matching binary at build time (auth via the GH_TOKEN passed to the build
+  # step). There is NO runtime download fallback, so the release MUST bundle
+  # the engine here. The fork must have cut an engine release matching
+  # DEFAULT_WCORE_VERSION (+ shasums) or this fails closed - see
+  # docs/contributing/fork-maintenance.md. PR/test builds (build-matrix.yml,
+  # pr-checks.yml) keep WCORE_SKIP=1 to stay fast; only this path ships it.
   WCORE_SKIP: '0'
   # aionrs binary version to bundle (used by scripts/prepareAionrs.js)
   AIONRS_VERSION: 'latest'

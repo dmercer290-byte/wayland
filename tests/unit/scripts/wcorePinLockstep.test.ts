@@ -38,15 +38,22 @@ describe('wayland-core engine pin lockstep (#451)', () => {
     expect(headlessPin()).toBe(bundlePin());
   });
 
-  it('both pins are real vX.Y.Z release tags', () => {
-    expect(headlessPin()).toMatch(/^v\d+\.\d+\.\d+$/);
-    expect(bundlePin()).toMatch(/^v\d+\.\d+\.\d+$/);
+  it('both pins are fork release tags (vX.Y.Z-genesis-*)', () => {
+    // The -genesis- suffix is the fork's engine tag convention
+    // (dmercer290-byte/wayland-core release.yml). Requiring it here also
+    // stops the pin from quietly drifting back to an upstream-style tag.
+    expect(headlessPin()).toMatch(/^v\d+\.\d+\.\d+-genesis-\w+$/);
+    expect(bundlePin()).toMatch(/^v\d+\.\d+\.\d+-genesis-\w+$/);
   });
 
   it('headless installer builds the canonical release asset URL from the pin', () => {
     // Asset/URL must interpolate WCORE_VERSION so a pin bump actually changes
     // what gets fetched (regression guard against a stray hardcoded version).
-    expect(POSTINSTALL).toContain('wayland-core-${WCORE_VERSION}-${triple}.tar.gz');
-    expect(POSTINSTALL).toContain('github.com/FerroxLabs/wayland-core/releases/download/${WCORE_VERSION}/${asset}');
+    expect(POSTINSTALL).toContain('genesis-core-${WCORE_VERSION}-${triple}.tar.gz');
+    expect(POSTINSTALL).toContain(
+      'github.com/dmercer290-byte/wayland-core/releases/download/${WCORE_VERSION}/${asset}'
+    );
+    // Independence guard: the engine must never be fetched from upstream.
+    expect(POSTINSTALL).not.toContain('FerroxLabs');
   });
 });

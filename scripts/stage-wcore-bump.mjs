@@ -17,8 +17,8 @@
  *      silently drifted to a 2-minor-stale v0.10.0 engine (#451).
  *
  * Hand-transcribing six checksums is the error surface. This helper pulls the
- * authoritative `wayland-core-checksums.txt` asset published alongside the
- * signed FerroxLabs/wayland-core release, parses the six platform archives, and
+ * authoritative `genesis-core-checksums.txt` asset published alongside the
+ * fork's (dmercer290-byte/wayland-core) release, parses the six platform archives, and
  * applies both edits. It does NOT download or execute the engine - that stays
  * with prepareWaylandCore.js, which re-verifies against the manifest this
  * writes.
@@ -40,7 +40,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SHASUMS_FILE = path.join(__dirname, 'bundled-wcore-shasums.json');
 const PREPARE_FILE = path.join(__dirname, 'prepareWaylandCore.js');
 const POSTINSTALL_FILE = path.join(__dirname, '..', 'installer', 'scripts', 'postinstall.mjs');
-const REPO = 'FerroxLabs/wayland-core';
+// OUR fork's engine release stream - never upstream FerroxLabs.
+const REPO = 'dmercer290-byte/wayland-core';
+// Asset + checksums naming used by the fork's release workflow.
+const ASSET_PREFIX = 'genesis-core';
+const CHECKSUMS_ASSET = 'genesis-core-checksums.txt';
 
 // The six platform archives a release must publish. The bump fails loudly if
 // any is missing from the checksums file rather than bundling a partial set.
@@ -71,11 +75,11 @@ let checksumsText;
 try {
   checksumsText = execFileSync(
     'gh',
-    ['release', 'download', tag, '--repo', REPO, '--pattern', 'wayland-core-checksums.txt', '--output', '-'],
+    ['release', 'download', tag, '--repo', REPO, '--pattern', CHECKSUMS_ASSET, '--output', '-'],
     { encoding: 'utf-8', timeout: 30000 }
   );
 } catch (err) {
-  fail(`could not download wayland-core-checksums.txt for ${tag} (is the release published?)\n  ${err.message}`);
+  fail(`could not download ${CHECKSUMS_ASSET} for ${tag} (is the release published?)\n  ${err.message}`);
 }
 
 // Parse `<sha256>␣␣<filename>` lines into { filename: "sha256:<hex>" }, keeping
@@ -85,19 +89,17 @@ for (const line of checksumsText.split('\n')) {
   const m = line.trim().match(/^([0-9a-f]{64})\s+(\S+)$/i);
   if (!m) continue;
   const [, hex, file] = m;
-  if (!file.startsWith(`wayland-core-${tag}-`)) continue;
+  if (!file.startsWith(`${ASSET_PREFIX}-${tag}-`)) continue;
   if (!REQUIRED_ARCHIVES.some((suffix) => file.endsWith(`-${suffix}`))) continue;
   block[file] = `sha256:${hex.toLowerCase()}`;
 }
 
-const missing = REQUIRED_ARCHIVES.filter(
-  (suffix) => !Object.keys(block).some((file) => file.endsWith(`-${suffix}`))
-);
+const missing = REQUIRED_ARCHIVES.filter((suffix) => !Object.keys(block).some((file) => file.endsWith(`-${suffix}`)));
 if (missing.length) {
   fail(`checksums for ${tag} are missing ${missing.length} archive(s): ${missing.join(', ')}`);
 }
 // Sort keys to match the existing file's platform ordering (darwin, linux, windows).
-const order = REQUIRED_ARCHIVES.map((suffix) => `wayland-core-${tag}-${suffix}`);
+const order = REQUIRED_ARCHIVES.map((suffix) => `${ASSET_PREFIX}-${tag}-${suffix}`);
 const orderedBlock = Object.fromEntries(order.map((k) => [k, block[k]]));
 
 const shasums = JSON.parse(fs.readFileSync(SHASUMS_FILE, 'utf-8'));
@@ -114,11 +116,14 @@ const postinstallVersion = postinstallMatch[1];
 
 console.log(`\nStage bundled wayland-core bump: ${currentVersion} -> ${tag}\n`);
 if (postinstallVersion !== currentVersion) {
-  console.log(`  (headless installer pin was out of lockstep at ${postinstallVersion} - it will be realigned to ${tag})\n`);
+  console.log(
+    `  (headless installer pin was out of lockstep at ${postinstallVersion} - it will be realigned to ${tag})\n`
+  );
 }
-console.log('Resolved checksums (from the published wayland-core-checksums.txt):');
+console.log(`Resolved checksums (from the published ${CHECKSUMS_ASSET}):`);
 for (const [file, sha] of Object.entries(orderedBlock)) console.log(`  ${file}\n    ${sha}`);
-if (alreadyPinned) console.log(`\nNote: ${tag} already has a block in bundled-wcore-shasums.json - it will be overwritten.`);
+if (alreadyPinned)
+  console.log(`\nNote: ${tag} already has a block in bundled-wcore-shasums.json - it will be overwritten.`);
 
 if (!write) {
   console.log('\nDRY RUN - no files changed. Re-run with --write to apply:');
@@ -135,18 +140,12 @@ for (const [k, v] of Object.entries(shasums)) {
 fs.writeFileSync(SHASUMS_FILE, JSON.stringify(reordered, null, 2) + '\n', 'utf-8');
 fs.writeFileSync(
   PREPARE_FILE,
-  prepareSrc.replace(
-    /const DEFAULT_WCORE_VERSION = '[^']+';/,
-    `const DEFAULT_WCORE_VERSION = '${tag}';`
-  ),
+  prepareSrc.replace(/const DEFAULT_WCORE_VERSION = '[^']+';/, `const DEFAULT_WCORE_VERSION = '${tag}';`),
   'utf-8'
 );
 fs.writeFileSync(
   POSTINSTALL_FILE,
-  postinstallSrc.replace(
-    /const WCORE_VERSION = '[^']+';/,
-    `const WCORE_VERSION = '${tag}';`
-  ),
+  postinstallSrc.replace(/const WCORE_VERSION = '[^']+';/, `const WCORE_VERSION = '${tag}';`),
   'utf-8'
 );
 

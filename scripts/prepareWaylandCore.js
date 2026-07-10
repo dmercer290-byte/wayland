@@ -32,7 +32,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const GITHUB_OWNER = 'FerroxLabs';
+// Engine releases come from OUR fork - never from upstream FerroxLabs. The
+// fork's release workflow (dmercer290-byte/wayland-core .github/workflows/
+// release.yml) publishes `genesis-core-<tag>-<target>` archives on
+// `v*-genesis-*` tags; the binary inside is named `genesis-core` and is
+// installed locally under the historical `wayland-core` name (getBinaryName)
+// so nothing else in the app changes.
+const GITHUB_OWNER = 'dmercer290-byte';
 const GITHUB_REPO = 'wayland-core';
 
 // Authoritative per-platform SHA-256 manifest for the downloaded release
@@ -74,6 +80,12 @@ function writeJson(filePath, payload) {
 
 function getBinaryName(platform) {
   return platform === 'win32' ? 'wayland-core.exe' : 'wayland-core';
+}
+
+// Name of the binary INSIDE the fork's release archives (the fork rebrands
+// the engine to genesis-core). It is renamed to getBinaryName() on install.
+function getArchiveBinaryName(platform) {
+  return platform === 'win32' ? 'genesis-core.exe' : 'genesis-core';
 }
 
 function readJsonSafe(filePath) {
@@ -181,10 +193,16 @@ function verifyArchiveChecksum(archivePath, expectedHex, assetName, tag) {
 }
 
 // Pinned default tag. The engine release stream lives at
-// FerroxLabs/wayland-core; Desktop integrates against a specific tag rather
-// than tracking `latest` so version drift can't sneak in via a release made
-// while a CI build is mid-flight. Override with WCORE_VERSION=... when bumping.
-const DEFAULT_WCORE_VERSION = 'v0.12.24';
+// dmercer290-byte/wayland-core (our fork - tags follow `vX.Y.Z-genesis-*`);
+// Desktop integrates against a specific tag rather than tracking `latest` so
+// version drift can't sneak in via a release made while a CI build is
+// mid-flight. Override with WCORE_VERSION=... when bumping.
+//
+// NOTE: the fork has not cut its first engine release yet. Until it does,
+// release builds fail closed here (no shasums entry for this tag on the fork).
+// Cut a `v*-genesis-*` release in wayland-core, then update this pin AND
+// scripts/bundled-wcore-shasums.json - see docs/contributing/fork-maintenance.md.
+const DEFAULT_WCORE_VERSION = 'v0.12.24-genesis-1';
 
 function getVersion() {
   return (process.env.WCORE_VERSION || DEFAULT_WCORE_VERSION).trim();
@@ -230,8 +248,10 @@ function resolveLatestTag() {
 /**
  * 1. Download from GitHub releases
  *
- * wayland-core release assets include the version tag in the filename:
- *   wayland-core-v0.1.9-aarch64-apple-darwin.tar.gz
+ * The fork's engine release assets include the version tag in the filename:
+ *   genesis-core-v0.12.24-genesis-1-aarch64-apple-darwin.tar.gz
+ * (release.yml packages `genesis-core-v${tag#v}-<target>`, so prefixing the
+ * full tag here produces the identical name.)
  */
 function getAssetName(platform, arch, tag) {
   const archMap = { x64: 'x86_64', arm64: 'aarch64' };
@@ -240,7 +260,7 @@ function getAssetName(platform, arch, tag) {
   const normalizedPlatform = platformMap[platform];
   if (!normalizedArch || !normalizedPlatform) return null;
   const ext = platform === 'win32' ? '.zip' : '.tar.gz';
-  return `wayland-core-${tag}-${normalizedArch}-${normalizedPlatform}${ext}`;
+  return `genesis-core-${tag}-${normalizedArch}-${normalizedPlatform}${ext}`;
 }
 
 function getDownloadUrl(assetName, tag) {
@@ -345,10 +365,13 @@ function downloadAndExtract(platform, arch, tag) {
   verifyArchiveChecksum(archivePath, expectedSha256, assetName, tag);
   extractArchive(archivePath, extractDir, platform);
 
-  const binaryName = getBinaryName(platform);
-  const binaryPath = findBinaryInDir(extractDir, binaryName);
+  // Fork archives ship the binary as genesis-core; accept the historical
+  // wayland-core name too so a hand-built upstream archive still works.
+  const archiveBinaryName = getArchiveBinaryName(platform);
+  const binaryPath =
+    findBinaryInDir(extractDir, archiveBinaryName) || findBinaryInDir(extractDir, getBinaryName(platform));
   if (!binaryPath) {
-    throw new Error(`Binary ${binaryName} not found in downloaded archive`);
+    throw new Error(`Binary ${archiveBinaryName} not found in downloaded archive`);
   }
 
   return { binaryPath, tempDir, url, assetName, sha256: expectedSha256 };
@@ -491,7 +514,7 @@ function prepareWaylandCore() {
   }
 
   // Resolve the actual version tag - asset filenames include the tag.
-  // If "latest" can't be resolved (e.g. FerroxLabs/wayland-core has no
+  // If "latest" can't be resolved (e.g. the fork has no
   // published releases yet), fall through to the skip-manifest path below
   // instead of throwing. The comment at "Not found - write skip manifest"
   // describes the intended behavior; this preserves it.

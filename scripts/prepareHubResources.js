@@ -19,9 +19,11 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 const HUB_DIR = path.join(PROJECT_ROOT, 'resources', 'hub');
 
 const DEFAULT_TAG = 'dist-latest';
+// Pinned to OUR org (see src/process/extensions/constants.ts for rationale);
+// CI keeps WAYLAND_HUB_SKIP=1 until dmercer290-byte/waylandHub exists.
 const BASE_URLS = [
-  `https://raw.githubusercontent.com/FerroxLabs/waylandHub/${process.env.WAYLAND_HUB_TAG || DEFAULT_TAG}/`,
-  `https://cdn.jsdelivr.net/gh/FerroxLabs/waylandHub@${process.env.WAYLAND_HUB_TAG || DEFAULT_TAG}/`,
+  `https://raw.githubusercontent.com/dmercer290-byte/waylandHub/${process.env.WAYLAND_HUB_TAG || DEFAULT_TAG}/`,
+  `https://cdn.jsdelivr.net/gh/dmercer290-byte/waylandHub@${process.env.WAYLAND_HUB_TAG || DEFAULT_TAG}/`,
 ];
 
 // ---------------------------------------------------------------------------

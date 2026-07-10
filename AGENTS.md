@@ -277,7 +277,7 @@ Detailed rules and guidelines are organized into Skills for better modularity:
 | **pr-verify**     | Verify and merge bot:ready-to-merge PRs with impact analysis and test supplementation | Verifying PRs, merging ready PRs, `/pr-verify`                            |
 | **pr-ship**       | End-to-end PR lifecycle: create, CI wait, review, fix, merge in one invocation        | `/pr-ship`, after development is done, resume shepherding a PR            |
 | **pr-automation** | PR automation orchestrator: poll PRs, review, fix, and merge via label state machine  | Invoked by daemon script (`pr-automation.sh`), `/pr-automation`           |
-| **upstream-merge** | Merge an upstream release into this fork without losing fork-owned features           | Updating from upstream, syncing the fork, `/upstream-merge`                |
+| **upstream-merge** | Cherry-pick specific upstream commits into this independent fork (never releases)     | Explicit request to import an upstream fix, `/upstream-merge`              |
 
 > Skills are located in `.claude/skills/` and contain project conventions that apply to **all** agents and contributors. Every agent working in this repository must read and follow the relevant skill files when the task matches their scope.
 

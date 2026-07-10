@@ -1,71 +1,66 @@
 ---
 name: upstream-merge
-description: Merge an upstream FerroxLabs/wayland release into this fork without losing fork-owned features. Use when the user asks to update from upstream, sync with upstream, or merge a new upstream version, or invokes /upstream-merge.
+description: Import specific upstream FerroxLabs/wayland commits into this independent fork via reviewed cherry-picks. Use when the user explicitly asks to pull in an upstream fix or commit. This fork no longer tracks upstream - if the user asks to "sync with upstream" or merge a release, push back and confirm they really want it.
 ---
 
-# Upstream Merge
+# Upstream Import (cherry-pick only)
 
-Merge an upstream release into this fork while preserving every fork feature.
-The authoritative deviation inventory lives in
-[docs/contributing/fork-maintenance.md](../../../docs/contributing/fork-maintenance.md) -
-read it before resolving any conflict.
+**This fork is independent.** As of the v0.11.17 divergence point we no longer
+follow the original author's changes - see
+[docs/contributing/fork-maintenance.md](../../../docs/contributing/fork-maintenance.md),
+which is the authoritative inventory of fork-owned files, hook lines, and
+independence guards. Read it before touching anything here.
+
+Default posture: upstream ships something → we do **nothing**. Only import
+when the user explicitly asks for a specific fix (e.g. a security patch in
+code we still share), and import it as a cherry-pick, never a release merge.
 
 ## Procedure
 
-1. **Fetch the release.**
+1. **Confirm scope with the user.** Which commits, and why. If the request is
+   "merge the new upstream version", stop and confirm - that contradicts the
+   fork's independence policy and is almost never what's wanted anymore.
+
+2. **Fetch and cherry-pick on a branch:**
 
    ```bash
    git remote add upstream https://github.com/FerroxLabs/wayland 2>/dev/null
-   git fetch upstream --tags
+   git fetch upstream
+   git checkout -b upstream-import-<topic>
+   git cherry-pick <sha> [<sha>...]
    ```
 
-   Merge a **release tag** (e.g. `v0.11.18`), never upstream `main`.
-
-2. **Merge on a branch.**
-
-   ```bash
-   git checkout -b upstream-merge-<version>
-   git merge <release-tag>
-   ```
-
-3. **Resolve conflicts** using fork-maintenance.md:
-   - **Fork-owned files** (listed there and in `tests/unit/forkIntegrity.test.ts`):
-     keep ours. If upstream suddenly ships a file with the same path, upstream
-     may have built its own version of the feature - diff both before choosing,
-     and prefer retiring the fork copy if upstream's is equivalent.
-   - **Hook files**: take upstream's new content, then re-apply the fork's
-     hook lines (each is an import plus 1-5 lines; the inventory says exactly
-     what goes where).
-   - **Locale JSON**: union merge - keep both sides' keys. Then
-     `bun run i18n:types` to regenerate `i18n-keys.d.ts` (never hand-merge the
-     generated file).
+3. **Review the incoming diff like a third-party PR.** Upstream's direction is
+   not trusted by default. Reject hunks that touch:
+   - Fork-owned files (inventory in fork-maintenance.md): keep ours.
+   - Hook files: keep the fork's hook lines intact.
+   - **Independence surfaces** - `electron-builder.yml publish:`,
+     `scripts/prepareWaylandCore.js` `GITHUB_OWNER`, or anything else that
+     names a repo/URL: these must keep pointing at `dmercer290-byte/*`.
+   - Locale JSON: union merge, then `bun run i18n:types` (never hand-merge
+     the generated `i18n-keys.d.ts`).
 
 4. **Verify** - all must pass before pushing:
 
    ```bash
-   bun run test tests/unit/forkIntegrity.test.ts   # fork wiring tripwire
+   bun run test tests/unit/forkIntegrity.test.ts   # fork wiring + independence guards
    bun run test tests/unit/process/services/memory/ # transcript/memory suite
    bun run typecheck
    bun run test
    bun run i18n:types && node scripts/check-i18n.js # if locales changed
    ```
 
-   If `forkIntegrity` fails, the failure message names the dropped hook and
-   the feature it wires up - re-apply it, don't delete the assertion.
+   If `forkIntegrity` fails, the failure message names the dropped hook or the
+   re-tethered upstream reference - fix the code, don't delete the assertion.
 
-5. **Record the new base**: update the "Current upstream base" line at the top
-   of `docs/contributing/fork-maintenance.md` in the merge commit.
-
-6. If the release bundles a new wayland-core version, the engine fork
-   (dmercer290-byte/wayland-core) needs its own merge - follow `REBRANDING.md`
-   in that repo.
+5. If the import touches the engine, the engine fork
+   (dmercer290-byte/wayland-core) has its own cherry-pick rules in its
+   `REBRANDING.md` (rename protect-list, verification greps).
 
 ## Rules
 
-- Never resolve a conflict by deleting a fork-owned file or hook without
-  checking the inventory first.
-- If upstream superseded a fork feature, retire the fork version fully:
-  remove files, hooks, tripwire entries, and the inventory section together.
-- New fork features added during the merge window follow the "Keeping the
-  fork mergeable" rules in fork-maintenance.md (new files + tiny hooks + a
-  tripwire entry).
+- Never resolve a conflict by deleting a fork-owned file or hook line.
+- Never let `FerroxLabs` back into the auto-update feed, engine download
+  source, or any other build/release surface.
+- New work during the import follows the "Keeping the codebase guarded" rules
+  in fork-maintenance.md (new files + tiny hooks + a tripwire entry).

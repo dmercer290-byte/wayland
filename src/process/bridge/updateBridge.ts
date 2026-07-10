@@ -57,7 +57,11 @@ interface AutoUpdateCheckParams {
   includePrerelease?: boolean;
 }
 
-const DEFAULT_REPO = 'FerroxLabs/wayland';
+// OUR fork - the canonical update source for packaged builds (see RT-B6-04
+// below). Never point this back at the original upstream org: whoever owns
+// this repo controls what packaged apps download as updates. Guarded by
+// tests/unit/forkIntegrity.test.ts.
+const DEFAULT_REPO = 'dmercer290-byte/wayland';
 const DEFAULT_USER_AGENT = 'Wayland';
 const ALLOWED_ASSET_EXTS = new Set(['.exe', '.msi', '.dmg', '.zip', '.deb', '.rpm']);
 const ALLOWED_DOWNLOAD_HOSTS = new Set<string>([
