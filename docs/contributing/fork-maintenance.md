@@ -107,6 +107,18 @@ chat AND team sessions because everything funnels through one store.
   (`memory.transcriptLogging` key),
   `src/renderer/pages/settings/IjfwSettingsPanel.tsx` (toggle UI)
 
+### ASI-Evolve MCP tools (autonomous research)
+
+Agent-callable tools (`asi_evolve_run/status/list`) that drive the external
+ASI-Evolve Python framework, available in solo AND team wcore sessions. The
+framework is not vendored - it runs as its own process from its own checkout.
+
+- Fork-owned: `src/process/asiEvolve/*`, `scripts/setup-asi-evolve.sh`,
+  `docs/guides/asi-evolve.md`
+- Hooks: `src/process/task/WCoreManager.ts` (`getAsiEvolveStdioConfig`
+  injection beside hub tools), `scripts/build-mcp-servers.js` (build entry for
+  `asiEvolveMcpStdio.ts` → `out/main/asi-evolve-mcp-stdio.js`)
+
 ### Hub tools MCP server
 
 Model Hub VRAM swap + cost report exposed as agent-callable tools in every

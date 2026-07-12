@@ -141,6 +141,11 @@ async function main() {
     }),
     esbuild.build({
       ...SHARED_OPTIONS,
+      entryPoints: [path.join(ROOT, 'src/process/asiEvolve/asiEvolveMcpStdio.ts')],
+      outfile: path.join(ROOT, 'out/main/asi-evolve-mcp-stdio.js'),
+    }),
+    esbuild.build({
+      ...SHARED_OPTIONS,
       entryPoints: [path.join(ROOT, 'src/process/team/mcp/guide/teamGuideMcpStdio.ts')],
       outfile: path.join(ROOT, 'out/main/team-guide-mcp-stdio.js'),
     }),

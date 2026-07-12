@@ -313,6 +313,21 @@ export class WCoreManager extends BaseAgentManager<WCoreManagerData, string> {
     if (!rawEngineMode && hubTools) {
       stdioMcpServers.push({ name: hubTools.name, command: hubTools.command, args: hubTools.args, env: hubTools.env });
     }
+    // ASI-Evolve autonomous-research tools - injected into every Desktop-managed
+    // wcore session (solo AND team), same as hub tools. Only present when the
+    // framework is installed (getAsiEvolveStdioConfig returns null otherwise).
+    if (!rawEngineMode) {
+      try {
+        const { app } = await import('electron');
+        const { getAsiEvolveStdioConfig } = await import('@process/asiEvolve/asiEvolveSingleton');
+        const asiEvolve = getAsiEvolveStdioConfig(app.getPath('userData'));
+        if (asiEvolve) {
+          stdioMcpServers.push({ name: asiEvolve.name, command: asiEvolve.command, args: asiEvolve.args, env: asiEvolve.env });
+        }
+      } catch (err) {
+        console.error('[WCoreManager] ASI-Evolve MCP injection skipped:', err);
+      }
+    }
     if (!rawEngineMode) {
       try {
         const mcpConfig = await ProcessConfig.get('mcp.config');

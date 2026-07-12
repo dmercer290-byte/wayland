@@ -31,6 +31,10 @@ const FORK_OWNED_FILES = [
   'src/process/hubTools/hubToolsFormat.ts',
   'src/process/hubTools/hubToolsMcpStdio.ts',
   'src/process/hubTools/hubToolsSingleton.ts',
+  // ASI-Evolve autonomous-research MCP tools (solo + team sessions)
+  'src/process/asiEvolve/asiEvolveFormat.ts',
+  'src/process/asiEvolve/asiEvolveMcpStdio.ts',
+  'src/process/asiEvolve/asiEvolveSingleton.ts',
   // Model Hub (local inference server management)
   'src/process/services/modelHub/modelHubService.ts',
   'src/process/bridge/modelHubBridge.ts',
@@ -107,9 +111,19 @@ const FORK_HOOKS: ForkHook[] = [
     mustContain: ['hubToolsSingleton'],
   },
   {
+    file: 'src/process/task/WCoreManager.ts',
+    feature: 'ASI-Evolve MCP injection into every desktop wcore session (solo + team)',
+    mustContain: ['getAsiEvolveStdioConfig'],
+  },
+  {
     file: 'scripts/build-mcp-servers.js',
     feature: 'hub-tools stdio server build entry',
     mustContain: ['hubToolsMcpStdio'],
+  },
+  {
+    file: 'scripts/build-mcp-servers.js',
+    feature: 'ASI-Evolve stdio server build entry',
+    mustContain: ['asiEvolveMcpStdio'],
   },
   {
     file: 'src/process/agent/wcore/index.ts',
