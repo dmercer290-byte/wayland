@@ -1,5 +1,8 @@
 {
   "_comment": "Authoritative SHA-256 checksums for bundled wayland-core release archives (the downloaded .tar.gz / .zip assets), keyed by release tag then asset filename. Mirrors scripts/bundled-bun-shasums.json. Source of truth: the SHASUMS published alongside each signed dmercer290-byte/wayland-core release (the fork's genesis-core-* archives; legacy wayland-core-* entries below predate independence). The downloaded archive is verified against this file BEFORE it is extracted, copied, or executed. Update this file in lockstep with DEFAULT_WCORE_VERSION in scripts/prepareWaylandCore.js and regenerate on every engine version bump.",
+  "v0.12.24-genesis-1": {
+    "genesis-core-v0.12.24-genesis-1-x86_64-unknown-linux-gnu.tar.gz": "sha256:fd994c628392423677f3786ab876a8a26526bda1f4ebafacbdedf65482110fe6"
+  },
   "v0.12.24": {
     "wayland-core-v0.12.24-aarch64-apple-darwin.tar.gz": "sha256:7b13153f16b403fea2743462a0fa7f3071715eb23be9ffd6972d545cb281f98b",
     "wayland-core-v0.12.24-x86_64-apple-darwin.tar.gz": "sha256:b880010da0375bd55e86e867e61d09398735fa3a694c114d7044fb042aad4176",
