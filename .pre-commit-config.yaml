@@ -18,6 +18,12 @@ default_install_hook_types:
   - pre-commit
   - commit-msg
 
+# The Rust engine lives in wayland-core/ (git-subtree monorepo). It has its own
+# Rust CI (cargo fmt/clippy/test); the desktop's JS/TS/format hooks must not
+# touch it, so exclude the whole subtree from every prek hook. The android/
+# Kotlin app is likewise outside these hooks' scope.
+exclude: '^(wayland-core/|android/)'
+
 repos:
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
