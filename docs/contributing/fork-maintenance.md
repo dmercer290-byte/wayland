@@ -10,8 +10,12 @@ the rare occasion we choose to.
 **Upstream divergence point: v0.11.17** (merged in `9417e0d`, bundles engine
 v0.12.24). This is the last upstream code wholesale-imported into this repo.
 
-The engine fork (dmercer290-byte/wayland-core) has its own playbook in its
-`REBRANDING.md` - the rules below cover only this desktop repo.
+**Monorepo:** the Rust engine now lives in THIS repo under `wayland-core/`
+(git subtree, full history preserved). It keeps its own Rust CI and its
+`REBRANDING.md` playbook under `wayland-core/`. The desktop's JS/TS tooling
+(oxlint, prek) excludes the subtree. Engine releases are built from
+`wayland-core/` by the root `.github/workflows/engine-release-self-hosted.yml`
+and published to THIS repo's releases.
 
 ## Independence: nothing may point at upstream infrastructure
 
@@ -21,12 +25,13 @@ Installed apps and release builds must depend only on repos we control:
 |---|---|---|
 | Auto-update feed (electron-updater) | `electron-builder.yml` `publish:` | `dmercer290-byte/wayland` releases |
 | App update metadata + integrity hashes | `src/process/bridge/updateBridge.ts` (`DEFAULT_REPO`) | `dmercer290-byte/wayland` |
-| Bundled engine binaries (release build) | `scripts/prepareWaylandCore.js` (`GITHUB_OWNER`) | `dmercer290-byte/wayland-core` releases (`genesis-core-*` archives on `v*-genesis-*` tags) |
-| In-app engine updater (runtime) | `src/process/agent/wcore/wcoreUpdater.ts` (`REPO`) | `dmercer290-byte/wayland-core` |
-| Headless installer engine fetch | `installer/scripts/postinstall.mjs` | `dmercer290-byte/wayland-core` |
-| Engine pin/checksum bump tool | `scripts/stage-wcore-bump.mjs` (`REPO`) | `dmercer290-byte/wayland-core` |
+| Bundled engine binaries (release build) | `scripts/prepareWaylandCore.js` (`GITHUB_REPO`) | `dmercer290-byte/wayland` releases (`genesis-core-*` archives on `v*-genesis-*` tags) |
+| In-app engine updater (runtime) | `src/process/agent/wcore/wcoreUpdater.ts` (`REPO`) | `dmercer290-byte/wayland` |
+| Headless installer engine fetch | `installer/scripts/postinstall.mjs` | `dmercer290-byte/wayland` |
+| Engine pin/checksum bump tool | `scripts/stage-wcore-bump.mjs` (`REPO`) | `dmercer290-byte/wayland` |
+| Engine build source | `.github/workflows/engine-release-self-hosted.yml` | builds from `wayland-core/` subtree, publishes to `dmercer290-byte/wayland` |
 | Extension hub mirrors | `src/process/extensions/constants.ts`, `scripts/prepareHubResources.js` | `dmercer290-byte/waylandHub` (repo doesn't exist yet; fetches fail soft) |
-| Engine self-update + provenance | wayland-core `crates/wcore-cli/src/self_update.rs` | `dmercer290-byte/wayland-core` |
+| Engine self-update + provenance | `wayland-core/crates/wcore-cli/src/self_update.rs` | `dmercer290-byte/wayland-core` (engine CLI's own updater; separate from desktop) |
 
 `tests/unit/forkIntegrity.test.ts` asserts every desktop-side surface above
 AND forbids `FerroxLabs` from reappearing in them. These are the

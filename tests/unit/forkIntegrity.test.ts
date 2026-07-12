@@ -192,17 +192,17 @@ const INDEPENDENCE_GUARDS: ForkHook[] = [
   {
     file: 'installer/scripts/postinstall.mjs',
     feature: 'headless installer engine fetch - npm installs download the engine from this repo',
-    mustContain: ['github.com/dmercer290-byte/wayland-core/releases'],
+    mustContain: ['github.com/dmercer290-byte/wayland/releases'],
   },
   {
     file: 'scripts/stage-wcore-bump.mjs',
     feature: 'engine pin/checksum bump tool - reads published checksums from this repo',
-    mustContain: ["const REPO = 'dmercer290-byte/wayland-core'"],
+    mustContain: ["const REPO = 'dmercer290-byte/wayland'"],
   },
   {
     file: 'src/process/agent/wcore/wcoreUpdater.ts',
     feature: 'in-app engine updater - downloads and executes engine binaries from this repo at runtime',
-    mustContain: ["const REPO = 'dmercer290-byte/wayland-core'"],
+    mustContain: ["const REPO = 'dmercer290-byte/wayland'"],
   },
   {
     file: 'src/process/bridge/updateBridge.ts',

@@ -39,7 +39,7 @@ export type { WCoreInstallResult, WCoreUpdateCheck, WCoreUpdateProgress };
  * controls code running on users' machines. Guarded by
  * tests/unit/forkIntegrity.test.ts.
  */
-const REPO = 'dmercer290-byte/wayland-core';
+const REPO = 'dmercer290-byte/wayland';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const DOWNLOAD_BASE = `https://github.com/${REPO}/releases/download`;
 const CHECKSUMS_ASSET = 'genesis-core-checksums.txt';

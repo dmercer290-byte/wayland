@@ -18,7 +18,7 @@
  *
  * Hand-transcribing six checksums is the error surface. This helper pulls the
  * authoritative `genesis-core-checksums.txt` asset published alongside the
- * fork's (dmercer290-byte/wayland-core) release, parses the six platform archives, and
+ * monorepo's (dmercer290-byte/wayland) engine release, parses the six platform archives, and
  * applies both edits. It does NOT download or execute the engine - that stays
  * with prepareWaylandCore.js, which re-verifies against the manifest this
  * writes.
@@ -41,7 +41,7 @@ const SHASUMS_FILE = path.join(__dirname, 'bundled-wcore-shasums.json');
 const PREPARE_FILE = path.join(__dirname, 'prepareWaylandCore.js');
 const POSTINSTALL_FILE = path.join(__dirname, '..', 'installer', 'scripts', 'postinstall.mjs');
 // OUR fork's engine release stream - never upstream FerroxLabs.
-const REPO = 'dmercer290-byte/wayland-core';
+const REPO = 'dmercer290-byte/wayland';
 // Asset + checksums naming used by the fork's release workflow.
 const ASSET_PREFIX = 'genesis-core';
 const CHECKSUMS_ASSET = 'genesis-core-checksums.txt';

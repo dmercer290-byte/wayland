@@ -32,14 +32,15 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Engine releases come from OUR fork - never from upstream FerroxLabs. The
-// fork's release workflow (dmercer290-byte/wayland-core .github/workflows/
-// release.yml) publishes `genesis-core-<tag>-<target>` archives on
-// `v*-genesis-*` tags; the binary inside is named `genesis-core` and is
+// Engine releases come from OUR monorepo - never from upstream FerroxLabs.
+// The engine now lives in this same repo under wayland-core/ (git subtree);
+// the root .github/workflows/engine-release-self-hosted.yml builds it and
+// publishes `genesis-core-<tag>-<target>` archives to THIS repo's releases on
+// `v*-genesis-*` tags. The binary inside is named `genesis-core` and is
 // installed locally under the historical `wayland-core` name (getBinaryName)
 // so nothing else in the app changes.
 const GITHUB_OWNER = 'dmercer290-byte';
-const GITHUB_REPO = 'wayland-core';
+const GITHUB_REPO = 'wayland';
 
 // Authoritative per-platform SHA-256 manifest for the downloaded release
 // archives. Supply-chain guard (UPD-03): every release build must fetch the
@@ -192,8 +193,8 @@ function verifyArchiveChecksum(archivePath, expectedHex, assetName, tag) {
   }
 }
 
-// Pinned default tag. The engine release stream lives at
-// dmercer290-byte/wayland-core (our fork - tags follow `vX.Y.Z-genesis-*`);
+// Pinned default tag. The engine release stream lives on THIS repo
+// (dmercer290-byte/wayland - engine tags follow `vX.Y.Z-genesis-*`);
 // Desktop integrates against a specific tag rather than tracking `latest` so
 // version drift can't sneak in via a release made while a CI build is
 // mid-flight. Override with WCORE_VERSION=... when bumping.

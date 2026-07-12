@@ -47,7 +47,7 @@ if (!triple) {
 // Engine releases come from OUR fork (genesis-core-* archives) - never from
 // the original upstream org. tests/unit/forkIntegrity.test.ts guards this.
 const asset = `genesis-core-${WCORE_VERSION}-${triple}.tar.gz`;
-const url = `https://github.com/dmercer290-byte/wayland-core/releases/download/${WCORE_VERSION}/${asset}`;
+const url = `https://github.com/dmercer290-byte/wayland/releases/download/${WCORE_VERSION}/${asset}`;
 const tmp = join(PAYLOAD, '.wcore-tmp');
 const tarPath = join(tmp, asset);
 const destDir = join(PAYLOAD, 'resources', 'bundled-wayland-core', runtimeKey);
