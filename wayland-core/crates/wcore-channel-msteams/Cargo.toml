@@ -1,0 +1,35 @@
+[package]
+name = "wcore-channel-msteams"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Microsoft Teams channel adapter for Genesis-Core — Bot Framework OAuth2 + Connector REST (send-only MVP; inbound webhook deferred to v0.8.3)"
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+# `aws_lc_rs`: jsonwebtoken 10.x requires an explicit CryptoProvider feature
+# (no default). We use aws_lc_rs (constant-time AWS-LC) NOT the pure-Rust
+# `rust_crypto` provider, because rust_crypto pulls the `rsa` crate which
+# carries RUSTSEC-2023-0071 (Marvin Attack timing sidechannel, no upstream
+# fix). aws-lc-rs is ALREADY in the tree (rustls's default crypto provider)
+# and its aws-lc-sys C build compiles green on every CI target incl.
+# aarch64-pc-windows-msvc — so this adds no new build surface and drops `rsa`
+# at the source. Used here to verify RS256 JWTs.
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
+reqwest = { workspace = true, features = ["json"] }
+wcore-egress = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+
+wcore-channels = { workspace = true }
+wcore-config = { workspace = true }
+
+[dev-dependencies]
+base64 = { workspace = true }
+mockito = "1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

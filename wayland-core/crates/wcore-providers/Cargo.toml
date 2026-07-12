@@ -1,0 +1,64 @@
+[package]
+name = "wcore-providers"
+description = "LLM provider implementations for genesis-core (Anthropic, OpenAI, Bedrock, Vertex)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wcore-types.workspace  = true
+wcore-config.workspace = true
+
+tokio.workspace        = true
+futures.workspace      = true
+reqwest.workspace      = true
+wcore-egress.workspace = true
+serde.workspace        = true
+serde_json.workspace   = true
+async-trait.workspace  = true
+thiserror.workspace    = true
+anyhow.workspace       = true
+tracing.workspace      = true
+dirs.workspace         = true
+url.workspace          = true
+base64.workspace       = true
+uuid.workspace         = true
+# aws_lc_rs CryptoProvider (NOT rust_crypto) so this crate's RS256 Vertex
+# service-account JWT *signing* never links the `rsa` crate (RUSTSEC-2023-0071).
+# Must be declared explicitly: previously this rode on wcore-channel-msteams's
+# feature unification, which is fragile (isolated builds of this crate had no
+# crypto backend). See that crate's Cargo.toml note.
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
+chrono.workspace       = true
+parking_lot.workspace  = true
+
+aws-sigv4.workspace            = true
+aws-credential-types.workspace = true
+aws-config.workspace           = true
+aws-sdk-sts.workspace          = true
+
+workspace-hack.workspace = true
+
+[features]
+default = []
+# M2.6 — live-API tests that actually hit the provider HTTPS endpoint.
+# Default CI does NOT compile or run these. To enable locally:
+#   cargo nextest run -p wcore-providers --features live-anthropic,live-openai,live-gemini
+# With the feature ON, a missing API key PANICS (the contract is "you
+# asked for live tests, you must supply the key") rather than skipping.
+live-anthropic = []
+live-openai    = []
+live-gemini    = []
+
+[dev-dependencies]
+wiremock.workspace   = true
+tokio-test.workspace = true
+criterion.workspace  = true
+tempfile.workspace   = true
+serial_test.workspace = true
+
+[[bench]]
+name    = "parse_sse_chunk_bench"
+harness = false

@@ -1,0 +1,47 @@
+[package]
+name = "wcore-mcp"
+description = "MCP (Model Context Protocol) client implementation for genesis-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wcore-types.workspace    = true
+wcore-protocol.workspace = true
+wcore-tools.workspace    = true
+wcore-config.workspace   = true
+
+tokio.workspace       = true
+serde.workspace       = true
+serde_json.workspace  = true
+async-trait.workspace = true
+thiserror.workspace   = true
+anyhow.workspace      = true
+reqwest.workspace     = true
+wcore-egress.workspace = true
+futures.workspace     = true
+tracing.workspace     = true
+
+workspace-hack.workspace = true
+
+# Rank 24 — stdio transport places the child in its own process group
+# (process_group(0)) and `killpg`s the whole group on close, so shell-wrapper
+# grandchildren (npx→node, uvx→python) are reaped instead of orphaned.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[features]
+test-utils = []
+
+[dev-dependencies]
+# Wave RA — cancel_request_test.rs exercises McpToolProxy::execute_with_ctx
+# against a slow transport to confirm the cancel race returns promptly.
+wcore-mcp = { path = ".", features = ["test-utils"] }
+tokio-util.workspace = true
+tempfile.workspace = true
+serial_test.workspace = true
+# Slice 3 — forge_grant.rs mocks the producer's /.well-known/mcp + /grant
+# endpoints to verify the liveness probe + grant status mapping.
+wiremock.workspace = true
