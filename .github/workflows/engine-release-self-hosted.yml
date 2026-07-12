@@ -28,7 +28,10 @@ env:
 jobs:
   build-linux-x64:
     name: Build engine x86_64-unknown-linux-gnu (self-hosted)
-    runs-on: self-hosted
+    # Pin to a Linux x64 self-hosted runner: the generic `self-hosted` label
+    # also matches the Windows runner (BOLDVISIONS), which cannot build the
+    # Linux target. Requires a Linux runner registered on this repo.
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
     steps:
       - name: Create tag from SHA (when missing)
