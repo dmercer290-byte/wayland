@@ -17,7 +17,15 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { buildRunArgs, inferRunState, newRunId, resolvePython, tailLines } from './asiEvolveFormat';
+import {
+  buildApiOverrideYaml,
+  buildRunArgs,
+  inferRunState,
+  newRunId,
+  resolveEndpoint,
+  resolvePython,
+  tailLines,
+} from './asiEvolveFormat';
 
 const DIR = process.env.ASI_EVOLVE_DIR || '';
 if (!DIR) {
@@ -56,11 +64,14 @@ const server = new McpServer({ name: 'wayland-asi-evolve', version: '1.0.0' }, {
 
 server.tool(
   'asi_evolve_run',
-  `Launch an ASI-Evolve autonomous research run in the background and return its run id immediately (runs take a long time). ASI-Evolve cycles through knowledge retrieval, hypothesis design, experimentation, and analysis to discover novel solutions in a domain. Provide an experiment name, a step budget, and optionally an evaluation script path. Poll asi_evolve_status with the returned id to watch progress.`,
+  `Launch an ASI-Evolve autonomous research run in the background and return its run id immediately (runs take a long time). ASI-Evolve cycles through knowledge retrieval, hypothesis design, experimentation, and analysis to discover novel solutions in a domain. Provide an experiment name, a step budget, and optionally an evaluation script path. The LLM endpoint (base_url/api_key/model) can be given here or preconfigured; poll asi_evolve_status with the returned id to watch progress.`,
   {
     experiment: z.string().describe('Experiment name (letters/digits/._- only).'),
     steps: z.number().int().positive().describe('Number of research iterations to run.'),
     eval_script: z.string().optional().describe('Path to the evaluation script that scores candidate solutions.'),
+    base_url: z.string().optional().describe('OpenAI-compatible endpoint base URL (overrides config.yaml).'),
+    api_key: z.string().optional().describe('API key for the endpoint (overrides config.yaml).'),
+    model: z.string().optional().describe('Model name (overrides config.yaml).'),
     extra_args: z.array(z.string()).optional().describe('Additional raw CLI flags passed through to main.py.'),
   },
   async (a) => {
@@ -71,15 +82,30 @@ server.tool(
           true
         );
       }
+      const id = newRunId(a.experiment as string, Date.now(), Math.random().toString(16).slice(2, 8));
+      const runDir = path.join(RUNS_DIR, id);
+      fs.mkdirSync(runDir, { recursive: true });
+
+      // ASI-Evolve reads the LLM endpoint from config.yaml's api block, not
+      // from env. Write a per-run override that main.py's --config deep-merges.
+      const endpoint = resolveEndpoint(
+        { base_url: a.base_url as string | undefined, api_key: a.api_key as string | undefined, model: a.model as string | undefined },
+        process.env
+      );
+      const overrideYaml = buildApiOverrideYaml(endpoint);
+      let configPath: string | undefined;
+      if (overrideYaml) {
+        configPath = path.join(runDir, 'config.override.yaml');
+        fs.writeFileSync(configPath, overrideYaml, 'utf8');
+      }
+
       const args = buildRunArgs({
         experiment: a.experiment as string,
         steps: a.steps as number,
         evalScript: a.eval_script as string | undefined,
+        configPath,
         extraArgs: a.extra_args as string[] | undefined,
       });
-      const id = newRunId(a.experiment as string, Date.now(), Math.random().toString(16).slice(2, 8));
-      const runDir = path.join(RUNS_DIR, id);
-      fs.mkdirSync(runDir, { recursive: true });
       const logPath = path.join(runDir, 'run.log');
       const out = fs.openSync(logPath, 'a');
       const python = resolvePython(DIR, fs.existsSync);
@@ -88,8 +114,9 @@ server.tool(
         cwd: DIR,
         detached: true,
         stdio: ['ignore', out, out],
-        // Pass the whole env through so the framework sees any
-        // OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL the session injected.
+        // Pass env through so ${VAR} placeholders in config.yaml resolve (the
+        // framework's own env-substitution); the endpoint itself is applied via
+        // the per-run --config override written above, not env.
         env: process.env,
       });
       const meta: RunMeta = {

@@ -23,10 +23,13 @@ export function getAsiEvolveStdioConfig(userDataDir: string): StdioMcpConfig | n
   if (!fs.existsSync(path.join(dir, 'main.py'))) return null;
 
   const scriptPath = path.join(resolveMcpScriptDir(), 'asi-evolve-mcp-stdio.js');
-  return {
-    name: 'wayland-asi-evolve',
-    command: 'node',
-    args: [scriptPath],
-    env: [{ name: 'ASI_EVOLVE_DIR', value: dir }],
-  };
+  const env = [{ name: 'ASI_EVOLVE_DIR', value: dir }];
+  // Pass through a preconfigured endpoint (set when Wayland was launched) so
+  // the agent can start runs without specifying it each time. Per-run tool
+  // args still override these.
+  for (const name of ['ASI_EVOLVE_BASE_URL', 'ASI_EVOLVE_API_KEY', 'ASI_EVOLVE_MODEL']) {
+    const value = process.env[name];
+    if (value) env.push({ name, value });
+  }
+  return { name: 'wayland-asi-evolve', command: 'node', args: [scriptPath], env };
 }

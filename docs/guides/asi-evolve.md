@@ -22,14 +22,23 @@ ASI_EVOLVE_DIR=/opt/asi-evolve bash scripts/setup-asi-evolve.sh
 This clones the framework and builds an isolated venv. It is re-runnable
 (pulls + reinstalls). Requires `git` and `python3` (3.10+).
 
-ASI-Evolve needs an OpenAI-compatible endpoint. Export these before launching
-Wayland so every run inherits them (point at your own Wayland/WebUI server or
-a provider):
+ASI-Evolve reads its LLM endpoint from `config.yaml`'s `api:` block
+(`base_url` / `api_key` / `model`) — **not** from `OPENAI_*` env vars (verified
+against the framework's `utils/config.py`). Set it any of three ways:
 
-```bash
-export OPENAI_API_KEY=...
-export OPENAI_BASE_URL=http://localhost:3000/v1
-```
+1. **Per run** — pass `base_url` / `api_key` / `model` straight to the
+   `asi_evolve_run` tool. Wayland writes a per-run override config that
+   `--config` deep-merges over the defaults.
+2. **Preconfigured** — export before launching Wayland (passed through to every
+   run, still overridable per run):
+   ```bash
+   export ASI_EVOLVE_BASE_URL=http://localhost:3000/v1   # your Wayland/WebUI server
+   export ASI_EVOLVE_API_KEY=...
+   export ASI_EVOLVE_MODEL=...
+   ```
+3. **Edit `config.yaml`** in the install dir directly. It supports
+   `${ENV_VAR}` placeholders, so `api_key: "${MY_KEY}"` resolves from the
+   environment at run time.
 
 ## Tools the agent gets
 

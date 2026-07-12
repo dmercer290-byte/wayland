@@ -42,9 +42,13 @@ ASI-Evolve installed at: $DIR
 Restart Wayland (or start a new chat/team) and the asi_evolve_run /
 asi_evolve_status / asi_evolve_list tools will be available to the agent.
 
-The framework needs an OpenAI-compatible endpoint. Point it at your own
-Wayland server or a provider by exporting before launching Wayland, e.g.:
-  export OPENAI_API_KEY=...        # or your provider key
-  export OPENAI_BASE_URL=http://localhost:3000/v1   # your Wayland/WebUI server
-These are passed through to every run. See docs/guides/asi-evolve.md.
+The framework reads its LLM endpoint from config.yaml's 'api:' block
+(base_url / api_key / model), NOT from OPENAI_* env vars. Three ways to set it:
+  1. Pass base_url/api_key/model straight to the asi_evolve_run tool (per run).
+  2. Export before launching Wayland (passed through, overridable per run):
+       export ASI_EVOLVE_BASE_URL=http://localhost:3000/v1   # your Wayland/WebUI server
+       export ASI_EVOLVE_API_KEY=...
+       export ASI_EVOLVE_MODEL=...
+  3. Edit $DIR/config.yaml directly (supports \${ENV_VAR} placeholders).
+See docs/guides/asi-evolve.md.
 EOF
