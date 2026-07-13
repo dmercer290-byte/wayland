@@ -34,27 +34,28 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 120
     steps:
-      - name: Create tag from SHA (when missing)
+      # Check out the requested SHA directly when given (the tag may not exist
+      # yet); otherwise check out the tag. The tag is then created via git
+      # push using checkout's persisted credentials - the raw refs API was
+      # rejecting the POST and curl -f hid the error body (run #2).
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.create_from_sha != '' && inputs.create_from_sha || format('refs/tags/{0}', inputs.tag_name) }}
+
+      - name: Ensure tag exists (git push)
         if: ${{ inputs.create_from_sha != '' && inputs.create_from_sha != null }}
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag_name }}
-          SHA: ${{ inputs.create_from_sha }}
         run: |
           set -e
-          api() { curl -sf -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
-          if api "https://api.github.com/repos/${{ github.repository }}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists."
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin."
           else
-            api -X POST "https://api.github.com/repos/${{ github.repository }}/git/refs" \
-              -d "{\"ref\":\"refs/tags/${TAG}\",\"sha\":\"${SHA}\"}" >/dev/null
-            echo "Created tag ${TAG} at ${SHA}."
+            git tag "${TAG}"
+            git push origin "refs/tags/${TAG}"
+            echo "Created and pushed tag ${TAG} at $(git rev-parse HEAD)."
           fi
-
-      - uses: actions/checkout@v6
-        with:
-          ref: refs/tags/${{ inputs.tag_name }}
 
       - name: Install system deps (best-effort)
         shell: bash
@@ -109,22 +110,44 @@ jobs:
           TAG: ${{ inputs.tag_name }}
         run: |
           set -e
-          api() { curl -sf -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
-          rid=$(api "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
+          # Status-checked API helper: prints the response body on success,
+          # prints the HTTP status + error body and fails on >= 400. Never
+          # use curl -f here - it swallows the error body (run #2 lesson).
+          req() {
+            local method=$1 url=$2; shift 2
+            local code
+            code=$(curl -s -o /tmp/gh-resp.json -w '%{http_code}' -X "$method" \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "$@" "$url")
+            if [ "$code" -ge 400 ]; then
+              echo "::error::GitHub API $method $url -> HTTP $code" >&2
+              cat /tmp/gh-resp.json >&2
+              return 1
+            fi
+            cat /tmp/gh-resp.json
+          }
+          rid=$(req GET "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}" 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
           if [ -z "$rid" ]; then
-            rid=$(api -X POST "https://api.github.com/repos/${{ github.repository }}/releases" \
+            rid=$(req POST "https://api.github.com/repos/${{ github.repository }}/releases" \
               -d "{\"tag_name\":\"${TAG}\",\"name\":\"Engine ${TAG}\",\"body\":\"genesis-core engine (Linux x86_64), built from the wayland-core/ subtree on the fork's own runner.\"}" \
               | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
           fi
           echo "Release id: $rid"
           for f in dist/*; do
             name=$(basename "$f")
-            aid=$(api "https://api.github.com/repos/${{ github.repository }}/releases/${rid}/assets?per_page=100" \
+            aid=$(req GET "https://api.github.com/repos/${{ github.repository }}/releases/${rid}/assets?per_page=100" \
               | python3 -c "import json,sys; print(next((a['id'] for a in json.load(sys.stdin) if a['name']=='$name'), ''))")
-            [ -n "$aid" ] && api -X DELETE "https://api.github.com/repos/${{ github.repository }}/releases/assets/${aid}" || true
-            curl -sf -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" \
+            [ -n "$aid" ] && req DELETE "https://api.github.com/repos/${{ github.repository }}/releases/assets/${aid}" >/dev/null || true
+            code=$(curl -s -o /tmp/gh-upload.json -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/octet-stream" \
               --data-binary @"$f" \
-              "https://uploads.github.com/repos/${{ github.repository }}/releases/${rid}/assets?name=${name}" >/dev/null
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/${rid}/assets?name=${name}")
+            if [ "$code" -ge 400 ]; then
+              echo "::error::Asset upload ${name} -> HTTP $code"
+              cat /tmp/gh-upload.json
+              exit 1
+            fi
             echo "Uploaded ${name}"
           done
           echo "Engine ${TAG} published to ${{ github.repository }} releases."
