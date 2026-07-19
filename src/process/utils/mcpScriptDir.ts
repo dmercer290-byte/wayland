@@ -56,6 +56,7 @@ import * as fs from 'node:fs';
 export const MCP_STDIO_SCRIPT_NAMES = [
   'team-mcp-stdio.js',
   'team-guide-mcp-stdio.js',
+  'hub-tools-mcp-stdio.js',
   'builtin-mcp-image-gen.js',
   'builtin-mcp-search-skills.js',
   'builtin-mcp-concierge-diag.js',
