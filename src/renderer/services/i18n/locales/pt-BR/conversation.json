@@ -440,6 +440,17 @@
     "connectProvider": "Connect a provider",
     "manageModels": "Manage models"
   },
+  "notification": {
+    "untitled": "Conversa sem título",
+    "agentFinished": {
+      "title": "Tarefa concluída",
+      "body": "{{title}} terminou e está esperando por você."
+    },
+    "agentError": {
+      "title": "A tarefa falhou",
+      "body": "{{title}} parou com um erro. {{detail}}"
+    }
+  },
   "cost": {
     "badgeTooltip": "Gasto nesta conversa: {{cost}} · {{tokens}} tokens"
   }

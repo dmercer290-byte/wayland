@@ -440,6 +440,17 @@
     "connectProvider": "Connect a provider",
     "manageModels": "Manage models"
   },
+  "notification": {
+    "untitled": "Unbenannter Chat",
+    "agentFinished": {
+      "title": "Aufgabe abgeschlossen",
+      "body": "{{title}} ist fertig und wartet auf dich."
+    },
+    "agentError": {
+      "title": "Aufgabe fehlgeschlagen",
+      "body": "{{title}} wurde mit einem Fehler beendet. {{detail}}"
+    }
+  },
   "cost": {
     "badgeTooltip": "Ausgaben in dieser Unterhaltung: {{cost}} · {{tokens}} Token"
   }

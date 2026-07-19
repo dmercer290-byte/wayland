@@ -98,9 +98,7 @@
     "panel_title": "IJFW Memory (Ferrox Labs)",
     "skip_label": "Omitir la configuración automática de IJFW",
     "skip_description": "Cuando está activado, Wayland no instalará ni actualizará IJFW. Puedes instalarlo manualmente más tarde desde la página de Memoria.",
-    "transcript_label": "Registrar transcripciones de conversaciones en la memoria",
-    "transcript_description": "Refleja chats, llamadas a herramientas y razonamientos en la transcripción de memoria de cada espacio de trabajo. Las entradas antiguas se comprimen automáticamente; los secretos se ocultan antes de escribir.",
-    "manual_install_hint": "Para instalar manualmente: ejecuta `npx -y --package @ijfw/install@latest ijfw-install` en un terminal",
+    "manual_install_hint": "Para instalar manualmente: ejecuta `npx -y --package @ijfw/install@latest ijfw-install --yes` en un terminal",
     "about_title": "IJFW Memory",
     "about_body": "Un motor de memoria persistente de código abierto de Ferrox Labs.",
     "setup_status_title": "Estado de configuración",
@@ -115,7 +113,9 @@
     "status_runtime_degraded": "Degradado (no accesible)",
     "test_button": "Probar",
     "test_pass": "Memory respondió. Todo correcto.",
-    "test_fail": "Memory no respondió. Revisa el estado de instalación de arriba."
+    "test_fail": "Memory no respondió. Revisa el estado de instalación de arriba.",
+    "transcript_label": "Registrar transcripciones de conversaciones en la memoria",
+    "transcript_description": "Refleja chats, llamadas a herramientas y razonamientos en la transcripción de memoria de cada espacio de trabajo. Las entradas antiguas se comprimen automáticamente; los secretos se ocultan antes de escribir."
   },
   "prelude": {
     "installing_notice": "IJFW se está instalando. Las CLIs externas (Claude Code, Codex, Gemini CLI) lo detectarán cuando finalice la instalación.",

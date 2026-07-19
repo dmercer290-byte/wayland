@@ -440,6 +440,17 @@
     "connectProvider": "Connect a provider",
     "manageModels": "Manage models"
   },
+  "notification": {
+    "untitled": "제목 없는 대화",
+    "agentFinished": {
+      "title": "작업 완료",
+      "body": "{{title}}이(가) 완료되어 기다리고 있습니다."
+    },
+    "agentError": {
+      "title": "작업 실패",
+      "body": "{{title}}이(가) 오류로 중지되었습니다. {{detail}}"
+    }
+  },
   "cost": {
     "badgeTooltip": "이 대화의 지출: {{cost}} · {{tokens}} 토큰"
   }

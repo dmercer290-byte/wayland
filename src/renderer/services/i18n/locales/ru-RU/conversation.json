@@ -440,6 +440,17 @@
     "connectProvider": "Connect a provider",
     "manageModels": "Manage models"
   },
+  "notification": {
+    "untitled": "Чат без названия",
+    "agentFinished": {
+      "title": "Задача выполнена",
+      "body": "{{title}} завершено и ожидает вас."
+    },
+    "agentError": {
+      "title": "Задача не выполнена",
+      "body": "{{title}} остановлено с ошибкой. {{detail}}"
+    }
+  },
   "cost": {
     "badgeTooltip": "Расходы в этом разговоре: {{cost}} · {{tokens}} токенов"
   }

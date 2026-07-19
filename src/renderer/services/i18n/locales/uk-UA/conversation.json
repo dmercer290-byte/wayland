@@ -440,6 +440,17 @@
     "connectProvider": "Connect a provider",
     "manageModels": "Manage models"
   },
+  "notification": {
+    "untitled": "Чат без назви",
+    "agentFinished": {
+      "title": "Завдання виконано",
+      "body": "{{title}} завершено й очікує на вас."
+    },
+    "agentError": {
+      "title": "Завдання не виконано",
+      "body": "{{title}} зупинено через помилку. {{detail}}"
+    }
+  },
   "cost": {
     "badgeTooltip": "Витрати в цій розмові: {{cost}} · {{tokens}} токенів"
   }

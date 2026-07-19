@@ -98,9 +98,7 @@
     "panel_title": "IJFW Memory（Ferrox Labs）",
     "skip_label": "IJFW の自動セットアップをスキップ",
     "skip_description": "有効にすると、Wayland は IJFW をインストールまたはアップグレードしません。後でメモリページから手動でインストールできます。",
-    "transcript_label": "会話の記録をメモリに保存",
-    "transcript_description": "チャット、ツール呼び出し、思考を各ワークスペースのメモリ記録にミラーリングします。古いエントリは自動圧縮され、シークレットは書き込み前に削除されます。",
-    "manual_install_hint": "手動でインストールするには、ターミナルで `npx -y --package @ijfw/install@latest ijfw-install` を実行してください",
+    "manual_install_hint": "手動でインストールするには、ターミナルで `npx -y --package @ijfw/install@latest ijfw-install --yes` を実行してください",
     "about_title": "IJFW Memory",
     "about_body": "Ferrox Labs によるオープンソースの永続メモリエンジンです。",
     "setup_status_title": "セットアップ状況",
@@ -115,7 +113,9 @@
     "status_runtime_degraded": "機能低下（到達不可）",
     "test_button": "テスト",
     "test_pass": "Memory が応答しました。問題ありません。",
-    "test_fail": "Memory が応答しませんでした。上のインストール状況を確認してください。"
+    "test_fail": "Memory が応答しませんでした。上のインストール状況を確認してください。",
+    "transcript_label": "会話の記録をメモリに保存",
+    "transcript_description": "チャット、ツール呼び出し、思考を各ワークスペースのメモリ記録にミラーリングします。古いエントリは自動圧縮され、シークレットは書き込み前に削除されます。"
   },
   "prelude": {
     "installing_notice": "IJFW のインストールが進行中です。外部 CLI（Claude Code、Codex、Gemini CLI）はインストール完了後に連携します。",

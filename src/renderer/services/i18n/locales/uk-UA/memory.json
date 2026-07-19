@@ -98,9 +98,7 @@
     "panel_title": "IJFW Memory (Ferrox Labs)",
     "skip_label": "Пропустити автоматичне налаштування IJFW",
     "skip_description": "Коли увімкнено, Wayland не встановлюватиме і не оновлюватиме IJFW. Ви зможете встановити вручну пізніше через сторінку Пам'яті.",
-    "transcript_label": "Зберігати стенограми розмов у пам'яті",
-    "transcript_description": "Відображає чати, виклики інструментів і міркування в стенограмі пам'яті робочого простору. Старі записи автоматично стискаються; секрети приховуються перед записом.",
-    "manual_install_hint": "Для встановлення вручну виконайте в терміналі: `npx -y --package @ijfw/install@latest ijfw-install`",
+    "manual_install_hint": "Для встановлення вручну виконайте в терміналі: `npx -y --package @ijfw/install@latest ijfw-install --yes`",
     "about_title": "IJFW Memory",
     "about_body": "Відкритий рушій постійної пам'яті від Ferrox Labs.",
     "setup_status_title": "Стан налаштування",
@@ -115,7 +113,9 @@
     "status_runtime_degraded": "Обмежено (недоступне)",
     "test_button": "Перевірити",
     "test_pass": "Memory відповіла. Усе гаразд.",
-    "test_fail": "Memory не відповіла. Перевірте стан встановлення вище."
+    "test_fail": "Memory не відповіла. Перевірте стан встановлення вище.",
+    "transcript_label": "Зберігати стенограми розмов у пам'яті",
+    "transcript_description": "Відображає чати, виклики інструментів і міркування в стенограмі пам'яті робочого простору. Старі записи автоматично стискаються; секрети приховуються перед записом."
   },
   "prelude": {
     "installing_notice": "IJFW встановлюється. Зовнішні CLI (Claude Code, Codex, Gemini CLI) підхоплять його після завершення встановлення.",

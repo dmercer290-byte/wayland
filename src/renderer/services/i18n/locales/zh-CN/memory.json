@@ -98,9 +98,7 @@
     "panel_title": "IJFW Memory（Ferrox Labs）",
     "skip_label": "跳过 IJFW 自动设置",
     "skip_description": "启用后，Wayland 将不会安装或升级 IJFW。你之后可以通过记忆页面手动安装。",
-    "transcript_label": "将对话记录保存到记忆",
-    "transcript_description": "将聊天、工具调用和思考过程镜像到每个工作区的记忆转录文件中。旧条目会自动压缩以保持文件较小；写入前会移除敏感信息。",
-    "manual_install_hint": "手动安装：在终端中运行 `npx -y --package @ijfw/install@latest ijfw-install`",
+    "manual_install_hint": "手动安装：在终端中运行 `npx -y --package @ijfw/install@latest ijfw-install --yes`",
     "about_title": "IJFW Memory",
     "about_body": "由 Ferrox Labs 出品的开源持久化记忆引擎。",
     "setup_status_title": "设置状态",
@@ -115,7 +113,9 @@
     "status_runtime_degraded": "降级（无法访问）",
     "test_button": "测试",
     "test_pass": "Memory 已响应，一切正常。",
-    "test_fail": "Memory 未响应。请检查上方的安装状态。"
+    "test_fail": "Memory 未响应。请检查上方的安装状态。",
+    "transcript_label": "将对话记录保存到记忆",
+    "transcript_description": "将聊天、工具调用和思考过程镜像到每个工作区的记忆转录文件中。旧条目会自动压缩以保持文件较小；写入前会移除敏感信息。"
   },
   "prelude": {
     "installing_notice": "IJFW 正在安装。外部命令行工具（Claude Code、Codex、Gemini CLI）会在安装完成后识别它。",

@@ -442,6 +442,17 @@
     "connectProvider": "Connect a provider",
     "manageModels": "Manage models"
   },
+  "notification": {
+    "untitled": "Başlıksız sohbet",
+    "agentFinished": {
+      "title": "Görev tamamlandı",
+      "body": "{{title}} tamamlandı ve sizi bekliyor."
+    },
+    "agentError": {
+      "title": "Görev başarısız",
+      "body": "{{title}} bir hatayla durdu. {{detail}}"
+    }
+  },
   "cost": {
     "badgeTooltip": "Bu konuşmadaki harcama: {{cost}} · {{tokens}} jeton"
   }
