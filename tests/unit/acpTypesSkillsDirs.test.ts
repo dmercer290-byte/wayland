@@ -11,7 +11,7 @@ describe('acpTypes - skillsDirs integration', () => {
         codex: ['.codex/skills'],
         codebuddy: ['.codebuddy/skills'],
         goose: ['.goose/skills'],
-        kimi: ['.kimi/skills'],
+        kimi: ['.kimi-code/skills', '.kimi/skills'],
         droid: ['.factory/skills'],
         vibe: ['.vibe/skills'],
         cursor: ['.cursor/skills'],

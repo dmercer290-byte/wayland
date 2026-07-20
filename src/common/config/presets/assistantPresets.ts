@@ -1155,7 +1155,7 @@ export const ASSISTANT_PRESETS: AssistantPreset[] = [
     promptsI18n: {
       'en-US': [
         'Install and set up Claude Code as a backend',
-        'Set up Kimi CLI as a Wayland backend',
+        'Set up Kimi Code as a Wayland backend',
         "My Codex backend won't connect, fix it",
       ],
     },

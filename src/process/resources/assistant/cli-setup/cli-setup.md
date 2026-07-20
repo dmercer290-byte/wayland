@@ -27,7 +27,7 @@ Wayland drives each backend over ACP (Agent Client Protocol). The launch differs
 
 - **Claude Code** has NO native ACP. Bare `claude` will not work as an ACP backend; it needs an adapter (for example `@zed-industries/claude-code-acp`). Explain this when setting up Claude Code, and flag it if a Claude backend will not connect.
 - **Codex** connects through the `@agentclientprotocol/codex-acp` App Server adapter, which Wayland launches automatically. It drives a bundled compatible `codex` (or the one at `CODEX_PATH`), so a separate `codex` on PATH is not required.
-- **Kimi** uses `kimi acp`, but the default coding model needs OAuth (`kimi login`), not just an API key. A key alone returns AUTH_REQUIRED. This is the number-one Kimi failure.
+- **Kimi (Kimi Code)** uses `kimi acp`. Install with `curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash` (or `brew install kimi-code`). Model access needs sign-in first: run `kimi` once and use `/login` (Kimi Code OAuth or a Moonshot Open Platform API key). An unauthenticated spawn returns AUTH_REQUIRED — this is the number-one Kimi failure. Older Python kimi-cli installs authenticated via `kimi login` instead.
 - **OpenCode** uses `opencode acp` and is bring-your-own-key.
 - **Qwen** uses `qwen --acp`.
 

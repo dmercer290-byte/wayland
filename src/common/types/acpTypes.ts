@@ -56,7 +56,7 @@ export type AcpBackendAll =
   | 'droid' // Factory Droid CLI (ACP via `droid exec --output-format acp`)
   | 'goose' // Block's Goose CLI
   | 'auggie' // Augment Code CLI
-  | 'kimi' // Kimi CLI (Moonshot)
+  | 'kimi' // Kimi Code (Moonshot)
   | 'opencode' // OpenCode CLI
   | 'copilot' // GitHub Copilot CLI
   | 'qoder' // Qoder CLI
@@ -420,13 +420,19 @@ export const ACP_BACKENDS_ALL: Record<AcpBackendAll, AcpBackendConfig> = {
   },
   kimi: {
     id: 'kimi',
-    name: 'Kimi CLI',
+    name: 'Kimi Code',
     cliCommand: 'kimi',
-    authRequired: false,
-    enabled: true, // ✅ Kimi CLI (Moonshot), launched via `kimi acp`
+    // Auth is CLI-owned: `/login` inside the CLI (Kimi Code OAuth or a
+    // Moonshot AI Open Platform API key). Wayland spawns the binary and it
+    // uses its cached credentials.
+    authRequired: true,
+    enabled: true, // ✅ Kimi Code (Moonshot, MoonshotAI/kimi-code), launched via `kimi acp`
     supportsStreaming: false,
     acpArgs: ['acp'], // kimi uses the acp subcommand
-    skillsDirs: ['.kimi/skills'],
+    // Kimi Code scans `.kimi-code/skills`; the legacy Python kimi-cli (same
+    // `kimi` binary name) scanned `.kimi/skills`. List both so skills reach
+    // whichever generation of the CLI is installed.
+    skillsDirs: ['.kimi-code/skills', '.kimi/skills'],
   },
   opencode: {
     id: 'opencode',
