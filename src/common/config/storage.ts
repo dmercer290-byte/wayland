@@ -207,6 +207,17 @@ export interface IConfigStorageRefer {
    * max     = hold maximum context, compact only as a last resort.
    */
   'wcore.compactMode'?: 'economy' | 'light' | 'max';
+  /**
+   * Local Router: optional per-tier pin. Absent tiers use the automatic
+   * policy (the router works with zero configuration). `providerId` is a
+   * model-config row id, or `hub:<serverId>` for a Model Hub server.
+   */
+  'router.tierOverrides'?: Partial<
+    Record<
+      'router-auto' | 'router-reasoning' | 'router-standard' | 'router-fast',
+      { providerId: string; modelId: string }
+    >
+  >;
   /** Model Hub: registered local/remote model servers (Ollama or OpenAI-compatible). */
   'modelHub.servers'?: Array<{ id: string; name: string; url: string; kind: 'ollama' | 'openai' }>;
   /**

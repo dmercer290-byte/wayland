@@ -22,6 +22,7 @@ import { CostAnalyticsService } from '@process/services/cost/CostAnalyticsServic
 import { BudgetController, setBudgetController } from '@process/services/cost/BudgetController';
 import { initCostBridge, initCostBudgetBridge } from '@process/bridge/costBridge';
 import { initHubToolsService } from '@process/hubTools/hubToolsSingleton';
+import { initLocalRouterService } from '@process/services/router/routerSingleton';
 import { CostRecorder, setCostRecorder } from '@process/services/cost/CostRecorder';
 import { getModelPricing } from '@process/services/cost/ModelPricing';
 import { getDatabase } from '@process/services/database';
@@ -188,6 +189,14 @@ void getDatabase()
       // tools). Best-effort: a start failure must never break cold-start.
       void initHubToolsService(costAnalytics).catch((error) => {
         console.error('[hub-tools] failed to start MCP server:', error);
+      });
+
+      // Local Router (the app's own model router): loopback openai-compatible
+      // server whose tier models route to the user's connected providers and
+      // Model Hub servers. Best-effort: a start failure must never break
+      // cold-start - the router's provider row just stays stale until next run.
+      void initLocalRouterService().catch((error) => {
+        console.error('[local-router] failed to start:', error);
       });
 
       // Budgets / caps (Stage 1). The controller emits a one-time non-blocking
